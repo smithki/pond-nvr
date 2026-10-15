@@ -1,0 +1,15 @@
+# generated
+dist/
+
+# editors and the OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# leftovers from an interrupted build
+*.tmp.*
+
+# Swift
+.build/
+.swiftpm/

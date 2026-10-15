@@ -1,0 +1,96 @@
+# Pond
+
+A network video recorder for the Mac, written in Swift ([pond.camera](https://pond.camera)). It records IP cameras around the clock to a drive of your choice, plays them back on a timeline, shows them live, and serves each one to Apple's Home app with live view and HomeKit Secure Video. It needs no bridge such as Homebridge or Scrypted. Everything runs on the Mac; nothing is sent to a cloud service of its own.
+
+Work in progress. What works today:
+
+- **Continuous recording** of every camera's main stream, in 1-minute MP4 files, with retention by age, size and free space. It reconnects when a camera drops, and stops writing (and says so) when the drive is unplugged instead of filling the startup disk.
+- **Pond.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
+- **HomeKit**, implemented natively (the HomeKit Accessory Protocol in Swift): each camera you choose is a camera in the Home app, with snapshots, live video and sound, several viewers at once, and **HomeKit Secure Video** recording on the camera's own motion detection. Doorbells are supported as video doorbells.
+- **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
+
+Planned: on-device detection of people, vehicles, animals and packages (Core ML), descriptions of each event, and plain-language search of clips ("packages delivered to the front door this week"), with Apple's on-device models only. See [docs/roadmap.md](docs/roadmap.md).
+
+## Requirements
+
+- A Mac with Apple silicon and macOS 27, with Xcode to build (Swift 6, Swift Testing).
+- Cameras that serve H.264 over RTSP. Reolink cameras are supported best: Pond reads their model and doorbell presses through their API, and knows their stream addresses. Others work through ONVIF and their RTSP addresses; see [docs/cameras](docs/cameras/README.md).
+- For continuous recording, an external drive or a NAS share: about 32 GB per camera per day at 2560×1440.
+- For HomeKit Secure Video, a home hub (Apple TV or HomePod) and an iCloud+ plan.
+
+## Build and run
+
+```sh
+make signing                # once per Mac, if you have no Apple Development certificate: see docs/development.md
+make app && open dist/Pond.app
+```
+
+In the app, **Settings › Storage** chooses the recordings folder, **Settings › Cameras › Add Camera** adds a camera by its address (it logs in, checks the streams and keeps the password in your Keychain), and **Settings › Recorder** starts the background recorder. Closing the app does not stop recording.
+
+The same from a terminal:
+
+```sh
+make install                                      # pond into /usr/local/bin (asks for your password)
+pond init                                          # the settings file, with defaults
+pond storage recordings /Volumes/Pond/recordings    # a folder on the external drive; prepared for pond
+pond retention continuous 14                       # days of continuous recording
+pond retention events 60                           # days to keep event clips
+pond camera add porch --host 192.168.1.20 --name "Front porch"   # asks for the password, checks the camera, saves
+pond check                                         # settings, folders, passwords
+pond service install                               # record whenever you are logged in
+```
+
+`pond help` lists every command; [docs/configuration.md](docs/configuration.md) explains each setting.
+
+## The app
+
+`Pond.app` has three views, chosen in the toolbar (Back and Forward, ⌘[ and ⌘], move between them):
+
+- **Live**: a rail of every camera beside a stage showing the chosen cameras live, as large as the window allows. Click a camera to add it or take it off, double-click it to watch it alone, drag to reorder. Large tiles play the main stream, small ones the sub-stream; one camera is heard at a time. A camera that is offline, sends no picture or has stopped being recorded is marked, and a tile without a picture says why.
+- **Timeline**: the recordings of any day, a lane per camera. Click or drag to move, space to play or pause, ← and → for 10 seconds, ½× to 16×, zoom from a whole day to 15 minutes; scroll back across midnight into earlier days. **LIVE** (L) shows the selected camera as it is now.
+- **Events**: comes with detection. `POND_MOCK_EVENTS=1` puts made-up events on the timeline to try it.
+
+Settings (⌘,) has **Cameras**, **Storage**, **Retention** and **Recorder**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
+
+## HomeKit
+
+Add a camera to the Home app from its settings (**Add to the Home App…**) or as the last step of Add Camera; the app shows the setup code and QR code. In the Home app: **+ › Add Accessory**, scan the code, and **Add Anyway** at the uncertified-accessory warning. From a terminal:
+
+```sh
+pond camera set ID --homekit on     # serve the camera to HomeKit (--kind doorbell for a doorbell)
+pond homekit code                   # setup codes and QR codes for the Home app
+```
+
+The background recorder serves the cameras, sharing one connection per camera stream with recording and the app (many cameras serve only a few connections at once). Per camera you can choose:
+
+- **The picture in the Home app**: the camera's own streams as they are (no work for the Mac), or re-encoded by Pond on the Mac's video hardware to the size and bitrate each viewer asks for, adapting to its connection.
+- **How many can watch at once** (1–4), and **instant live view** (keeps a stream open so live views and snapshots start at once).
+- **Allow recording**: HomeKit Secure Video. The home hub decides what to keep and stores it in iCloud; turn recording on in the Home app, in the camera's Recording Options. Pond records from a few seconds before the motion, re-encoded to what the hub asks for. The HomeKit badge on the camera's tile and its settings say whether it is recording and why not.
+
+Each camera's HomeKit identity and pairings are kept in the login Keychain (`pond-homekit`); `pond homekit reset ID` forgets them. See [docs/security.md](docs/security.md).
+
+## The login service
+
+`pond service install` (or Start Recording in the app) makes `pond run` a launchd agent: it starts at login, restarts if it stops, and keeps the Mac from idle-sleeping while it records (the display can still sleep). It runs in your login session, where the Keychain with the camera passwords is, so the Mac needs a logged-in user; turn on automatic login for a headless Mac.
+
+```sh
+pond service status       # running or not, and the last lines of the log
+pond service restart      # after changing settings by hand
+pond service uninstall    # stop and remove it; recordings and settings stay
+```
+
+The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The first time it runs, macOS asks whether pond may find devices on your local network (Allow) and use the camera passwords in your Keychain (Always Allow).
+
+## Documentation
+
+- [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
+- [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
+- [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
+- [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.
+- [docs/development.md](docs/development.md): building, testing, conventions.
+- [docs/roadmap.md](docs/roadmap.md): what is done and what comes next.
+- [CHANGELOG.md](CHANGELOG.md)
+
+## License
+
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
