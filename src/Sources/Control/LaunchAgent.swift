@@ -150,7 +150,22 @@ public struct ServiceControl: Sendable {
         try launchd.bootout(label: LaunchAgent.label)   // an older version, if any
         try Data(LaunchAgent.plist(program: program, configPath: configPath).utf8)
             .write(to: URL(fileURLWithPath: LaunchAgent.plistPath), options: .atomic)
-        try launchd.bootstrap(plist: LaunchAgent.plistPath)
+        // launchd stops the old one in the background, and refuses to load the new one until it has
+        // ("Bootstrap failed: 5: Input/output error"): wait for it, and try once more if it still refuses.
+        waitUntilUnloaded(seconds: 10)
+        do {
+            try launchd.bootstrap(plist: LaunchAgent.plistPath)
+        } catch {
+            Thread.sleep(forTimeInterval: 2)
+            try launchd.bootstrap(plist: LaunchAgent.plistPath)
+        }
+    }
+
+    private func waitUntilUnloaded(seconds: Double) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while launchd.describe(label: LaunchAgent.label) != nil, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
     }
 
     public func uninstall() throws {
