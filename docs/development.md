@@ -28,6 +28,8 @@ open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pon
 
 (Liquid Glass comes out flatter in these pictures than on screen; with screen-recording permission, `screencapture -l <window id>` takes the real thing.) `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.
 
+**Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
+
 **Trying the timeline without a camera.** Any H.264 MP4 copied into `<recordings>/continuous/<camera>/<YYYY-MM-DD>/<HH-MM-SS>.mp4` (UTC) shows up, for example a minute of test pattern made with `ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=20 -t 60 -c:v libx264 -pix_fmt yuv420p seg.mp4`, copied under successive names, with a settings file of its own (`POND_CONFIG`).
 
 The package is in `src/`; `swift build --package-path src` and Xcode (open `src/Package.swift`) work too.
@@ -50,6 +52,16 @@ The package is in `src/`; `swift build --package-path src` and Xcode (open `src/
 3. A test in `src/Tests/NVRCoreTests/ConfigTests.swift`.
 4. A command to change it in `NVRCLI`, its line in `CLI.help`, and a test in `src/Tests/NVRCLITests/`.
 5. A row in [configuration.md](configuration.md) and a line in [CHANGELOG.md](../CHANGELOG.md).
+
+## The app's conventions
+
+- **Notes sit under the row they explain**: `LabeledContent { control } label: { Text(title); Text(note) }`, or a picker whose label has two texts; never loose text at the end of a section.
+- **A choice between two values** (camera or doorbell) is a segmented control, not a menu.
+- **The toolbar uses native items.** Custom glass in the toolbar hung the layout. A control that belongs to one view (the rail's toggle) is added and removed with it, not hidden.
+- **Glass is never drawn into a drag image**: drags get a plain preview (`DragPreview`); drawing glass that way crashed the app.
+- **Vendor-neutral wording**: name a camera's own app only through its provider (`appName`, "the Reolink app"), else "the camera's own app". Say "ID", HomeKit, HKSV, RTSP, macOS.
+- **The timeline's live mode is only ever chosen** by the viewer (LIVE or L); playing recording pauses at its end rather than switching to live.
+- **Errors say what happened in plain words** and name only a cause the error itself shows; a problem with a fix comes with the button for it.
 
 ## Message style
 
