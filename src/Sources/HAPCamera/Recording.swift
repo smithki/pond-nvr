@@ -150,6 +150,8 @@ public final class RecordingController: @unchecked Sendable {
     /// Told how recording is going, for the app (HomeKitStatus).
     var statusChanged: (@Sendable (HomeKitStatus.Recording) -> Void)?
     private var status = HomeKitStatus.Recording()
+    /// Whether the status has been told to a listener at all: until then it is told even unchanged.
+    private var told = false
 
     /// The status, changed by `edit` (and told on, if it changed).
     func report(_ edit: (inout HomeKitStatus.Recording) -> Void) {
@@ -161,8 +163,10 @@ public final class RecordingController: @unchecked Sendable {
             next.chosen = s.selected != nil
             if next.lastClip == nil { next.lastClip = s.lastClip }
             edit(&next)
-            guard next != status else { return nil }
+            guard next != status || !told else { return nil }
             status = next
+            // Told only once there is someone to tell (the setup reports before the host listens).
+            told = statusChanged != nil
             return next
         }
         if let changed { statusChanged?(changed) }

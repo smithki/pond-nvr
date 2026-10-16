@@ -29,7 +29,7 @@ The first version: recording, the app and HomeKit.
 - **Snapshots, live video and sound**: the camera's H.264 over SRTP (sub-stream, or main for a viewer with the bandwidth, switching on a reconfigure), the camera's AAC converted to AAC-ELD, 1–4 viewers at once on one camera connection.
 - **Optional re-encoding** for the Home app (`homekitVideo`): the main stream sized and encoded per viewer on the Mac's video hardware, adapting to each viewer's connection from its RTCP reports.
 - **HomeKit Secure Video** (`homekitRecording`, "Allow recording in the Home app"): the HomeKit Data Stream, the recording services, a prebuffer, and recordings re-encoded to the hub's choice, started by the camera's own motion (Reolink). The app shows whether a camera is recording, its last clip, and why it won't record.
-- **Doorbells**: a video doorbell accessory that rings on a press of a Reolink doorbell's button.
+- **Doorbells**: a video doorbell accessory that rings on a press of a Reolink doorbell's button, and records to HomeKit Secure Video on motion or a ring.
 
 ### Cameras
 - **Camera checks** (`pond camera add`, `test`): Digest login, both streams' codecs and resolutions, then the video's frame rate, keyframe spacing and bitrate, with warnings about privacy mode, H.265 and keyframes too far apart.

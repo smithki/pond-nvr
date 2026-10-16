@@ -30,7 +30,7 @@ Status: **done**, **in progress**, **next**, **later**.
 | Re-encoding for the Home app | done | Optional per camera: sized and encoded per viewer on the Mac's video hardware, steered by each viewer's RTCP reports (`RateControl`). Not for cameras that send B-frames. |
 | Fast start | done | `StreamHub` replays the video since the latest keyframe; `instantLive` keeps the sub-stream open. |
 | HomeKit Secure Video | done | Recording on the camera's motion, from a prebuffer, re-encoded to the hub's choice; status and "Allow recording" in the app. Needs a home hub and iCloud+. |
-| Doorbells | in progress | A video doorbell accessory that rings on a press (Reolink, through its API). Recording works as for any camera; ringing needs trying on more doorbells. |
+| Doorbells | done | A video doorbell accessory that rings on a press (Reolink, through its API) and records to HomeKit Secure Video on motion or a ring. A 4:3 doorbell is recorded fitted inside the size the hub chooses. Tried with a Reolink Video Doorbell WiFi. |
 | Motion from ONVIF cameras | next | A PullPoint subscription for the camera's motion events, so HKSV works beyond Reolink. |
 | Talkback | later | The Home app's microphone to the camera's speaker: see two-way audio under ONVIF. |
 

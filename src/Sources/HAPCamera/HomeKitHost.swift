@@ -167,6 +167,15 @@ public final class HomeKitHost: @unchecked Sendable {
         return next
     }
 
+    /// A camera's own log lines, named: "HomeKit: …" becomes "HomeKit (Doorbell): …", so two cameras
+    /// recording at once can be told apart.
+    static func labelled(_ name: String, _ log: @escaping @Sendable (String) -> Void) -> @Sendable (String) -> Void {
+        { line in
+            guard let range = line.range(of: "HomeKit:") else { return log(line) }
+            log(line.replacingCharacters(in: range, with: "HomeKit (\(name)):"))
+        }
+    }
+
     private func start(_ camera: Config.Camera, password: String) throws {
         let id = camera.id
         let record = record(for: id)
@@ -179,8 +188,11 @@ public final class HomeKitHost: @unchecked Sendable {
         // HomeKit Secure Video, for a camera set to record in HomeKit: its state kept with the record.
         let recording = camera.homekitRecording == true
             ? RecordingController(options: RecordingOptions(doorbell: doorbell), state: record.recording,
-                                  source: (camera.main, camera.username, password), log: log) : nil
+                                  source: (camera.main, camera.username, password),
+                                  log: Self.labelled(camera.name, log)) : nil
         recording?.statusChanged = { [weak self] status in self?.update(id) { $0.recording = status } }
+        // Told once now, so the app shows the camera waiting for the hub before the hub writes anything.
+        recording?.report { _ in }
         let store = self.records
         recording?.saved = { state in
             if var latest = store.record(for: id) {
@@ -244,7 +256,12 @@ public final class HomeKitHost: @unchecked Sendable {
             self?.update(id) { $0.paired = paired; $0.setup = paired ? nil : setup }
         }
         try listener.start(port: record.port)
-        update(id) { $0 = HomeKitStatus.Camera(running: true, paired: record.isPaired, setup: record.isPaired ? nil : setup) }
+        // Started afresh, keeping the recording status already told.
+        update(id) {
+            let recording = $0.recording
+            $0 = HomeKitStatus.Camera(running: true, paired: record.isPaired, setup: record.isPaired ? nil : setup)
+            $0.recording = recording
+        }
         log("HomeKit: \(camera.name) is \(record.isPaired ? "in the Home app" : "waiting to be added to the Home app")")
 
         let seesMotion = watchEvents(camera, password: password, accessory: accessory)
