@@ -14,15 +14,23 @@ struct RecorderView: View {
                 LabeledContent("Status") {
                     switch model.serviceState {
                     case _ where model.isRestartingRecorder:
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
+                        // A label like the row's others (a spinner is taller, and nudged the page down and up).
+                        Label {
                             Text("Restarting\u{2026}")
+                        } icon: {
+                            Image(systemName: "arrow.clockwise").symbolEffect(.rotate, options: .repeating)
                         }
                         .foregroundStyle(.secondary)
                     case .notInstalled:
                         Label("Not installed", systemImage: "circle.dashed").foregroundStyle(.secondary)
                     case let .running(pid):
-                        Label("Recording (process \(pid))", systemImage: "record.circle.fill").foregroundStyle(.green)
+                        if model.needsRestart {
+                            Label("Recording with older settings", systemImage: "arrow.clockwise.circle.fill")
+                                .foregroundStyle(.orange)
+                                .help("Settings it works from changed since it started (process \(pid)). Restart it to use them.")
+                        } else {
+                            Label("Recording (process \(pid))", systemImage: "record.circle.fill").foregroundStyle(.green)
+                        }
                     case let .stopped(why):
                         Label("Not running: \(why)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
@@ -36,8 +44,18 @@ struct RecorderView: View {
                             .disabled(model.helperPath == nil)
                     default:
                         Button("Stop and Remove…") { confirmUninstall = true }
-                        Button(model.isChangingService ? "Restarting\u{2026}" : "Restart") { model.restartService() }
-                            .disabled(model.isChangingService)
+                        // The tab's own Restart: orange while the recorder runs with older settings, as the
+                        // Restart Recorder buttons elsewhere are (so this tab needs none of its own).
+                        Group {
+                            let restart = Button(model.isChangingService ? "Restarting\u{2026}" : "Restart") { model.restartService() }
+                                .disabled(model.isChangingService)
+                            if model.needsRestart {
+                                restart.buttonStyle(.borderedProminent).tint(.orange)
+                            } else {
+                                restart
+                            }
+                        }
+                        .animation(.snappy(duration: 0.25), value: model.needsRestart)
                     }
                 }
             } header: {
