@@ -210,6 +210,9 @@ public struct Config: Codable, Equatable, Sendable {
         /// The provider set to mean: the camera's video only.
         public static let videoOnly = "video"
         public var isVideoOnly: Bool { provider == Self.videoOnly }
+        /// What can be controlled on it (PTZ, talking back, night mode), and through which provider each: worked
+        /// out when it is identified, so the app shows only the controls that work. Nil until then.
+        public var controls: Controls?
 
         public init(manufacturer: String, model: String, serial: String? = nil, firmware: String? = nil,
                     isDoorbell: Bool = false, provider: String? = nil) {
@@ -219,6 +222,56 @@ public struct Config: Codable, Equatable, Sendable {
             self.serial = serial
             self.firmware = firmware
             self.isDoorbell = isDoorbell
+        }
+    }
+
+    /// A camera's controls, each with the provider that serves it (a camera's own make's, else ONVIF's).
+    public struct Controls: Codable, Equatable, Sendable {
+        public var ptz: PTZ?
+        public var talk: Talk?
+        public var nightMode: NightMode?
+
+        public init(ptz: PTZ? = nil, talk: Talk? = nil, nightMode: NightMode? = nil) {
+            self.ptz = ptz
+            self.talk = talk
+            self.nightMode = nightMode
+        }
+
+        public var isEmpty: Bool { ptz == nil && talk == nil && nightMode == nil }
+
+        /// Moving the picture: pan and tilt, zoom, and positions kept by the camera.
+        public struct PTZ: Codable, Equatable, Sendable {
+            public var provider: String
+            public var panTilt: Bool
+            public var zoom: Bool
+            /// How many positions it can keep; 0 if none.
+            public var presets: Int
+
+            public init(provider: String, panTilt: Bool, zoom: Bool, presets: Int) {
+                self.provider = provider
+                self.panTilt = panTilt
+                self.zoom = zoom
+                self.presets = presets
+            }
+        }
+
+        /// Sound to the camera's speaker.
+        public struct Talk: Codable, Equatable, Sendable {
+            public var provider: String
+
+            public init(provider: String) { self.provider = provider }
+        }
+
+        /// Day and night: how the camera chooses between them, and what can be chosen.
+        public struct NightMode: Codable, Equatable, Sendable {
+            public var provider: String
+            /// Of "auto", "day", "night".
+            public var choices: [String]
+
+            public init(provider: String, choices: [String]) {
+                self.provider = provider
+                self.choices = choices
+            }
         }
     }
 

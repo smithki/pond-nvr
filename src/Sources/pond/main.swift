@@ -97,6 +97,12 @@ struct RecordingAndHomeKit: ServiceRunning {
             return (camera.username, password)
         }) { line in log.log("pond", line) }
         relay.start()
+        // Their controls (PTZ, night mode, talking back) too, through the connections the service keeps.
+        let controls = ControlServer(path: ControlSocket.path(nextTo: statusPath), lookup: { id in
+            guard let camera = cameras.first(where: { $0.id == id }), let password = passwords[camera.id] else { return nil }
+            return (CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main), camera.device)
+        }) { line in log.log("pond", line) }
+        controls.start()
         // Cameras set to start live view at once: their sub-stream held open, so a viewer joins it mid-way.
         let keepers = cameras.filter(\.keepsLiveReady).compactMap { camera in
             passwords[camera.id].map { StreamKeeper(url: camera.sub, username: camera.username, password: $0) }
@@ -105,7 +111,15 @@ struct RecordingAndHomeKit: ServiceRunning {
         RealService().run(config: config, passwords: passwords, for: seconds, log: log)
         for keeper in keepers { keeper.stop() }
         relay.stop()
+        controls.stop()
         host.stop()
+        // Logged out of the cameras (Reolink's allow only a few logins at once).
+        let loggedOut = DispatchSemaphore(value: 0)
+        Task.detached {
+            await CameraSessions.shared.forgetAll()
+            loggedOut.signal()
+        }
+        _ = loggedOut.wait(timeout: .now() + 5)
     }
 }
 
@@ -272,6 +286,251 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
     exit(status)
 }
 
+/// `pond camera controls ID [--save]`: which way each of the camera's controls goes (PTZ, night mode,
+/// talking back), as the service would choose; `--save` keeps them in its settings for the app.
+/// `pond camera ptz ID presets | goto PRESET | move PAN TILT [ZOOM] [--for SECONDS] | stop` and
+/// `pond camera night-mode ID [auto|day|night]` and `pond camera talk ID [--tone SECONDS]` (a quiet tone
+/// through the camera's speaker): the controls themselves. `--via reolink|onvif` uses only that
+/// provider, for trying each.
+if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk"].contains(args[1]) {
+    let store = ConfigStore(path: configPath)
+    guard var config = try? store.load(), let index = config.cameras.firstIndex(where: { $0.id == args[2] }) else {
+        FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
+        exit(1)
+    }
+    let camera = config.cameras[index]
+    guard let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ There is no password for \(camera.id) in the Keychain.\n".utf8))
+        exit(1)
+    }
+    let access = CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main)
+    var providers = CameraProviders.order(for: camera.device)
+    if let i = args.firstIndex(of: "--via"), i + 1 < args.count {
+        providers = CameraProviders.all.filter { $0.id == args[i + 1] }
+    }
+    let controls = CameraControls(access: access, providers: providers)
+    let command = args[1]
+    // Through the service when it runs (it keeps the camera's logins; Reolink's allow only a few), unless a
+    // provider is chosen.
+    let service = ControlClient(path: ControlSocket.path(nextTo: configPath))
+    let viaService = !args.contains("--via") && service.isAvailable
+    // The words after the camera, without the options and their values.
+    var rest: [String] = []
+    var skip = false
+    for word in args.dropFirst(3) {
+        if skip { skip = false; continue }
+        if ["--via", "--for", "--tone", "--delay"].contains(word) { skip = true; continue }
+        if !word.hasPrefix("--") { rest.append(word) }
+    }
+    let saving = args.contains("--save")
+    let delay = args.firstIndex(of: "--delay").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 0
+    let tone = args.firstIndex(of: "--tone").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 1
+    let seconds = args.firstIndex(of: "--for").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 0.5
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var status: Int32 = 0
+    nonisolated(unsafe) var found: Config.Controls?
+    Task.detached {
+        defer { semaphore.signal() }
+        if viaService {
+            print("· through the service")
+            let id = camera.id
+            func ask(_ request: ControlSocket.Request) async throws(ControlFailure) -> ControlSocket.Reply {
+                let reply = await service.ask(request)
+                if let error = reply.error { throw error }
+                return reply
+            }
+            do throws(ControlFailure) {
+                switch (command, rest.first ?? "") {
+                case ("controls", _):
+                    let all = try await ask(.init(camera: id, action: "controls")).controls ?? Config.Controls()
+                    found = all
+                    print("PTZ: \(all.ptz.map { "\($0.provider), pan/tilt \($0.panTilt), zoom \($0.zoom), \($0.presets) presets" } ?? "none")")
+                    print("night mode: \(all.nightMode.map { "\($0.provider): \($0.choices.joined(separator: ", "))" } ?? "none")")
+                    print("talking back: \(all.talk?.provider ?? "none")")
+                case ("ptz", "presets"), ("ptz", ""):
+                    for p in try await ask(.init(camera: id, action: "ptz.presets")).presets ?? [] { print("  \(p.id)  \(p.name)") }
+                case ("ptz", "goto"):
+                    _ = try await ask(.init(camera: id, action: "ptz.goto", preset: rest.count > 1 ? rest[1] : nil))
+                    print("✓ going to \(rest.count > 1 ? rest[1] : "?")")
+                case ("ptz", "move"):
+                    let v = PTZVelocity(pan: rest.count > 1 ? Double(rest[1]) ?? 0 : 0, tilt: rest.count > 2 ? Double(rest[2]) ?? 0 : 0,
+                                        zoom: rest.count > 3 ? Double(rest[3]) ?? 0 : 0)
+                    _ = try await ask(.init(camera: id, action: "ptz.move", velocity: v))
+                    try? await Task.sleep(for: .seconds(seconds))
+                    _ = try await ask(.init(camera: id, action: "ptz.stop"))
+                    print("✓ moved")
+                case ("ptz", "stop"):
+                    _ = try await ask(.init(camera: id, action: "ptz.stop"))
+                    print("✓ stopped")
+                case ("night-mode", ""):
+                    print("night mode: \(try await ask(.init(camera: id, action: "night.get")).mode?.rawValue ?? "?")")
+                case ("night-mode", let mode):
+                    guard let m = NightMode(rawValue: mode) else { throw .failed("auto, day or night") }
+                    _ = try await ask(.init(camera: id, action: "night.set", mode: m))
+                    print("✓ night mode: \(m.rawValue)")
+                case ("talk", _):
+                    let talk = try await service.talk(camera: id)
+                    print("✓ talking at \(Int(talk.sampleRate)) Hz; silence for \(delay) s, then a tone for \(tone) s")
+                    let rate = talk.sampleRate, piece = Int(rate / 50)
+                    var n = 0
+                    let started = Date()
+                    while Date().timeIntervalSince(started) < delay + tone {
+                        let sounding = Date().timeIntervalSince(started) >= delay
+                        try talk.send((0 ..< piece).map { i in sounding ? Int16(8000 * sin(2 * Double.pi * 440 * Double(n + i) / rate)) : 0 })
+                        n += piece
+                        try? await Task.sleep(for: .milliseconds(20))
+                    }
+                    talk.close()
+                    print("✓ done")
+                default:
+                    throw .failed("presets, goto PRESET, move PAN TILT [ZOOM] [--for SECONDS] or stop")
+                }
+            } catch {
+                print("✗ \(error.description)")
+                status = 1
+            }
+            return
+        }
+        do throws(ControlFailure) {
+            switch command {
+            case "controls":
+                let all = await controls.controls()
+                found = all
+                if let p = all.ptz {
+                    print("✓ PTZ through \(p.provider): \([p.panTilt ? "pan and tilt" : nil, p.zoom ? "zoom" : nil].compactMap { $0 }.joined(separator: ", ")), \(p.presets) presets")
+                } else { print("· no PTZ") }
+                if let n = all.nightMode { print("✓ night mode through \(n.provider): \(n.choices.joined(separator: ", "))") } else { print("· no night mode") }
+                if let t = all.talk { print("✓ talking back through \(t.provider)") } else { print("· no talking back") }
+            case "ptz":
+                switch rest.first ?? "presets" {
+                case "presets":
+                    let presets = try await controls.withPTZ { c throws(ControlFailure) in try await c.presets() }
+                    for p in presets { print("  \(p.id)  \(p.name)") }
+                    if presets.isEmpty { print("  (none)") }
+                case "goto":
+                    guard rest.count >= 2 else { throw .failed("which preset? pond camera ptz ID goto PRESET") }
+                    try await controls.withPTZ { c throws(ControlFailure) in try await c.goTo(rest[1]) }
+                    print("✓ going to \(rest[1])")
+                case "move":
+                    let v = PTZVelocity(pan: rest.count > 1 ? Double(rest[1]) ?? 0 : 0, tilt: rest.count > 2 ? Double(rest[2]) ?? 0 : 0,
+                                        zoom: rest.count > 3 ? Double(rest[3]) ?? 0 : 0)
+                    let started = Date()
+                    try await controls.withPTZ { c throws(ControlFailure) in try await c.move(v) }
+                    try? await Task.sleep(for: .seconds(seconds))
+                    try await controls.withPTZ { c throws(ControlFailure) in try await c.stop() }
+                    print(String(format: "✓ moved for %.2f s", Date().timeIntervalSince(started)))
+                case "stop":
+                    try await controls.withPTZ { c throws(ControlFailure) in try await c.stop() }
+                    print("✓ stopped")
+                default:
+                    throw .failed("presets, goto PRESET, move PAN TILT [ZOOM] [--for SECONDS] or stop")
+                }
+            case "talk":
+                let session = try await controls.withTalk { c throws(ControlFailure) in try await c.open() }
+                print("✓ talking to \(camera.name) at \(Int(session.sampleRate)) Hz; silence for \(delay) s, then a tone for \(tone) s")
+                // Silence first (--delay: some cameras take a moment to start their speaker), then 440 Hz, in
+                // 20 ms pieces as a microphone would give them.
+                let rate = session.sampleRate, piece = Int(rate / 50)
+                var n = 0
+                let started = Date()
+                while Date().timeIntervalSince(started) < delay + tone {
+                    let sounding = Date().timeIntervalSince(started) >= delay
+                    let samples = (0 ..< piece).map { i in sounding ? Int16(8000 * sin(2 * Double.pi * 440 * Double(n + i) / rate)) : 0 }
+                    n += piece
+                    try session.send(samples)
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                session.close()
+                print("✓ done")
+            default:
+                if let mode = rest.first {
+                    guard let m = NightMode(rawValue: mode) else { throw .failed("auto, day or night") }
+                    try await controls.withNightMode { c throws(ControlFailure) in try await c.setNightMode(m) }
+                    print("✓ night mode: \(m.rawValue)")
+                } else {
+                    let m = try await controls.withNightMode { c throws(ControlFailure) in try await c.nightMode() }
+                    print("night mode: \(m.rawValue)")
+                }
+            }
+        } catch {
+            print("✗ \(error.description)")
+            status = 1
+        }
+        // Logged out (a Reolink camera allows only a few logins at once).
+        await CameraSessions.shared.forget(access)
+    }
+    semaphore.wait()
+    if saving, let found {
+        config.cameras[index].device?.controls = found.isEmpty ? nil : found
+        do { try store.save(config) } catch {
+            FileHandle.standardError.write(Data("✗ \(error)\n".utf8))
+            exit(1)
+        }
+        print("✓ kept in \(camera.name)\u{2019}s settings")
+    }
+    exit(status)
+}
+
+/// `pond camera reolink ID CMD [JSON]`: one command of Reolink's API, its reply as the camera writes it,
+/// for working out what a camera wants (JSON is the command's param).
+if args.count >= 4, args[0] == "camera", args[1] == "reolink" {
+    guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }),
+          let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ No such camera, or no password for it.\n".utf8))
+        exit(1)
+    }
+    let param = args.count > 4 ? (try? JSONSerialization.jsonObject(with: Data(args[4].utf8))) as? [String: Any] ?? [:] : [:]
+    nonisolated(unsafe) let sendable = param
+    let (cmd, semaphore) = (args[3], DispatchSemaphore(value: 0))
+    Task.detached {
+        let api = ReolinkAPI(host: camera.host, username: camera.username, password: password)
+        print(await api.raw(cmd, param: sendable))
+        await api.logout()
+        semaphore.signal()
+    }
+    semaphore.wait()
+    exit(0)
+}
+
+/// `pond camera abilities ID`: what the camera says it can do, every way Pond asks (ONVIF's PTZ, audio out
+/// and imaging, whether its RTSP offers ONVIF's audio backchannel, and Reolink's own API), written out in
+/// full for working out what a camera supports. Read-only: nothing moves or changes.
+if args.count >= 3, args[0] == "camera", args[1] == "abilities" {
+    guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }) else {
+        FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
+        exit(1)
+    }
+    guard let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ There is no password for \(camera.id) in the Keychain.\n".utf8))
+        exit(1)
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached {
+        defer { semaphore.signal() }
+        let tell: @Sendable (String) -> Void = { print($0) }
+        print("== \(camera.id) at \(camera.host)")
+        await CapabilityProbe.onvif(host: camera.host, username: camera.username, password: password, tell: tell)
+        // The backchannel: a DESCRIBE that asks for it; a camera that offers it adds a track it receives
+        // (a=sendonly from its side).
+        do {
+            let url = camera.main
+            let parts = URLComponents(string: url)
+            let transport = try SocketTransport(host: parts?.host ?? camera.host, port: parts?.port ?? 554, timeout: 6)
+            let client = RTSPClient(transport: transport, username: camera.username, password: password, timeout: 6)
+            let reply = try client.request("DESCRIBE", url, headers: [("Accept", "application/sdp"),
+                                                                       ("Require", "www.onvif.org/ver20/backchannel")])
+            print("✓ RTSP DESCRIBE with the backchannel asked for: \(reply.status) \(reply.reason)")
+            print(reply.bodyText.split(whereSeparator: \.isNewline).map { "    " + $0 }.joined(separator: "\n"))
+            transport.close()
+        } catch {
+            print("✗ RTSP DESCRIBE with the backchannel: \(error)")
+        }
+        await CapabilityProbe.reolink(host: camera.host, username: camera.username, password: password, tell: tell)
+    }
+    semaphore.wait()
+    exit(0)
+}
+
 /// `pond camera identify ID`: asks the camera what it is (maker, model, serial number, firmware, doorbell or
 /// not) and keeps the answer in its settings, for HomeKit and the app. `--provider reolink|onvif` asks only
 /// that one.
@@ -315,10 +574,28 @@ if args.count >= 3, args[0] == "camera", args[1] == "identify" {
         FileHandle.standardError.write(Data("✗ There is no password for \(camera.id) in the Keychain. Set it with: pond camera password \(camera.id)\n".utf8))
         exit(1)
     }
+    // Without --provider: the way it was chosen to be talked to is asked first, so asking again keeps it.
+    if providers.count > 1, let chosen = camera.device?.provider, let first = CameraProviders.provider(chosen) {
+        providers = [first] + providers.filter { $0.id != chosen }
+    }
     let semaphore = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var device: Config.Device?
+    let service = ControlClient(path: ControlSocket.path(nextTo: configPath))
     Task.detached {
         device = await DeviceReader.read(host: camera.host, username: camera.username, password: password, providers: providers)
+        // And what it can be controlled with, through which provider each (for the app's controls); through
+        // the service when it runs (it keeps the logins), else asked here and logged out after.
+        if var found = device {
+            if service.isAvailable, camera.device?.provider == found.provider {
+                found.controls = await service.ask(.init(camera: camera.id, action: "controls")).controls
+            } else {
+                let access = CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main)
+                let controls = await CameraControls(access: access, device: found).controls()
+                found.controls = controls.isEmpty ? nil : controls
+                await CameraSessions.shared.forget(access)
+            }
+            device = found
+        }
         semaphore.signal()
     }
     semaphore.wait()
@@ -337,6 +614,11 @@ if args.count >= 3, args[0] == "camera", args[1] == "identify" {
     print("✓ \(camera.name): \([device.manufacturer, device.model].filter { !$0.isEmpty }.joined(separator: " "))\(device.isDoorbell ? ", a doorbell" : "")")
     if let serial = device.serial { print("  serial number \(serial)") }
     if let firmware = device.firmware { print("  firmware \(firmware)") }
+    if let controls = device.controls {
+        let words = [controls.ptz.map { "PTZ (\($0.provider))" }, controls.nightMode.map { "night mode (\($0.provider))" },
+                     controls.talk.map { "talking back (\($0.provider))" }].compactMap { $0 }
+        print("  controls: \(words.joined(separator: ", "))")
+    }
     exit(0)
 }
 

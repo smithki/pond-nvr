@@ -13,12 +13,17 @@ public struct SDP: Sendable, Equatable {
         public var format: [String: String]
         /// From a=control: a track URL, absolute or relative to the session.
         public var control: String?
+        /// From a=sendonly, a=recvonly, a=sendrecv, as the client sees it: "sendonly" is a track the
+        /// client sends on (ONVIF's backchannel, to the camera's speaker).
+        public var direction: String?
     }
 
     public var media: [Media]
 
     public var video: Media? { media.first { $0.kind == "video" } }
-    public var audio: Media? { media.first { $0.kind == "audio" } }
+    public var audio: Media? { media.first { $0.kind == "audio" && $0.direction != "sendonly" } }
+    /// The track for sound to the camera (ONVIF's backchannel), when asked for and offered.
+    public var backchannel: Media? { media.first { $0.kind == "audio" && $0.direction == "sendonly" } }
 
     public init(_ text: String) {
         var media: [Media] = []
@@ -52,6 +57,8 @@ public struct SDP: Sendable, Equatable {
                 }
             } else if line.hasPrefix("a=control:") {
                 media[n].control = String(line.dropFirst(10))
+            } else if ["a=sendonly", "a=recvonly", "a=sendrecv", "a=inactive"].contains(line) {
+                media[n].direction = String(line.dropFirst(2))
             }
         }
         self.media = media

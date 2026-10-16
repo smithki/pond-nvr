@@ -380,3 +380,6 @@ extension AppModel {
     /// Where the background service offers its camera streams to live views.
     var streamRelay: String { StreamRelay.path(nextTo: store.path) }
 }
+
+/// A stream is its own identity: its view stays with it, whichever place it has on the tile.
+extension LiveStream: Identifiable {}

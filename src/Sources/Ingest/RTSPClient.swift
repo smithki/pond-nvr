@@ -112,15 +112,31 @@ public final class RTSPClient {
     }
 
     /// SETUP one track over this connection, on interleaved channels `channel` (RTP) and `channel + 1` (RTCP).
-    public func setup(_ trackURL: String, channel: UInt8) throws(RTSPError) {
+    public func setup(_ trackURL: String, channel: UInt8, headers: [(String, String)] = []) throws(RTSPError) {
         let r = try request("SETUP", trackURL,
-                            headers: [("Transport", "RTP/AVP/TCP;unicast;interleaved=\(channel)-\(channel + 1)")])
+                            headers: [("Transport", "RTP/AVP/TCP;unicast;interleaved=\(channel)-\(channel + 1)")] + headers)
         guard let s = r.header("session") else { throw .malformed("SETUP reply without a session") }
         session = s.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    public func play(_ url: String) throws(RTSPError) {
-        _ = try request("PLAY", url, headers: [("Range", "npt=0.000-")])
+    public func play(_ url: String, headers: [(String, String)] = []) throws(RTSPError) {
+        _ = try request("PLAY", url, headers: [("Range", "npt=0.000-")] + headers)
+    }
+
+    /// Sends bytes as they are (an interleaved packet).
+    public func sendRaw(_ bytes: [UInt8]) throws(RTSPError) {
+        do { try transport.send(bytes) } catch { throw .transport(error) }
+    }
+
+    /// Reads and drops whatever has arrived (the camera's RTCP, replies to keepalives), so its sending
+    /// doesn't stall; waits up to `timeout`. Throws if the camera hung up.
+    public func drain(timeout: Double = 0) throws(RTSPError) {
+        do {
+            let bytes = try transport.receive(timeout: timeout)
+            if !bytes.isEmpty { reader.feed(bytes); while (try? reader.next()) != nil {} }
+        } catch {
+            throw .transport(error)
+        }
     }
 
     /// Sends a request without waiting for the reply (which `nextPacket` skips). For keepalives while playing:

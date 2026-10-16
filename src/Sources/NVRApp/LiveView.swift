@@ -32,6 +32,12 @@ struct LiveView: View {
     /// preferences can arrive as a separate update, after the animation meant for it.
     @State private var stagedList: [String]?
     @AppStorage(LiveView.railKey) private var showRail = true
+    /// The live controls dock is open under a camera watched on its own: kept between launches, and in view
+    /// state for this session (a stored preference's change can arrive apart from the animation meant for it,
+    /// and the dock and stage would then jump).
+    @AppStorage("liveControls") private var controlsKept = false
+    @State private var controlsShown: Bool?
+    private var controlsOpen: Bool { controlsShown ?? controlsKept }
     @State private var snapshots = CameraSnapshots()
     @State private var activity = CameraActivity()
     private var reorderDrag: ReorderDrag { model.reorderDrag }
@@ -74,14 +80,50 @@ struct LiveView: View {
                                    staged: staged(cameras), snapshots: snapshots,
                                    health: { health($0, cameras: cameras) },
                                    solo: solo, toggle: toggle, showAll: { showAll(cameras.map(\.id)) },
+                                   openControls: { openControls($0) },
                                    drag: reorderDrag, reorder: reorder)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
-                    Stage(cameras: cameras.filter { staged(cameras).contains($0.id) }, allCameras: cameras, snapshots: snapshots,
-                          activity: activity, health: { health($0, cameras: cameras) }, openEvent: openEvent,
-                          drag: reorderDrag, reorder: reorder,
-                          justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
-                          solo: solo, remove: { toggle($0) })
+                    // The stage, and under it the controls of a camera watched on its own.
+                    let docked = docked(cameras)
+                    VStack(spacing: 0) {
+                        Stage(cameras: cameras.filter { staged(cameras).contains($0.id) }, allCameras: cameras, snapshots: snapshots,
+                              activity: activity, health: { health($0, cameras: cameras) }, openEvent: openEvent,
+                              drag: reorderDrag, reorder: reorder,
+                              justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
+                              solo: solo, remove: { toggle($0) }, openControls: { openControls($0) })
+                            // Above the dock: tiles growing back over its place (more cameras on the stage) pass
+                            // over it as it goes, not under it.
+                            .zIndex(1)
+                        if let docked {
+                            // The dock and its button, one piece: open, it sits under the stage with the button on
+                            // its top edge; hidden, it slides down until only the button shows, at the bottom of
+                            // the stage. Its place on the screen is only as tall as the dock while it's open.
+                            Color.clear
+                                .frame(height: controlsOpen ? Self.dockToggleRoom + LiveControlsDock.height + 12 : 0)
+                                .overlay(alignment: .top) {
+                                    VStack(spacing: 8) {
+                                        controlsButton
+                                        // Centred, as wide as it needs (it lays itself out for narrower windows).
+                                        LiveControlsDock(camera: docked.camera, controls: docked.controls)
+                                            .opacity(controlsOpen ? 1 : 0)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .offset(y: controlsOpen ? Self.dockToggleRoom - Self.controlsButtonHeight - 8
+                                                            : -(Self.controlsButtonHeight + 14))
+                                }
+                                // Hidden, the button is over the stage; open, the stage is over the dock (tiles
+                                // growing back over its place pass over it as it goes).
+                                .zIndex(controlsOpen ? 0 : 2)
+                                .transition(.opacity)
+                        }
+                    }
+                }
+                // ⌥⌘L: a camera's controls, watching it on its own if others are on the stage too.
+                .background {
+                    Button("Live Controls") { shortcut(cameras) }
+                        .keyboardShortcut("l", modifiers: [.command, .option])
+                        .hidden()
                 }
                 .animation(.snappy(duration: 0.25), value: showRail)
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
@@ -117,6 +159,57 @@ struct LiveView: View {
         return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
                                lastRecorded: snapshots[id]?.time, recordingAsOf: asOf,
                                startedRecording: model.recordingStarted[id])
+    }
+
+    static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)
+    /// Above the dock: room for the button that shows and hides it.
+    static let dockToggleRoom: CGFloat = 52
+    /// The show and hide button's height (a large glass capsule).
+    static let controlsButtonHeight: CGFloat = 36
+
+    /// Shows or hides the controls.
+    var controlsButton: some View {
+        Button { setControls(open: !controlsOpen) } label: {
+            Label(controlsOpen ? "Hide Controls" : "Controls", systemImage: controlsOpen ? "chevron.down" : "chevron.up")
+                .font(.callout.weight(.semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .controlSize(.large)
+        .help(controlsOpen ? "Hide the controls (\u{2325}\u{2318}L)" : "Show this camera\u{2019}s controls (\u{2325}\u{2318}L)")
+    }
+
+    /// The camera whose controls go under the stage: the one watched on its own, if it has any to show
+    /// there (talking back is on the tile).
+    func docked(_ cameras: [Config.Camera]) -> (camera: Config.Camera, controls: Config.Controls)? {
+        let ids = staged(cameras)
+        guard ids.count == 1, let camera = cameras.first(where: { $0.id == ids[0] }), let controls = model.controls(for: camera),
+              controls.ptz != nil || controls.nightMode != nil else { return nil }
+        return (camera, controls)
+    }
+
+    func setControls(open: Bool) {
+        withAnimation(Self.dockAnimation) { controlsShown = open }
+        controlsKept = open
+    }
+
+    /// Watches the camera on its own, with its controls open.
+    func openControls(_ id: String) {
+        solo(id)
+        setControls(open: true)
+    }
+
+    /// The shortcut: shows or hides the controls of the camera watched on its own; with several on the stage,
+    /// the first that has controls is watched on its own with them open.
+    func shortcut(_ cameras: [Config.Camera]) {
+        if docked(cameras) != nil { return setControls(open: !controlsOpen) }
+        let ids = staged(cameras)
+        guard let id = ids.first(where: { id in
+            cameras.first { $0.id == id }.flatMap { model.controls(for: $0) }.map { $0.ptz != nil || $0.nightMode != nil } == true
+        }) else { return }
+        openControls(id)
     }
 
     /// Shows a camera's latest event on the timeline.
@@ -268,6 +361,8 @@ struct CameraRail: View {
     let solo: (String) -> Void
     let toggle: (String) -> Void
     let showAll: () -> Void
+    /// Watches a camera on its own with its controls open.
+    var openControls: (String) -> Void = { _ in }
     let drag: ReorderDrag
     let reorder: (String, String) -> Void
     @AppStorage("liveRailWidth") private var width = CameraRail.defaultWidth
@@ -304,7 +399,8 @@ struct CameraRail: View {
                     ForEach(cameras) { camera in
                         RailThumbnail(camera: camera, snapshot: snapshots[camera.id], health: health(camera.id),
                                       onStage: staged.contains(camera.id),
-                                      canRemove: staged.count > 1, solo: { solo(camera.id) }, toggle: { toggle(camera.id) })
+                                      canRemove: staged.count > 1, solo: { solo(camera.id) }, toggle: { toggle(camera.id) },
+                                      openControls: { openControls(camera.id) })
                             .reorderable(camera.id, name: camera.name, drag: drag, from: .rail, move: reorder)
                     }
                 }
@@ -441,6 +537,7 @@ struct RailThumbnail: View {
     let canRemove: Bool
     let solo: () -> Void
     let toggle: () -> Void
+    var openControls: () -> Void = {}
     @State private var hovering = false
     @State private var presses = 0
     /// What a click is about to do, shown at once while the stage waits to see whether it is the first click
@@ -533,6 +630,10 @@ struct RailThumbnail: View {
         .onTapGesture(perform: click)
         .contextMenu {
             Button("Watch Only This", action: solo)
+            // Its controls, with it on its own: only for a camera that has them.
+            if model.controls(for: camera).map({ $0.ptz != nil || $0.nightMode != nil }) == true {
+                Button("Control This Camera", systemImage: "slider.horizontal.3", action: openControls)
+            }
             Button(onStage ? "Take Off the Screen" : "Add to the Screen", action: toggle)
                 .disabled(onStage && !canRemove)
             Divider()
@@ -597,6 +698,8 @@ struct Stage: View {
 
     let solo: (String) -> Void
     let remove: (String) -> Void
+    /// Watches a camera on its own with its controls open.
+    var openControls: (String) -> Void = { _ in }
 
     /// The cameras as last laid out, to tell which tiles a change moves to another row.
     @State private var shownLineup: [String] = []
@@ -682,6 +785,7 @@ struct Stage: View {
                                canRemove: cameras.count > 1, announced: !place.leaving && camera.id == justAdded,
                                superseded: motion == .calm || (justAdded != nil && justAdded != camera.id),
                                solo: cameras.count > 1 ? { solo(camera.id) } : nil, remove: { remove(camera.id) },
+                               openControls: { openControls(camera.id) },
                                compact: compact, health: health(camera.id), events: activity?[camera.id],
                                openEvent: openEvent)
                         .frame(width: place.frame.width, height: place.frame.height)
@@ -946,6 +1050,8 @@ struct CameraTile: View {
     var superseded = false
     var solo: (() -> Void)?
     var remove: (() -> Void)?
+    /// Watches it on its own with its controls open.
+    var openControls: (() -> Void)?
     /// A still stand-in: no connection, the snapshot, and this status.
     var frozen: TileStatus?
     /// A small tile: shorter messages and badges.
@@ -955,6 +1061,11 @@ struct CameraTile: View {
     var events: CameraActivity.Summary?
     var openEvent: (TimelineEvent) -> Void = { _ in }
     @State private var stream: LiveStream?
+    /// The stream taking over (the tile grew or shrank past the size for the main stream): connecting under
+    /// the current one until it plays and the tile has stopped moving; then the current one goes and stops, so
+    /// the picture never goes black between them. Each stream keeps its own view all along (moved to a new view, a stream was
+    /// drawn for a frame at the tile's final size while the tile was still animating to it).
+    @State private var incoming: LiveStream?
     @State private var noPassword = false
     @State private var pointerInside = false
     /// The events popover is open: it has the pointer or the keyboard, so the tile's controls stay.
@@ -1005,8 +1116,16 @@ struct CameraTile: View {
         openSettingsWindow()
     }
 
+    /// Longer than the stage's moves (its tiles growing and shrinking), so a new stream's picture shows once its
+    /// tile has stopped moving.
+    static let settle: TimeInterval = 0.65
+
     /// This camera is the one heard.
     var audible: Bool { model.audibleCamera == camera.id }
+    /// Its speaker has the microphone.
+    var talking: Bool { model.talking?.camera == camera.id }
+    /// It has controls for the dock under the stage.
+    var hasDockControls: Bool { model.controls(for: camera).map { $0.ptz != nil || $0.nightMode != nil } == true }
 
     /// Show the hover controls: the pointer is on the tile, or in its popover.
     var hovering: Bool { pointerInside || popoverOpen }
@@ -1038,8 +1157,13 @@ struct CameraTile: View {
                     Image(decorative: snapshot, scale: 1).resizable().aspectRatio(contentMode: .fit)
                         .opacity(playing ? 1 : 0.35)
                 }
-                if let stream, frozen == nil {
-                    VideoLayerView(layer: stream.layer).opacity(playing ? 1 : 0)
+                if frozen == nil {
+                    // The stream taking over underneath, drawing all along (unseen, a view doesn't draw, and one
+                    // shown later rose from black); the current one over it until the new one is ready.
+                    ForEach([incoming, stream].compactMap { $0 }) { s in
+                        VideoLayerView(layer: s.layer, videoSize: s.size)
+                            .opacity(s.state == .playing ? 1 : 0)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1060,19 +1184,29 @@ struct CameraTile: View {
             // while a tile is moving would animate from wherever they last were, not with the tile.
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 6) {
-                    Button { solo?() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-                        .help("Watch only this camera")
-                    Button { remove?() } label: { Image(systemName: "xmark") }
-                        .help("Take off the screen")
+                    // Its controls (moving it, its positions, day and night), under it on its own.
+                    // Not when it's alone on the stage: its controls are under it there.
+                    if hasDockControls, frozen == nil, canRemove {
+                        Button { openControls?() } label: { Image(systemName: "slider.horizontal.3") }
+                            .help("Controls for \(camera.name) (\u{2325}\u{2318}L)")
+                            .opacity(hovering ? 1 : 0)
+                            .allowsHitTesting(hovering)
+                    }
+                    // Only with other cameras on the stage: alone, there is nothing to enlarge it over or
+                    // take it off for.
+                    Group {
+                        Button { solo?() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                            .help("Watch only this camera")
+                        Button { remove?() } label: { Image(systemName: "xmark") }
+                            .help("Take off the screen")
+                    }
+                    .opacity(hovering && solo != nil && canRemove ? 1 : 0)
+                    .allowsHitTesting(hovering && solo != nil && canRemove)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.capsule)
                 .controlSize(compact ? .small : .regular)
                 .padding(compact ? 6 : 10)
-                // Only with other cameras on the stage: alone, there is nothing to enlarge it over or
-                // take it off for.
-                .opacity(hovering && solo != nil && canRemove ? 1 : 0)
-                .allowsHitTesting(hovering && solo != nil && canRemove)
                 .animation(.easeOut(duration: 0.15), value: hovering)
             }
             .overlay(alignment: .topLeading) {
@@ -1102,6 +1236,7 @@ struct CameraTile: View {
         .onHover { pointerInside = $0 }
         .preference(key: TileStatuses.self, value: frozen == nil ? [camera.id: status] : [:])
         .onChange(of: audible) { _, heard in stream?.muted = !heard }
+        .onDisappear { stopStreams() }
         .task(id: "\(camera.id) \(camera.main) \(camera.sub) \(camera.username) \(mainStream)") {
             guard frozen == nil else { return }
             await play()
@@ -1178,6 +1313,8 @@ struct CameraTile: View {
                              height: compact ? Self.compactPillHeight : Self.pillHeight)
             }
             Spacer(minLength: 0)
+            // The buttons on the right come and go with the pointer as the tile's other controls do.
+            HStack(spacing: Self.badgeGap) {
             // Sound: the button is there on hover, and stays while the camera is heard, so it is clear which.
             // A circle as tall as the name pill and the resolution pill.
             if stream?.hasAudio == true, frozen == nil, hovering || audible {
@@ -1195,13 +1332,21 @@ struct CameraTile: View {
                 .help(audible ? "Mute \(camera.name)" : "Listen to \(camera.name) (mutes the others)")
                 .transition(.opacity)
             }
+            // Talking through its speaker: on hover, and while talking (lit, with the voice's level).
+            if model.controls(for: camera)?.talk != nil, frozen == nil, hovering || talking {
+                TalkButton(camera: camera, compact: compact)
+                    .transition(.opacity)
+            }
             if hovering, !compact, let size = stream?.size {
                 Text("\(Int(size.width))×\(Int(size.height))")
                     .font(.callout.monospacedDigit())
                     .padding(.horizontal, 12)
                     .frame(height: Self.pillHeight)
                     .glassEffect(.regular, in: .capsule)
+                    .transition(.opacity)
             }
+            }
+            .animation(.easeOut(duration: 0.15), value: hovering)
         }
     }
 
@@ -1250,12 +1395,55 @@ struct CameraTile: View {
         noPassword = false
         let s = LiveStream(url: mainStream ? camera.main : camera.sub, relay: model.streamRelay)
         s.muted = !audible
-        stream = s
-        s.start()
+        // This camera's other stream (main or sub), already playing, stays the picture until this one plays. Only
+        // this camera's: a tile can be given another camera, whose picture must not stand in for this one.
+        let previous = stream.flatMap { old in
+            old.state == .playing && [camera.main, camera.sub].contains(old.url) ? old : nil
+        }
+        incoming?.stop()
+        incoming = nil
+        if let previous {
+            s.muted = true
+            incoming = s
+            s.start()
+            // Up to a few seconds for its first picture, and not before the tile has finished growing or shrinking
+            // (its view, new, isn't animated: it has the tile's final size from the start, so shown sooner it
+            // would sit cropped and out of register over the old one, which grows with the tile); then it fades
+            // in over the old one, which then stops.
+            let started = Date()
+            for _ in 0 ..< 100 where (s.state != .playing || Date().timeIntervalSince(started) < Self.settle) && !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            // A cut, not a fade: the same scene either way, and fading one video over another here dimmed the
+            // picture by a quarter halfway through.
+            if incoming === s {
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) {
+                    s.muted = !audible
+                    stream = s
+                    incoming = nil
+                }
+                previous.stop()
+            }
+        } else {
+            stream?.stop()
+            stream = s
+            s.start()
+        }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3600))
         }
-        s.stop()
+        // Not stopped here: a newer stream takes over from this one (and stops it once it plays), or the tile
+        // has gone (onDisappear stops it), whichever runs first.
+    }
+
+    /// The tile has left the screen: its streams stop.
+    func stopStreams() {
+        stream?.stop()
+        incoming?.stop()
+        stream = nil
+        incoming = nil
     }
 }
 
@@ -1486,6 +1674,8 @@ struct TileMessage: View {
 /// Shows an AVSampleBufferDisplayLayer, kept the size of the view.
 struct VideoLayerView: NSViewRepresentable {
     let layer: AVSampleBufferDisplayLayer
+    /// The picture's size, when known: a picture nearly the tile's shape fills it (see HostView).
+    var videoSize: CGSize?
 
     func makeNSView(context: Context) -> HostView {
         let view = HostView()
@@ -1496,6 +1686,7 @@ struct VideoLayerView: NSViewRepresentable {
 
     func updateNSView(_ view: HostView, context: Context) {
         view.video = layer
+        view.videoSize = videoSize
     }
 
     final class HostView: NSView {
@@ -1503,16 +1694,34 @@ struct VideoLayerView: NSViewRepresentable {
             didSet {
                 guard video !== oldValue else { return }
                 oldValue?.removeFromSuperlayer()
-                if let video { layer?.addSublayer(video) }
+                if let video {
+                    // Sized with the view in the same step (resizing it later, in layout, left a frame where a
+                    // tile that had just changed size showed its video at the old size, in a corner).
+                    video.frame = layer?.bounds ?? bounds
+                    video.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+                    layer?.addSublayer(video)
+                }
                 needsLayout = true
             }
         }
+
+        var videoSize: CGSize? {
+            didSet { if videoSize != oldValue { needsLayout = true } }
+        }
+
+        /// How far a picture's shape may be from the tile's and still fill it (a sliver cropped, rather than
+        /// thin black bars, as for a sub-stream a little narrower than 16:9); further, it fits whole.
+        static let fillTolerance = 0.06
 
         override func layout() {
             super.layout()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             video?.frame = bounds
+            if let videoSize, videoSize.width > 0, videoSize.height > 0, bounds.width > 0, bounds.height > 0 {
+                let picture = videoSize.width / videoSize.height, tile = bounds.width / bounds.height
+                video?.videoGravity = abs(picture / tile - 1) <= Self.fillTolerance ? .resizeAspectFill : .resizeAspect
+            }
             CATransaction.commit()
         }
     }

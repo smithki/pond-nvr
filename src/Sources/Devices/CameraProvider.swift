@@ -1,8 +1,11 @@
 // Brand-specific know-how behind one interface, so other makes of camera can be added beside Reolink's:
-// each provider says what a camera is, and offers what it can (a doorbell's button, the stream addresses).
-// A camera's `device.provider` says which one recognised it; its other hooks go to that one.
-// Each brand's provider is in Providers/ (Reolink.swift, ONVIF.swift); a new brand is a file there and an
-// entry in `CameraProviders.all`.
+// each provider says what a camera is, and offers what it can (a doorbell's button, the stream addresses,
+// and controls: PTZ, night mode, talking back). A camera's `device.provider` says which one it was chosen to
+// be talked to through; each control is then served by the first provider in order (that one, the others
+// that fit the camera, ONVIF last) that answers for it (see Controls.swift), so a make's own API is used
+// where it does something and ONVIF fills in the rest.
+// Each provider is in Providers/ (Reolink.swift, ONVIF.swift); a new one (another make's API, a proprietary
+// protocol for one feature) is a file there and an entry in `CameraProviders.all`.
 import Foundation
 import NVRCore
 
@@ -25,6 +28,13 @@ public protocol CameraProvider: Sendable {
     var appName: String? { get }
     /// What the brand's app calls the lighter stream ("Fluent"), for advice on where to change it.
     var subStreamName: String? { get }
+
+    /// The camera's controls through this provider: offered if it can do them for this camera (asked of the
+    /// camera, once; the connection is shared, see CameraSessions), not if it can't, or unknown if the camera
+    /// couldn't be asked just now (it's asked again later, so a moment's trouble doesn't pass it over).
+    func ptz(_ access: CameraAccess) async -> Offer<any PTZControl>
+    func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl>
+    func talk(_ access: CameraAccess) async -> Offer<any TalkControl>
 }
 
 extension CameraProvider {
@@ -39,6 +49,9 @@ extension CameraProvider {
     public var appName: String? { nil }
     public var subStreamName: String? { nil }
     public var maker: String? { nil }
+    public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> { .no }
+    public func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl> { .no }
+    public func talk(_ access: CameraAccess) async -> Offer<any TalkControl> { .no }
 }
 
 extension Config.Device {
@@ -83,6 +96,16 @@ public enum CameraProviders {
                 || provider.maker.map { device.manufacturer.localizedCaseInsensitiveContains($0) } == true
         }
         return own + all.filter { $0.maker == nil }
+    }
+
+    /// The providers a camera's controls are asked of, in order: the one it was chosen to be talked to
+    /// through, then the others that fit it (its make's, ONVIF). None for a camera that is video only.
+    public static func order(for device: Config.Device?) -> [CameraProvider] {
+        guard let device else { return all.filter { $0.maker == nil } }
+        if device.isVideoOnly { return [] }
+        let fitting = choices(for: device)
+        let chosen = fitting.filter { $0.id == device.provider }
+        return chosen + fitting.filter { $0.id != device.provider }
     }
 
     /// A camera's stream addresses, from the first provider that can say: its brand's known addresses, else

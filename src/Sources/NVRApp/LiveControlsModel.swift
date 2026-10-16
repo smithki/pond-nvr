@@ -1,0 +1,177 @@
+// A camera's controls from the app: PTZ, presets, night mode and talking back, all through the service's
+// control socket (ControlSocket), which has the passwords and keeps each camera's logins. What a camera has
+// is in its settings (`device.controls`, worked out when it's identified), so the app shows only what works.
+import AVFoundation
+import Devices
+import Foundation
+import NVRCore
+
+extension AppModel {
+    var controlClient: ControlClient { ControlClient(path: ControlSocket.path(nextTo: store.path)) }
+
+    /// What can be controlled on this camera (nil: nothing, or not known yet).
+    func controls(for camera: Config.Camera) -> Config.Controls? {
+        guard let controls = camera.device?.controls, !controls.isEmpty else { return nil }
+        return controls
+    }
+
+    /// Asks the service; a failure is shown on the camera for a moment.
+    @discardableResult
+    func control(_ camera: String, _ request: ControlSocket.Request) async -> ControlSocket.Reply? {
+        let reply = await controlClient.ask(request)
+        if let error = reply.error {
+            var serviceDown = true
+            if case .running = serviceState { serviceDown = false }
+            showControlError(camera, error == .unreachable && serviceDown ? "The service isn\u{2019}t running" : error.description)
+            return nil
+        }
+        return reply
+    }
+
+    /// Says what went wrong on the camera for a few seconds.
+    func showControlError(_ camera: String, _ words: String) {
+        controlError[camera] = words
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if controlError[camera] == words { controlError[camera] = nil }
+        }
+    }
+
+    func move(_ camera: String, _ velocity: PTZVelocity) async {
+        await control(camera, .init(camera: camera, action: velocity.isStill ? "ptz.stop" : "ptz.move", velocity: velocity))
+    }
+
+    func loadPresets(_ camera: String) async {
+        if let list = await control(camera, .init(camera: camera, action: "ptz.presets"))?.presets { presets[camera] = list }
+    }
+
+    func goTo(_ camera: String, preset: String) async {
+        await control(camera, .init(camera: camera, action: "ptz.goto", preset: preset))
+    }
+
+    func savePreset(_ camera: String, name: String, replacing: String? = nil) async {
+        guard await control(camera, .init(camera: camera, action: "ptz.save", preset: replacing, name: name)) != nil else { return }
+        await loadPresets(camera)
+    }
+
+    func removePreset(_ camera: String, preset: String) async {
+        guard await control(camera, .init(camera: camera, action: "ptz.remove", preset: preset)) != nil else { return }
+        presets[camera]?.removeAll { $0.id == preset }
+    }
+
+    func loadNightMode(_ camera: String) async {
+        if let mode = await control(camera, .init(camera: camera, action: "night.get"))?.mode { nightModes[camera] = mode }
+    }
+
+    func setNightMode(_ camera: String, _ mode: NightMode) async {
+        let before = nightModes[camera]
+        nightModes[camera] = mode
+        if await control(camera, .init(camera: camera, action: "night.set", mode: mode)) == nil { nightModes[camera] = before }
+    }
+
+    /// Starts or stops talking through a camera (one at a time).
+    func toggleTalk(_ camera: String) async {
+        if let talking {
+            let was = talking.camera
+            talking.stop()
+            self.talking = nil
+            talkLevel = 0
+            if was == camera { return }
+        }
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            showControlError(camera, "This Mac has no microphone")
+            return
+        }
+        guard await AVCaptureDevice.requestAccess(for: .audio) else {
+            showControlError(camera, "Pond may not use the microphone (System Settings › Privacy & Security › Microphone)")
+            return
+        }
+        let talker = Talker(camera: camera)
+        talking = talker
+        do throws(ControlFailure) {
+            try await talker.start(client: controlClient) { [weak self] level in
+                Task { @MainActor in if self?.talking === talker { self?.talkLevel = level } }
+            }
+        } catch {
+            if talking === talker { talking = nil }
+            showControlError(camera, error == .notSupported ? "This camera can\u{2019}t be talked through" : error.description)
+        }
+    }
+}
+
+/// The microphone to a camera's speaker, through the service: the connection opens first and carries silence
+/// while the microphone starts (cameras take a moment to start their speaker), then the voice, converted to
+/// the camera's rate as it's captured.
+final class Talker: @unchecked Sendable {
+    let camera: String
+    private let engine = AVAudioEngine()
+    private var link: ControlTalk?
+    private let lock = NSLock()
+    private var voiceStarted = false
+    private var stopped = false
+
+    init(camera: String) { self.camera = camera }
+
+    func start(client: ControlClient, level: @escaping @Sendable (Double) -> Void) async throws(ControlFailure) {
+        let link = try await client.talk(camera: camera)
+        lock.withLock { self.link = link }
+        // Silence, 20 ms at a time, until the voice takes over.
+        let piece = Int(link.sampleRate / 50)
+        Thread.detachNewThread { [self] in
+            while lock.withLock({ !voiceStarted && !stopped }) {
+                try? link.send([Int16](repeating: 0, count: piece))
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        }
+        let input = engine.inputNode
+        let from = input.outputFormat(forBus: 0)
+        guard let to = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: link.sampleRate, channels: 1, interleaved: true),
+              let converter = AVAudioConverter(from: from, to: to) else {
+            stop()
+            throw .failed("the microphone\u{2019}s sound can\u{2019}t be converted")
+        }
+        // 100 ms at a time (the shortest a tap gives), sent as it comes.
+        do {
+            // (Swift's form of installTapOnBus:bufferSize:format:error:block:, which throws.)
+            try input.__installTap(onBus: 0, bufferSize: AVAudioFrameCount(from.sampleRate / 10), format: from,
+                                   error: ()) { [weak self] buffer, _ in
+            guard let self else { return }
+            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * to.sampleRate / from.sampleRate) + 32
+            guard let out = AVAudioPCMBuffer(pcmFormat: to, frameCapacity: capacity) else { return }
+            nonisolated(unsafe) var given = false
+            var error: NSError?
+            converter.convert(to: out, error: &error) { _, status in
+                if given {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                given = true
+                status.pointee = .haveData
+                return buffer
+            }
+            guard error == nil, let data = out.int16ChannelData else { return }
+            let samples = Array(UnsafeBufferPointer(start: data[0], count: Int(out.frameLength)))
+            self.lock.withLock { self.voiceStarted = true }
+            try? link.send(samples)
+            // How loud, for the button.
+            let rms = sqrt(samples.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(1, samples.count))) / 32768
+            level(min(1, rms * 4))
+            }
+            try engine.start()
+        } catch {
+            stop()
+            throw .failed("the microphone didn\u{2019}t start")
+        }
+    }
+
+    func stop() {
+        let link = lock.withLock { () -> ControlTalk? in
+            stopped = true
+            defer { self.link = nil }
+            return self.link
+        }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        link?.close()
+    }
+}

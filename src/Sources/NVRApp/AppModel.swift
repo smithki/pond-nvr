@@ -35,6 +35,14 @@ final class AppModel {
     var homeKitStatus: HomeKitStatus?
     /// The one camera heard in live view; the others are muted.
     var audibleCamera: String?
+    /// Live controls (LiveControlsModel): the camera being talked through and how loud the voice is (0–1),
+    /// each camera's presets as last asked, and its night mode.
+    var talking: Talker?
+    var talkLevel: Double = 0
+    var presets: [String: [PTZPreset]] = [:]
+    var nightModes: [String: NightMode] = [:]
+    /// A control that failed, for a moment, by camera.
+    var controlError: [String: String] = [:]
     /// Waits for macOS's local network permission before a check; tests replace it so they connect nowhere.
     var localNetworkAccess: (String, UInt16, @escaping @MainActor @Sendable () -> Void) async -> LocalNetworkAccess.Outcome = {
         await LocalNetworkAccess.wait(host: $0, port: $1, waiting: $2)

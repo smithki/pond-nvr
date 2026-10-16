@@ -22,6 +22,8 @@
 	<string>public.app-category.utilities</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pond sends your voice to a camera’s speaker while you talk through it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Pond connects to your cameras on the local network to check them and record them.</string>
 </dict>

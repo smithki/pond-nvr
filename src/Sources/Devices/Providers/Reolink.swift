@@ -15,6 +15,8 @@ public final class ReolinkAPI: @unchecked Sendable {
         case notSupported
         /// The token ran out; log in again.
         case loggedOut
+        /// It allows only a few logins at once, and has them all ("max session"); they lapse after a while.
+        case tooManyLogins
         /// It answered with something else; kept for the log, not for people.
         case unexpected(String)
     }
@@ -23,8 +25,11 @@ public final class ReolinkAPI: @unchecked Sendable {
     let username: String
     let password: String
     let timeout: Double
-    private var base: String?
-    private var token: String?
+    /// Where it answered and the login's token, while logged in; one login at a time, shared by whoever
+    /// asks during it (a camera allows only a few).
+    private let lock = NSLock()
+    private var login: (base: String, token: String)?
+    private var loggingIn: Task<Result<(base: String, token: String), Failure>, Never>?
     private let session: URLSession
 
     public init(host: String, username: String, password: String, timeout: Double = 4) {
@@ -39,8 +44,26 @@ public final class ReolinkAPI: @unchecked Sendable {
 
     deinit { session.invalidateAndCancel() }
 
-    /// Logs in over HTTPS, else HTTP.
+    /// Logs in (once, however many ask at the same time).
     public func login() async throws(Failure) {
+        let task = lock.withLock {
+            if let pending = loggingIn { return pending }
+            let task = Task { await self.loginNow() }
+            loggingIn = task
+            return task
+        }
+        let result = await task.value
+        lock.withLock {
+            if loggingIn == task { loggingIn = nil }
+            if case let .success(login) = result { self.login = login }
+        }
+        if case let .failure(error) = result { throw error }
+    }
+
+    var isLoggedIn: Bool { lock.withLock { login != nil } }
+
+    /// Logs in over HTTPS, else HTTP.
+    private func loginNow() async -> Result<(base: String, token: String), Failure> {
         var lastFailure = Failure.unreachable
         for scheme in ["https", "http"] {
             let base = "\(scheme)://\(host)/api.cgi"
@@ -50,30 +73,71 @@ public final class ReolinkAPI: @unchecked Sendable {
                 guard let token = (value["Token"] as? [String: Any])?["name"] as? String else {
                     throw .unexpected("no token in the login reply")
                 }
-                self.base = base
-                self.token = token
-                return
+                return .success((base, token))
             } catch .unreachable {
                 continue
             } catch {
                 lastFailure = error
-                if error == .loginRefused { break }
+                if error == .loginRefused || error == .tooManyLogins { break }
             }
         }
-        throw lastFailure
+        return .failure(lastFailure)
     }
 
     /// One command's `value`, after logging in.
     public func command(_ cmd: String, param: [String: Any] = [:]) async throws(Failure) -> [String: Any] {
-        if token == nil { try await login() }
-        guard let base, let token else { throw .unreachable }
-        return try await send(base: base, cmd: cmd, token: token, body: [["cmd": cmd, "action": 0, "param": param]])
+        if !isLoggedIn { try await login() }
+        guard let (base, token) = lock.withLock({ login }) else { throw .unreachable }
+        do throws(Failure) {
+            return try await send(base: base, cmd: cmd, token: token, body: [["cmd": cmd, "action": 0, "param": param]])
+        } catch .loggedOut {
+            // That login is over; the next command logs in again.
+            lock.withLock { if self.login?.token == token { self.login = nil } }
+            throw .loggedOut
+        }
+    }
+
+    /// One command's whole reply as the camera wrote it, for investigating (`pond camera reolink`).
+    public func raw(_ cmd: String, param: [String: Any]) async -> String {
+        for attempt in 0 ..< 3 where !isLoggedIn {
+            // A process's first connections fail while macOS decides whether it may use the local network.
+            if attempt > 0 { try? await Task.sleep(for: .seconds(2)) }
+            do throws(Failure) { try await login() } catch {
+                if error == .loginRefused { return "login refused: " + (await rawLogin() ?? "no answer") }
+            }
+        }
+        guard let (base, token) = lock.withLock({ login }), let url = URL(string: "\(base)?cmd=\(cmd)&token=\(token)"),
+              let body = try? JSONSerialization.data(withJSONObject: [["cmd": cmd, "action": 0, "param": param]]) else {
+            return "not logged in: " + (await rawLogin() ?? "no answer")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        guard let (data, _) = try? await session.data(for: request) else { return "no answer" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The login's reply as written, to see why it was refused.
+    private func rawLogin() async -> String? {
+        for scheme in ["https", "http"] {
+            guard let url = URL(string: "\(scheme)://\(host)/api.cgi?cmd=Login"),
+                  let body = try? JSONSerialization.data(withJSONObject: [["cmd": "Login", "param": ["User": ["Version": "0", "userName": username, "password": password]]]])
+            else { continue }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.httpBody = body
+            if let (data, _) = try? await session.data(for: request) { return String(decoding: data, as: UTF8.self) }
+        }
+        return nil
     }
 
     public func logout() async {
-        guard let base, let token else { return }
+        guard let (base, token) = lock.withLock({ () -> (String, String)? in
+            defer { login = nil }
+            return login
+        }) else { return }
         _ = try? await send(base: base, cmd: "Logout", token: token, body: [["cmd": "Logout", "param": [:]]])
-        self.token = nil
     }
 
     private func send(base: String, cmd: String, token: String?, body: [[String: Any]]) async throws(Failure) -> [String: Any] {
@@ -99,6 +163,8 @@ public final class ReolinkAPI: @unchecked Sendable {
         let code = (first["error"] as? [String: Any])?["rspCode"] as? Int
         // -9 "not support", -4 "param error" (an unknown command, on some firmware).
         if code == -9 || code == -4 { throw .notSupported }
+        // -5 "max session": every login it allows is in use.
+        if code == -5 { throw .tooManyLogins }
         if cmd == "Login", code != nil { throw .loginRefused }
         // -6: the token ran out ("please login first").
         if code == -6 { throw .loggedOut }
@@ -153,7 +219,7 @@ public struct ReolinkProvider: CameraProvider {
     }
 
     public func events(host: String, username: String, password: String) -> CameraEvents? {
-        ReolinkEvents(api: ReolinkAPI(host: host, username: username, password: password))
+        ReolinkEvents(access: CameraAccess(host: host, username: username, password: password))
     }
 
     public func streams(host: String) -> (main: String, sub: String)? {
@@ -164,11 +230,12 @@ public struct ReolinkProvider: CameraProvider {
 /// Polls GetEvents once a second: motion while its motion alarm (or an AI detection: a person, vehicle or
 /// animal) is on; a visitor alarm going from off to on is a doorbell press.
 final class ReolinkEvents: CameraEvents, @unchecked Sendable {
-    let api: ReolinkAPI
+    /// The camera's login is the one its controls use too (CameraSessions): it allows only a few.
+    let access: CameraAccess
     private let lock = NSLock()
     private var task: Task<Void, Never>?
 
-    init(api: ReolinkAPI) { self.api = api }
+    init(access: CameraAccess) { self.access = access }
 
     /// Motion in a GetEvents answer: its motion alarm, or any AI detection on.
     static func motion(in value: [String: Any]) -> Bool {
@@ -179,8 +246,9 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
 
     func start(motion: @escaping @Sendable (Bool) -> Void, pressed: @escaping @Sendable () -> Void,
                state: @escaping @Sendable (DoorbellButtonState) -> Void) {
-        let api = self.api
+        let access = self.access
         let t = Task.detached {
+            let api = await CameraSessions.shared.reolink(access)
             var moving = false
             var ringing = false
             var reported: DoorbellButtonState?
@@ -221,6 +289,10 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
                 } catch .loginRefused {
                     report(.loginRefused)
                     try? await Task.sleep(for: .seconds(60))
+                } catch .tooManyLogins {
+                    // Its logins lapse after a while.
+                    report(.unreachable)
+                    try? await Task.sleep(for: .seconds(60))
                 } catch .loggedOut {
                     try? await api.login()
                 } catch {
@@ -233,7 +305,6 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
                     try? await Task.sleep(for: .seconds(10))
                 }
             }
-            await api.logout()
         }
         lock.withLock { task = t }
     }

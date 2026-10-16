@@ -33,7 +33,7 @@ targets += [
     .testTarget(name: "NVRMacTests", dependencies: ["NVRMac"]),
 ]
 // What cameras say they are and what they offer, brand by brand (Reolink, ONVIF).
-targets.append(.target(name: "Devices", dependencies: ["NVRCore"]))
+targets.append(.target(name: "Devices", dependencies: ["NVRCore", "Ingest"]))
 targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRCore"]))
 commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
