@@ -10,7 +10,9 @@ Pond records what a camera sends over RTSP, without re-encoding it, so a camera 
 | ONVIF cameras | asked of the camera | yes | ONVIF events | ONVIF events, if the doorbell sends one | [onvif.md](onvif.md) |
 | Other RTSP cameras | typed in | no | no | no | [onvif.md](onvif.md#cameras-without-onvif) |
 
-Without motion from the camera (no ONVIF events, or no ONVIF at all), a camera still records continuously, shows live and works in the Home app's live view; HomeKit Secure Video needs motion to start a recording, so it waits for Pond's own detection. Reports of other models are welcome.
+**Talks through.** Each camera's settings (Device) say how Pond talks to it, and switch it: its make's own way (Reolink), ONVIF, or **Video only**, where Pond logs in only for the video, never for details or events (for an account limited to video, a camera whose own motion detection is too noisy, or one whose events another system already watches). Video only pauses HomeKit Secure Video, keeping the setting for when you switch back.
+
+Without motion from the camera (no ONVIF events, video only, or no ONVIF at all), a camera still records continuously, shows live and works in the Home app's live view; HomeKit Secure Video needs motion to start a recording, so it waits for Pond's own detection. Reports of other models are welcome.
 
 ## What every camera needs
 

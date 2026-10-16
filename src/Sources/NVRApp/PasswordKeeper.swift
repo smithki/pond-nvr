@@ -18,7 +18,8 @@ protocol PasswordKeeper: Sendable {
     /// nil if pond couldn't be run.
     func check(_ camera: Config.Camera, seconds: Double) -> Result<ProbeReport, RTSPError>?
     /// Has pond ask a saved camera what it is, keeping the answer in the settings.
-    func identify(_ id: String)
+    /// Asks the camera what it is (and keeps it), through `provider` if given ("reolink", "onvif").
+    func identify(_ id: String, provider: String?)
 }
 
 struct KeeperError: Error, CustomStringConvertible {
@@ -53,8 +54,8 @@ struct HelperPasswordKeeper: PasswordKeeper {
         return outcome.result
     }
 
-    func identify(_ id: String) {
-        _ = try? run(["camera", "identify", id])
+    func identify(_ id: String, provider: String?) {
+        _ = try? run(["camera", "identify", id] + (provider.map { ["--provider", $0] } ?? []))
     }
 
     /// Runs pond with these arguments (and the settings file the app uses); its output, or its error in words.
@@ -92,5 +93,5 @@ struct StorePasswordKeeper: PasswordKeeper {
     func move(from id: String, to newID: String) throws { try store.movePassword(from: id, to: newID) }
     func has(_ id: String) -> Bool { ((try? store.password(for: id)) ?? nil) != nil }
     func check(_ camera: Config.Camera, seconds: Double) -> Result<ProbeReport, RTSPError>? { probe(camera) }
-    func identify(_ id: String) {}
+    func identify(_ id: String, provider: String?) {}
 }

@@ -135,6 +135,11 @@ struct StorageOutlook: Equatable, Sendable {
 }
 
 extension AppModel {
+    /// Measures the storage outlook again, and keeps it for the tabs that show it.
+    func refreshStorageOutlook() async {
+        lastStorageOutlook = await storageOutlook()
+    }
+
     /// The storage outlook for the settings as they are: measured off the main thread.
     func storageOutlook() async -> StorageOutlook? {
         guard let config else { return nil }

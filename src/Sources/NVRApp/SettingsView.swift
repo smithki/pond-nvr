@@ -26,9 +26,8 @@ struct SettingsView: View {
         // Tall enough that a camera's settings (a sheet as tall as this) fit unscrolled with their sections
         // closed.
         .frame(width: 640, height: 560)
-        .safeAreaInset(edge: .bottom) {
-            if model.needsRestart { RestartBar().padding(12) }
-        }
+        // Measured as Settings opens, so Storage and Retention have it before they are first shown.
+        .task { await model.refreshStorageOutlook() }
         .alert("Not saved", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK") { model.alert = nil }
         } message: {

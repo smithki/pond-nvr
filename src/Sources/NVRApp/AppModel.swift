@@ -28,6 +28,9 @@ final class AppModel {
     /// A camera being dragged to a new order, in the live view or in Settings: one for the app, so the live
     /// view moves its tiles as a reorder whichever window it is dragged in.
     let reorderDrag = ReorderDrag()
+    /// The storage outlook last measured (the drive, how long it lasts), kept so the Storage and Retention
+    /// tabs show it at once rather than filling in after they appear; measured again in the background.
+    var lastStorageOutlook: StorageOutlook?
     /// What the service's HomeKit is doing (nil when the service is not running). See HomeKitModel.
     var homeKitStatus: HomeKitStatus?
     /// The one camera heard in live view; the others are muted.
@@ -40,7 +43,25 @@ final class AppModel {
     private(set) var waitingForLocalNetwork = false
     private(set) var serviceState: ServiceControl.State = .notInstalled
     /// Settings were saved while the service ran with the old ones.
-    private(set) var needsRestart = false
+    /// The settings the running recorder started with, as far as the app knows (at launch: what was saved),
+    /// and whether a password changed since.
+    private var recorderSettings: RecorderSettings?
+    private var passwordChangedSinceStart = false
+    /// The start, restart or removal going on, if any.
+    private var serviceChange: Task<Void, Never>?
+
+    /// The recorder runs with settings other than the saved ones: changed since it started, and not changed
+    /// back.
+    var needsRestart: Bool {
+        guard case .running = serviceState, let recorderSettings, let config else { return false }
+        return passwordChangedSinceStart || RecorderSettings(config) != recorderSettings
+    }
+
+    /// The recorder (re)started now, with the saved settings.
+    func recorderStarted() {
+        recorderSettings = config.map(RecorderSettings.init)
+        passwordChangedSinceStart = false
+    }
     /// What the main window shows; `--mode live|timeline|events` on the command line picks the first one.
     var mode: Mode = launchArgument("--mode").flatMap(Mode.init(rawValue:)) ?? .live {
         didSet {
@@ -124,8 +145,8 @@ final class AppModel {
     }
 
     /// Changes and saves the settings. A change that leaves a problem is not saved; the alert says why.
-    /// `affectsRecorder: false` for changes the recorder doesn't use (such as the cameras' order), which
-    /// then don't ask for a restart.
+    /// Whether the recorder needs a restart for it is worked out from the settings it uses
+    /// (`RecorderSettings`); `affectsRecorder` says only what the caller expects.
     @discardableResult
     func update(affectsRecorder: Bool = true, _ change: (inout Config) -> Void) -> Bool {
         guard var next = config else { return false }
@@ -141,7 +162,6 @@ final class AppModel {
             return false
         }
         config = next
-        if affectsRecorder, case .running = serviceState { needsRestart = true }
         return true
     }
 
@@ -269,7 +289,7 @@ final class AppModel {
     func setPassword(_ password: String, for id: String) -> Bool {
         do {
             try passwords.save(password, for: id)
-            if case .running = serviceState { needsRestart = true }
+            if case .running = serviceState { passwordChangedSinceStart = true }
             return true
         } catch {
             alert = "\(error)"
@@ -359,44 +379,65 @@ final class AppModel {
 
     func refreshService() {
         serviceState = service.state
-        if case .running = serviceState {} else { needsRestart = false }
+        // Running, and not known since when: it started with what is saved now (the app's launch).
+        if case .running = serviceState {
+            if recorderSettings == nil { recorderStarted() }
+        } else {
+            recorderSettings = nil
+        }
     }
 
-    func installService() {
+    @discardableResult
+    func installService() -> Task<Void, Never>? {
         guard let helperPath else {
             alert = "The recorder can only be installed from Pond.app (make app builds it)."
-            return
+            return nil
         }
         guard let config, config.problems().isEmpty, !config.cameras.isEmpty else {
             alert = "Add a camera first: the recorder has nothing to record."
-            return
+            return nil
         }
-        do {
-            try service.install(program: helperPath, configPath: store.path == ConfigStore.defaultPath ? nil : store.path)
-            needsRestart = false
-        } catch {
-            alert = "\(error)"
-        }
-        refreshService()
+        let configPath = store.path == ConfigStore.defaultPath ? nil : store.path
+        return changeService(starts: true) { try $0.install(program: helperPath, configPath: configPath) }
     }
 
-    func restartService() {
-        do {
-            try service.restart()
-            needsRestart = false
-        } catch {
-            alert = "\(error)"
-        }
-        refreshService()
+    @discardableResult
+    func restartService() -> Task<Void, Never> {
+        changeService(starts: true) { try $0.restart() }
     }
 
-    func uninstallService() {
-        do {
-            try service.uninstall()
-        } catch {
-            alert = "\(error)"
+    @discardableResult
+    func uninstallService() -> Task<Void, Never> {
+        changeService(starts: false) { try $0.uninstall() }
+    }
+
+    /// Whether the recorder is being started, restarted or removed now.
+    var isChangingService: Bool { serviceChange != nil }
+
+    /// Starts, restarts or removes the recorder off the main thread: launchd waits for the recorder to stop
+    /// (it finishes its recordings and HomeKit first, seconds), which on the main thread froze the app. One
+    /// at a time; the settings it starts with are those saved when asked.
+    @discardableResult
+    private func changeService(starts: Bool, _ work: @escaping @Sendable (ServiceControl) throws -> Void) -> Task<Void, Never> {
+        if let serviceChange { return serviceChange }
+        let service = self.service
+        let settings = config.map(RecorderSettings.init)
+        let task = Task { [weak self] in
+            let failure = await Task.detached { () -> String? in
+                do { try work(service); return nil } catch { return "\(error)" }
+            }.value
+            guard let self else { return }
+            if let failure {
+                alert = failure
+            } else if starts {
+                recorderSettings = settings
+                passwordChangedSinceStart = false
+            }
+            serviceChange = nil
+            refreshService()
         }
-        refreshService()
+        serviceChange = task
+        return task
     }
 }
 
@@ -427,4 +468,19 @@ func slug(_ name: String) -> String {
     while out.hasSuffix("-") { out.removeLast() }
     if let first = out.first, !first.isLetter { out = "cam-" + out }
     return out
+}
+
+/// What of the settings the recorder works from: where it records, what it keeps, and each camera's streams
+/// and login. Changes to anything else (the cameras' order and names, HomeKit, which restarts by itself)
+/// don't need the recorder restarted.
+struct RecorderSettings: Equatable {
+    var storage: Config.Storage
+    var retention: Config.Retention
+    var cameras: [String]
+
+    init(_ config: Config) {
+        storage = config.storage
+        retention = config.retention
+        cameras = config.cameras.map { [$0.id, $0.main, $0.sub, $0.username].joined(separator: "\n") }.sorted()
+    }
 }

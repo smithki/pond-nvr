@@ -25,12 +25,13 @@ struct RecorderView: View {
                     Spacer()
                     switch model.serviceState {
                     case .notInstalled:
-                        Button("Start Recording") { model.installService() }
+                        Button(model.isChangingService ? "Starting\u{2026}" : "Start Recording") { model.installService() }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.helperPath == nil)
                     default:
                         Button("Stop and Remove…") { confirmUninstall = true }
-                        Button("Restart") { model.restartService() }
+                        Button(model.isChangingService ? "Restarting\u{2026}" : "Restart") { model.restartService() }
+                            .disabled(model.isChangingService)
                     }
                 }
             } header: {

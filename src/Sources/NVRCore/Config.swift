@@ -168,6 +168,9 @@ public struct Config: Codable, Equatable, Sendable {
         /// The host in the main stream's address.
         public var host: String { URLComponents(string: main)?.host ?? main }
 
+        /// Set to be talked to only for its video: its motion and button are not watched.
+        public var isVideoOnly: Bool { device?.isVideoOnly == true }
+
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
@@ -200,8 +203,13 @@ public struct Config: Codable, Equatable, Sendable {
         public var firmware: String?
         /// The camera says it is a doorbell.
         public var isDoorbell: Bool
-        /// Which provider recognised it ("reolink", "onvif"): the one asked for its other features.
+        /// Which provider recognised it ("reolink", "onvif"): the one asked for its other features. Or
+        /// `videoOnly`: chosen to be talked to only for its video (no logins for details or events).
         public var provider: String?
+
+        /// The provider set to mean: the camera's video only.
+        public static let videoOnly = "video"
+        public var isVideoOnly: Bool { provider == Self.videoOnly }
 
         public init(manufacturer: String, model: String, serial: String? = nil, firmware: String? = nil,
                     isDoorbell: Bool = false, provider: String? = nil) {

@@ -175,7 +175,30 @@ extension AppModel {
     /// the password), and writes the settings; they are read again after.
     func identify(_ id: String) async {
         let passwords = self.passwords
-        await Task.detached { passwords.identify(id) }.value
+        await Task.detached { passwords.identify(id, provider: nil) }.value
         reload()
+    }
+
+    /// Talks to the camera only for its video from now on: no logins for its details or events (those it
+    /// gave stay). Its recording in HomeKit pauses (the setting is kept) until another way is chosen.
+    func setVideoOnly(_ id: String) {
+        guard update(affectsRecorder: false, { config in
+            guard let i = config.cameras.firstIndex(where: { $0.id == id }), config.cameras[i].device != nil else { return }
+            config.cameras[i].device?.provider = Config.Device.videoOnly
+        }) else { return }
+        if config?.cameras.first(where: { $0.id == id })?.homekit == true { applyHomeKitChange() }
+    }
+
+    /// Talks to the camera through `provider` from now on: asks it that way first, and keeps the answer only
+    /// if it comes (else the camera stays as it was, and false). The service starts again to watch its
+    /// events the new way.
+    func setProvider(_ id: String, _ provider: String) async -> Bool {
+        let passwords = self.passwords
+        await Task.detached { passwords.identify(id, provider: provider) }.value
+        reload()
+        let camera = config?.cameras.first { $0.id == id }
+        guard camera?.device?.provider == provider else { return false }
+        if camera?.homekit == true { applyHomeKitChange() }
+        return true
     }
 }

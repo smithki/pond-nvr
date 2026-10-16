@@ -147,6 +147,8 @@ public struct HomeKitStatus: Codable, Equatable, Sendable {
         case loginRefused
         /// The camera never said what it is, so there is no way known to watch its button.
         case unknownModel
+        /// Set to video only: its button is not watched, by choice.
+        case videoOnly
     }
 
     /// Next to the settings file.

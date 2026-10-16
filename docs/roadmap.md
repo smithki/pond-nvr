@@ -56,7 +56,7 @@ Not every camera speaks ONVIF, and some do two-way audio only through their own 
 
 | Goal | Status | Notes |
 |---|---|---|
-| Detection | later | People, vehicles, animals and packages, in zones, on the Neural Engine (Core ML), from the sub-stream. It then drives the HomeKit motion sensor instead of the camera's own motion. |
+| Detection | later | People, vehicles, animals and packages, in zones, on the Neural Engine (Core ML), from the sub-stream. It then drives the HomeKit motion sensor instead of the camera's own motion. **Revisit Video only then:** today a video-only camera's HomeKit Secure Video is paused, because only the camera's own motion can start a recording; with Pond's own detection it could record again (`HomeKitHost`'s recording condition, and the paused toggle in camera settings). |
 | Event clips and the Events view | later | Clips kept longer than continuous recording; the app's Events view (`POND_MOCK_EVENTS=1` shows made-up events until then). |
 | Descriptions | later | A sentence per event, from Apple's on-device models. |
 | Search | later | Plain-language questions ("packages delivered this week") to filters and semantic ranking, results that open the clip. |

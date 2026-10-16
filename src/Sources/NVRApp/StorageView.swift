@@ -5,7 +5,6 @@ import SwiftUI
 struct StorageView: View {
     @Environment(AppModel.self) private var model
     @State private var choosing: Target?
-    @State private var outlook: StorageOutlook?
     @State private var turningOff = false
     @State private var spotlightProblem: String?
 
@@ -13,6 +12,9 @@ struct StorageView: View {
         case recordings, database
         var id: Self { self }
     }
+
+    /// The last measurement, so the tab is laid out at once when it appears; measured again as it does.
+    var outlook: StorageOutlook? { model.lastStorageOutlook }
 
     var body: some View {
         let storage = model.config?.storage
@@ -23,7 +25,7 @@ struct StorageView: View {
                             choose: { choosing = .recordings })
                 if let estimate = outlook?.estimate { lasting(estimate) }
             } header: {
-                Text("Recordings")
+                Text("Recordings").restartRecorderButton()
             } footer: {
                 Text("Continuous recording, and event clips and snapshots in a folder of their own beside it. Pond records only while this folder is there, so an unplugged drive never fills this Mac\u{2019}s disk.")
                     .foregroundStyle(.secondary)
@@ -63,7 +65,7 @@ struct StorageView: View {
     }
 
     func measure() async {
-        outlook = await model.storageOutlook()
+        await model.refreshStorageOutlook()
     }
 
     /// How long the folder lasts, and from what.

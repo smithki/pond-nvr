@@ -32,7 +32,16 @@ struct HomeKitText: Equatable {
         self.actions = actions
     }
 
-    init(_ state: HomeKitState, camera: Config.Camera) {
+    /// Where the words are read: a camera's settings say "below" for what is there, rather than sending you
+    /// to the settings you are in.
+    enum Place { case popover, settings }
+
+    /// Where in a camera's settings a part of them is, said from `place`.
+    static func settings(_ part: String, from place: Place) -> String {
+        place == .settings ? "under \(part), below" : "in its settings \u{203A} \(part)"
+    }
+
+    init(_ state: HomeKitState, camera: Config.Camera, in place: Place = .popover) {
         let name = camera.name
         switch state {
         case .serviceStopped:
@@ -50,7 +59,7 @@ struct HomeKitText: Equatable {
         case let .problem(problem):
             self = Self.problem(problem, camera: camera)
         case let .doorbellButton(state):
-            self = Self.doorbell(state, camera: camera)
+            self = Self.doorbell(state, camera: camera, in: place)
         case .live:
             self.init(title: "Live in the Home app", detail: "Someone is watching \(name) in the Home app.")
         case .ready:
@@ -97,7 +106,7 @@ struct HomeKitText: Equatable {
         }
     }
 
-    static func doorbell(_ state: HomeKitStatus.DoorbellState, camera: Config.Camera) -> HomeKitText {
+    static func doorbell(_ state: HomeKitStatus.DoorbellState, camera: Config.Camera, in place: Place = .popover) -> HomeKitText {
         let name = camera.name
         switch state {
         case .watching:
@@ -107,7 +116,7 @@ struct HomeKitText: Equatable {
                                detail: "\(name) doesn\u{2019}t report button presses in a way Pond can read, so the Home app shows its video but won\u{2019}t ring.")
         case .unknownModel:
             return HomeKitText(title: "The Home app won\u{2019}t ring",
-                               detail: "Pond doesn\u{2019}t know what model \(name) is, so it can\u{2019}t watch the button. Check the connection in its settings to let Pond ask the camera.",
+                               detail: "Pond doesn\u{2019}t know what model \(name) is, so it can\u{2019}t watch the button. \(place == .settings ? "Check Connection, above, lets Pond ask the camera." : "Check the connection in its settings to let Pond ask the camera.")",
                                actions: [.cameraSettings])
         case .cameraUnreachable:
             return HomeKitText(title: "The Home app won\u{2019}t ring",
@@ -116,6 +125,10 @@ struct HomeKitText: Equatable {
         case .loginRefused:
             return HomeKitText(title: "The Home app won\u{2019}t ring",
                                detail: "\(name) turned down the saved password when Pond asked about its button. Enter the password it uses now.",
+                               actions: [.cameraSettings])
+        case .videoOnly:
+            return HomeKitText(title: "The Home app won\u{2019}t ring",
+                               detail: "\(name) is set to video only, so Pond doesn\u{2019}t watch its button. Change it \(settings("Device", from: place)).",
                                actions: [.cameraSettings])
         }
     }
@@ -132,13 +145,16 @@ struct RecordingText: Equatable {
     /// Something to do or know about (shown in orange).
     var attention = false
 
-    init(_ r: HomeKitStatus.Recording, camera: Config.Camera, now: Date = Date()) {
+    init(_ r: HomeKitStatus.Recording, camera: Config.Camera, now: Date = Date(), in place: HomeKitText.Place = .popover) {
         let name = camera.name
         let last = r.lastClip.map { clip -> String in
             let size = ByteCountFormatter.string(fromByteCount: Int64(clip.bytes), countStyle: .file)
             return "Last recording \(Self.when(clip.at, now: now)), \(Int(clip.seconds.rounded())) s, \(size)."
         }
-        if !r.motion {
+        if !r.motion, camera.isVideoOnly {
+            self.init(title: "Won\u{2019}t record", attention: true,
+                      detail: "\(name) is set to video only, so Pond doesn\u{2019}t watch its motion, which is what starts a recording. Change it \(HomeKitText.settings("Device", from: place)).")
+        } else if !r.motion {
             self.init(title: "Won\u{2019}t record", attention: true,
                       detail: "Pond can\u{2019}t see motion from \(name), and motion is what starts a recording.")
         } else if !r.on {

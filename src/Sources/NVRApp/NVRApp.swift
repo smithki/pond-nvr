@@ -164,9 +164,6 @@ struct ContentView: View {
             }
         }
         .toolbar(removing: .title)
-        .safeAreaInset(edge: .bottom) {
-            if model.needsRestart { RestartBar().padding(12) }
-        }
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
         .task {
             if launchArgument("--settings") != nil { openSettings() }
@@ -196,15 +193,21 @@ struct ContentView: View {
     }
 }
 
-/// Whether the background recorder runs; opens its settings.
+/// Whether the background recorder runs; opens its settings. While it runs with settings other than the
+/// saved ones, it says so in orange (Restart Recorder), and opens a popover to restart it instead: in the
+/// toolbar, so nothing in the window moves.
 struct RecorderStatusButton: View {
     @Environment(AppModel.self) private var model
     let action: () -> Void
+    @State private var askingRestart = false
 
     var body: some View {
-        Button(action: action) {
+        Button { model.needsRestart ? askingRestart.toggle() : action() } label: {
             HStack(spacing: 6) {
                 switch model.serviceState {
+                case .running where model.needsRestart:
+                    Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.orange)
+                    Text("Restart Recorder")
                 case .running:
                     Image(systemName: "record.circle.fill").foregroundStyle(.red)
                         .symbolEffect(.pulse, options: .repeating)
@@ -219,7 +222,35 @@ struct RecorderStatusButton: View {
             }
             .padding(.horizontal, 4)
         }
-        .help("The background recorder. Click for its settings.")
+        .help(model.needsRestart ? "The recorder is still using its old settings. Click to restart it." : "The background recorder. Click for its settings.")
+        .popover(isPresented: $askingRestart, arrowEdge: .bottom) { restartPopover }
+        .animation(.snappy(duration: 0.25), value: model.needsRestart)
+    }
+
+    var restartPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("The recorder is still using its old settings").font(.headline)
+            Text("Settings it works from changed since it started. Restarting it uses them, and pauses recording for a few seconds.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Settings\u{2026}") {
+                    askingRestart = false
+                    action()
+                }
+                Spacer()
+                Button(model.isChangingService ? "Restarting\u{2026}" : "Restart Recorder") {
+                    askingRestart = false
+                    model.restartService()
+                }
+                .disabled(model.isChangingService)
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
     }
 }
 
@@ -246,21 +277,39 @@ struct SetupView: View {
     }
 }
 
-struct RestartBar: View {
+/// Restart Recorder, while the recorder runs with settings other than the saved ones; gone when they match
+/// again. Where the change is made (a section's header, the cameras' bar), so Settings doesn't grow a bar.
+struct RestartRecorderButton: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack {
-            Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.orange)
-            Text("The recorder is still using the old settings.")
-            Spacer()
-            Button("Restart Recorder") { model.restartService() }
+        Group {
+            if model.needsRestart {
+                // Filled orange, as what wants doing is elsewhere in the app: easy to see beside a header.
+                Button { model.restartService() } label: {
+                    Label(model.isChangingService ? "Restarting\u{2026}" : "Restart Recorder", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.isChangingService)
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+                .help("The recorder is still using the settings it started with. Restarting it pauses recording for a few seconds.")
+                .transition(.scale(scale: 0.85, anchor: .trailing).combined(with: .opacity))
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .glassEffect(.regular, in: .capsule)
+        .animation(.snappy(duration: 0.25), value: model.needsRestart)
     }
 }
+
+extension View {
+    /// The Restart Recorder button at the trailing end of a section header, laid over it so the header keeps
+    /// its height whether the button is there or not.
+    func restartRecorderButton() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .trailing) { RestartRecorderButton() }
+    }
+}
+
 
 /// Lines from a camera check, with icons.
 struct CheckLinesView: View {

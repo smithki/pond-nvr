@@ -172,7 +172,7 @@ struct HomeKitPairing: View {
                             .foregroundStyle(.secondary)
                     }
                 default:
-                    let text = HomeKitText(state, camera: camera)
+                    let text = HomeKitText(state, camera: camera, in: .settings)
                     Label(text.title, systemImage: "exclamationmark.circle.fill")
                         .foregroundStyle(.orange)
                         .font(.headline)

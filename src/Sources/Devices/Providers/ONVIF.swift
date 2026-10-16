@@ -7,6 +7,7 @@ import NVRCore
 /// Any ONVIF camera: what it is, and its stream addresses; no doorbell button yet (ONVIF events would bring it).
 public struct ONVIFProvider: CameraProvider {
     public let id = "onvif"
+    public let name = "ONVIF"
     public init() {}
 
     public func identify(host: String, username: String, password: String) async -> Config.Device? {

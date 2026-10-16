@@ -67,6 +67,7 @@ import Testing
 
 struct FakeProvider: CameraProvider {
     let id: String
+    var name: String { id }
     let answer: Config.Device?
     func identify(host: String, username: String, password: String) async -> Config.Device? { answer }
 }
@@ -110,5 +111,22 @@ struct FakeProvider: CameraProvider {
         #expect(!ReolinkEvents.motion(in: ["md": ["alarm_state": 0], "ai": ["people": ["alarm_state": 0]],
                                            "visitor": ["alarm_state": 1]]))
         #expect(!ReolinkEvents.motion(in: [:]))
+    }
+}
+
+@Suite struct ProviderChoiceTests {
+    static func device(_ maker: String, _ provider: String) -> Config.Device {
+        Config.Device(manufacturer: maker, model: "M", serial: nil, firmware: nil, isDoorbell: false, provider: provider)
+    }
+
+    @Test func aReolinkCanUseItsOwnAPIOrONVIF() {
+        #expect(CameraProviders.choices(for: Self.device("Reolink", "reolink")).map(\.id) == ["reolink", "onvif"])
+        // Recognised over ONVIF (which spells the make its own way): its own API is still offered.
+        #expect(CameraProviders.choices(for: Self.device("REOLINK", "onvif")).map(\.id) == ["reolink", "onvif"])
+    }
+
+    @Test func otherMakesHaveONVIFAndUnknownCamerasNothing() {
+        #expect(CameraProviders.choices(for: Self.device("Hikvision", "onvif")).map(\.id) == ["onvif"])
+        #expect(CameraProviders.choices(for: nil).isEmpty)
     }
 }

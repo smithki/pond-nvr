@@ -7,7 +7,8 @@ import SwiftUI
 
 struct RetentionView: View {
     @Environment(AppModel.self) private var model
-    @State private var outlook: StorageOutlook?
+    /// The last measurement, shown at once (see AppModel.lastStorageOutlook).
+    var outlook: StorageOutlook? { model.lastStorageOutlook }
     /// While a slider is dragged: its value, shown live and saved when it is let go.
     @State private var draftLimit: Double?
     @State private var draftReserve: Double?
@@ -36,7 +37,7 @@ struct RetentionView: View {
                     model.update { $0.retention.events.days = days }
                 }
             } header: {
-                Text("How long")
+                Text("How long").restartRecorderButton()
             } footer: {
                 Text("Older recording is deleted. Event clips are never deleted to make space: they stay for their days, whatever happens to continuous recording.")
                     .foregroundStyle(.secondary)
@@ -63,7 +64,7 @@ struct RetentionView: View {
             }
         }
         .formStyle(.grouped)
-        .task(id: model.config) { outlook = await model.storageOutlook() }
+        .task(id: model.config) { await model.refreshStorageOutlook() }
     }
 
     // MARK: - Days

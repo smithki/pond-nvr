@@ -64,6 +64,7 @@ struct CamerasView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         Spacer()
+                        RestartRecorderButton()
                         Button { adding = true } label: { Label("Add Camera…", systemImage: "plus") }
                     }
                     .padding(.horizontal, 20)
@@ -507,6 +508,8 @@ struct EditCameraSheet: View {
     enum Field { case password, address }
     @State private var name = ""
     @State private var host = ""
+    /// How Pond talks to the camera ("reolink", "onvif"), as it would be saved.
+    @State private var provider = ""
     /// The stream addresses, as they would be saved.
     @State private var mainURL = ""
     @State private var subURL = ""
@@ -588,6 +591,7 @@ struct EditCameraSheet: View {
             host = camera.host
             mainURL = camera.main
             subURL = camera.sub
+            provider = camera.device?.provider ?? ""
             username = camera.username
             newID = camera.id
             kind = camera.kind
@@ -675,12 +679,21 @@ struct EditCameraSheet: View {
             }
             if saved.homekit {
                 homeKitPicture
+                // Video only: nothing would start a recording. The choice is kept, shown, and comes back.
+                // Revisit with Pond's own detection (see the roadmap's Detection item).
+                let paused = provider == Config.Device.videoOnly
                 Toggle(isOn: $homeKitRecording) {
                     Text("Allow recording in the Home app")
-                    Text("HomeKit Secure Video: your home hub records \(saved.name)\u{2019}s motion to iCloud, where the Home app keeps it. Needs a home hub and iCloud+. Then turn recording on in the Home app, in \(saved.name)\u{2019}s Recording Options.")
+                    if paused {
+                        let others = CameraProviders.choices(for: saved.device).map(\.name).joined(separator: " or ")
+                        Text("Paused while \(saved.name) is video only: recording needs its motion. It comes back when you choose \(others.isEmpty ? "another way" : others) again.")
+                    } else {
+                        Text("HomeKit Secure Video: your home hub records \(saved.name)\u{2019}s motion to iCloud, where the Home app keeps it. Needs a home hub and iCloud+. Then turn recording on in the Home app, in \(saved.name)\u{2019}s Recording Options.")
+                    }
                 }
-                if homeKitRecording, saved.homekitRecording == true, let status = model.homeKitRecording(for: saved) {
-                    RecordingSummary(text: RecordingText(status, camera: saved))
+                .disabled(paused)
+                if !paused, homeKitRecording, saved.homekitRecording == true, let status = model.homeKitRecording(for: saved) {
+                    RecordingSummary(text: RecordingText(status, camera: saved, in: .settings))
                 }
             }
         } header: {
@@ -723,7 +736,67 @@ struct EditCameraSheet: View {
     /// What the camera is, in one line for the collapsed header: "Reolink E1 Pro · Doorbell".
     var deviceSummary: String {
         let device = saved.device.map { [$0.manufacturer, $0.model].filter { !$0.isEmpty }.joined(separator: " ") }
-        return [device, kind == .doorbell ? "Doorbell" : "Camera"].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        let via = CameraProviders.provider(saved.device?.provider).map { "via \($0.name)" }
+        return [device, kind == .doorbell ? "Doorbell" : "Camera", via].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    /// How Pond talks to the camera, said plainly, as a switch: its make's own way (when Pond has one), ONVIF,
+    /// or its video only (no logins for its details or events).
+    @ViewBuilder
+    func providerRow(_ device: Config.Device) -> some View {
+        let choices = CameraProviders.choices(for: device)
+        let changed = provider != (device.provider ?? "")
+        // Laid out by hand: the name and the switch on one line, the note under both, the row's whole width
+        // (LabeledContent would put a switch this wide under its note, or squeeze the note beside it).
+        // Room between the switch and the note under it, which would otherwise touch.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Talks through")
+                Spacer(minLength: 0)
+                Picker("Talks through", selection: $provider) {
+                    ForEach(choices, id: \.id) { Text($0.name).tag($0.id) }
+                    Text("Video only").tag(Config.Device.videoOnly)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            providerNote(changed: changed)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    func providerNote(changed: Bool) -> some View {
+        Group {
+            if changed, provider == Config.Device.videoOnly {
+                Text("Saving stops Pond reading its motion\(kind == .doorbell ? " and button" : "").")
+            } else if changed, let name = CameraProviders.provider(provider)?.name {
+                Text("Saving asks the camera through \(name) first\(saved.homekit ? ", then restarts Pond\u{2019}s background service" : "").")
+            } else if provider == Config.Device.videoOnly {
+                Text("Pond logs in only for its video; its motion\(kind == .doorbell ? " and button" : "") aren\u{2019}t watched.")
+            } else {
+                Text("For its details, motion\(kind == .doorbell ? " and doorbell button" : "").")
+            }
+        }
+    }
+
+    /// Why a video-only camera can't be asked again: asking is logging in, through one of the other ways.
+    var askNeedsLogin: String {
+        let ways = CameraProviders.choices(for: saved.device).map(\.name).joined(separator: " or ")
+        return "Asking again needs \(ways.isEmpty ? "another way than video only" : ways) above."
+    }
+
+    /// A camera that never said what it is: its video is all Pond has.
+    var videoOnlyRow: some View {
+        LabeledContent {
+            Text("Video only")
+        } label: {
+            Text("Talks through")
+            Text("Pond records and shows it, but can\u{2019}t read its details or motion. Turning on ONVIF in the camera\u{2019}s own app may change that; then Ask Again.")
+        }
     }
 
     /// The rarely changed, as rows of one card that open in place (like System Settings' "Advanced…"): the
@@ -765,9 +838,11 @@ struct EditCameraSheet: View {
                             Text(device.serial ?? "Not given").textSelection(.enabled)
                         }
                         LabeledContent("Firmware", value: device.firmware ?? "Not given")
+                        providerRow(device)
+                    } else if identifying {
+                        Text("Asking the camera\u{2026}").foregroundStyle(.secondary)
                     } else {
-                        Text(identifying ? "Asking the camera\u{2026}" : "The camera hasn\u{2019}t said what it is yet.")
-                            .foregroundStyle(.secondary)
+                        videoOnlyRow
                     }
                     LabeledContent {
                         Button(identifying ? "Asking\u{2026}" : "Ask Again") {
@@ -778,9 +853,13 @@ struct EditCameraSheet: View {
                                 if saved.device?.isDoorbell == true { kind = .doorbell }
                             }
                         }
-                        .disabled(identifying)
+                        // Asking means logging in, which video only doesn't: it says so beside the button and on it.
+                        .disabled(identifying || provider == Config.Device.videoOnly)
+                        .help(provider == Config.Device.videoOnly ? askNeedsLogin : "")
                     } label: {
-                        Text("As the camera reports it; HomeKit shows the same.").foregroundStyle(.secondary)
+                        Text(provider == Config.Device.videoOnly ? "As the camera last reported it. \(askNeedsLogin)"
+                             : "As the camera reports it; HomeKit shows the same.")
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.leading, FoldRow.indent)
@@ -902,6 +981,17 @@ struct EditCameraSheet: View {
         if instantLive != saved.keepsLiveReady { model.setInstantLive(camera.id, instantLive) }
         if homeKitVideo != (saved.homekitVideo ?? .camera) { model.setHomeKitVideo(camera.id, homeKitVideo) }
         if homeKitRecording != (saved.homekitRecording == true) { model.setHomeKitRecording(camera.id, homeKitRecording) }
+        // The new way of talking to it, if it answers that way; else it stays as it was, and says so.
+        if provider == Config.Device.videoOnly, !saved.isVideoOnly {
+            model.setVideoOnly(camera.id)
+        } else if !provider.isEmpty, provider != (saved.device?.provider ?? ""), let chosen = CameraProviders.provider(provider) {
+            if await !model.setProvider(camera.id, provider) {
+                let current = CameraProviders.provider(saved.device?.provider)?.name ?? "its current way"
+                model.alert = "\(camera.name) didn\u{2019}t answer through \(chosen.name), so Pond still talks to it through \(current)."
+                provider = saved.device?.provider ?? ""
+                return
+            }
+        }
         if newID != camera.id, !model.rename(camera.id, to: newID) { return }
         dismiss()
     }

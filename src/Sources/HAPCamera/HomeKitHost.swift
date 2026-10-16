@@ -186,7 +186,9 @@ public final class HomeKitHost: @unchecked Sendable {
         }
         let doorbell = camera.kind == .doorbell
         // HomeKit Secure Video, for a camera set to record in HomeKit: its state kept with the record.
-        let recording = camera.homekitRecording == true
+        // Not while it is video only: nothing would start a recording (its choice stays, and comes back).
+        // Revisit with Pond's own detection, which could start recordings for a video-only camera too.
+        let recording = camera.homekitRecording == true && !camera.isVideoOnly
             ? RecordingController(options: RecordingOptions(doorbell: doorbell), state: record.recording,
                                   source: (camera.main, camera.username, password),
                                   log: Self.labelled(camera.name, log)) : nil
@@ -290,6 +292,11 @@ public final class HomeKitHost: @unchecked Sendable {
     @discardableResult
     private func watchEvents(_ camera: Config.Camera, password: String, accessory: CameraAccessory) -> Bool {
         let id = camera.id, name = camera.name, log = self.log, doorbell = camera.kind == .doorbell
+        if camera.isVideoOnly {
+            log("HomeKit: \(name) is set to video only: its motion\(doorbell ? " and button" : "") aren't watched")
+            if doorbell { update(id) { $0.doorbell = .videoOnly } }
+            return false
+        }
         guard let events = CameraProviders.provider(camera.device?.provider)?
             .events(host: camera.host, username: camera.username, password: password) else {
             if doorbell {

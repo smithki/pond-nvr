@@ -238,9 +238,29 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// that one.
 if args.count >= 3, args[0] == "camera", args[1] == "identify" {
     var providers = CameraProviders.all
+    // --provider video: talk to the camera only for its video from now on (no logins for its details or
+    // events); its last-known details stay.
+    if let i = args.firstIndex(of: "--provider"), i + 1 < args.count, args[i + 1] == Config.Device.videoOnly {
+        let store = ConfigStore(path: configPath)
+        guard var config = try? store.load(), let index = config.cameras.firstIndex(where: { $0.id == args[2] }) else {
+            FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
+            exit(1)
+        }
+        guard config.cameras[index].device != nil else {
+            print("\(config.cameras[index].name) is video only already: it hasn't said what it is.")
+            exit(0)
+        }
+        config.cameras[index].device?.provider = Config.Device.videoOnly
+        do { try store.save(config) } catch {
+            FileHandle.standardError.write(Data("✗ \(error)\n".utf8))
+            exit(1)
+        }
+        print("✓ \(config.cameras[index].name): video only; its motion and button aren't watched. The service picks this up when it restarts: pond service restart")
+        exit(0)
+    }
     if let i = args.firstIndex(of: "--provider") {
         guard i + 1 < args.count, let p = CameraProviders.provider(args[i + 1]) else {
-            FileHandle.standardError.write(Data("✗ --provider takes one of: \(CameraProviders.all.map(\.id).joined(separator: ", "))\n".utf8))
+            FileHandle.standardError.write(Data("✗ --provider takes one of: \((CameraProviders.all.map(\.id) + [Config.Device.videoOnly]).joined(separator: ", "))\n".utf8))
             exit(2)
         }
         providers = [p]

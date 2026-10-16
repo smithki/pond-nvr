@@ -23,6 +23,16 @@ import Testing
         #expect(blind.title == "Won\u{2019}t record" && blind.attention)
     }
 
+    @Test func videoOnlySaysWhyItWontRecord() {
+        var videoOnly = camera
+        videoOnly.device = Config.Device(manufacturer: "Reolink", model: "E1", provider: Config.Device.videoOnly)
+        #expect(videoOnly.isVideoOnly)
+        let text = RecordingText(status { $0.on = true; $0.motion = false }, camera: videoOnly, now: now)
+        #expect(text.title == "Won\u{2019}t record" && text.detail.contains("set to video only"))
+        // The make's own app is still named, though Pond doesn't talk to it that way.
+        #expect(videoOnly.device?.appName == "the Reolink app")
+    }
+
     @Test func theLastClipAndProblemsAreSaid() {
         let clip = HomeKitStatus.Recording.Clip(at: now.addingTimeInterval(-60), seconds: 16, bytes: 5_300_000)
         let done = RecordingText(status { $0.on = true; $0.chosen = true; $0.lastClip = clip }, camera: camera, now: now)

@@ -125,6 +125,8 @@ final class CameraCertificate: NSObject, URLSessionDelegate {
 /// GetEvents.
 public struct ReolinkProvider: CameraProvider {
     public let id = "reolink"
+    public let name = "Reolink"
+    public let maker: String? = "Reolink"
     public let appName: String? = "the Reolink app"
     /// The Reolink app's name for the sub-stream ("Clear" is the main stream's).
     public let subStreamName: String? = "Fluent"

@@ -9,6 +9,10 @@ import NVRCore
 public protocol CameraProvider: Sendable {
     /// Stored in `Config.Device.provider`: "reolink", "onvif".
     var id: String { get }
+    /// As people read it: "Reolink", "ONVIF".
+    var name: String { get }
+    /// The make whose cameras it is for ("Reolink"); nil for ONVIF, which is for any.
+    var maker: String? { get }
     /// What the camera says it is; nil if it does not answer this provider.
     func identify(host: String, username: String, password: String) async -> Config.Device?
     /// What the camera notices (motion, a doorbell's button), if this provider can see it for this camera.
@@ -34,11 +38,15 @@ extension CameraProvider {
     }
     public var appName: String? { nil }
     public var subStreamName: String? { nil }
+    public var maker: String? { nil }
 }
 
 extension Config.Device {
     /// Where to change the camera's own settings, in words: its brand's app if its provider names one.
-    public var appName: String { CameraProviders.provider(provider)?.appName ?? "the camera\u{2019}s own app" }
+    public var appName: String {
+        CameraProviders.provider(provider)?.appName ?? CameraProviders.choices(for: self).compactMap(\.appName).first
+            ?? "the camera\u{2019}s own app"
+    }
 }
 
 /// What a camera notices, as it happens, until stopped: one watcher per camera, so it is asked once.
@@ -65,6 +73,17 @@ public enum CameraProviders {
     public static let all: [CameraProvider] = [ReolinkProvider(), ONVIFProvider()]
 
     public static func provider(_ id: String?) -> CameraProvider? { all.first { $0.id == id } }
+
+    /// The ways Pond can talk to this camera: its make's own provider (when Pond has one for it), then ONVIF.
+    /// One way only (ONVIF) when Pond knows nothing of the make; none before the camera has said what it is.
+    public static func choices(for device: Config.Device?) -> [CameraProvider] {
+        guard let device else { return [] }
+        let own = all.filter { provider in
+            provider.id == device.provider && provider.maker != nil
+                || provider.maker.map { device.manufacturer.localizedCaseInsensitiveContains($0) } == true
+        }
+        return own + all.filter { $0.maker == nil }
+    }
 
     /// A camera's stream addresses, from the first provider that can say: its brand's known addresses, else
     /// what it describes over ONVIF. Nil if none can (the addresses are then typed in).
