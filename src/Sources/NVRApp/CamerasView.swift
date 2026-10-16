@@ -286,6 +286,8 @@ struct AddCameraSheet: View {
     @State private var checking = false
     @State private var result: (lines: [CheckLine], passed: Bool)?
     @State private var added = false
+    /// Add Camera lists the ignored cameras on the network too, when asked.
+    @State private var showingIgnored = false
     @State private var kind = Config.Camera.Kind.camera
     /// What the camera said it is, during the check.
     @State private var device: Config.Device?
@@ -327,6 +329,7 @@ struct AddCameraSheet: View {
             Text("Add Camera").font(.title2.bold()).padding([.top, .horizontal], 20)
             ScrollViewReader { proxy in
             Form {
+                foundSection
                 Section {
                     TextField("Name", text: $name, prompt: Text("Front porch"))
                         .onChange(of: name) { if !idEdited { id = slug(name) } }
@@ -421,6 +424,70 @@ struct AddCameraSheet: View {
         }
         .frame(width: 520)
         .frame(maxHeight: height)
+        .onAppear {
+            if let from = model.addingFrom {
+                use(from)
+                model.addingFrom = nil
+            }
+        }
+        .task { await model.findCameras() }
+    }
+
+    /// Cameras on the network that aren't set up: picking one fills in its address and a name. Looked for
+    /// again as the sheet opens (shown by the header, so the form keeps its height). Ignored ones only when
+    /// asked for.
+    @ViewBuilder
+    var foundSection: some View {
+        let ignored = model.ignoredFound
+        let found = showingIgnored ? model.camerasNotSetUp : model.newCameras
+        if !added, !found.isEmpty || !ignored.isEmpty {
+            Section {
+                ForEach(found) { camera in
+                    Button { use(camera) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: host == camera.host ? "checkmark.circle.fill" : "video")
+                                .foregroundStyle(host == camera.host ? Color.accentColor : .secondary)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(camera.suggestedName.isEmpty ? camera.host : camera.suggestedName)
+                                Text(camera.detail)
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if model.isIgnored(camera) { Text("Ignored").foregroundStyle(.secondary) }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !ignored.isEmpty {
+                    Button(showingIgnored ? "Hide Ignored" : ignored.count == 1 ? "Show 1 Ignored" : "Show \(ignored.count) Ignored") {
+                        withAnimation(.snappy(duration: 0.25)) { showingIgnored.toggle() }
+                    }
+                    // Quiet: secondary, and not where the keyboard starts.
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .focusable(false)
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Text("On your network")
+                    if model.findingCameras {
+                        ProgressView().controlSize(.mini)
+                            .help("Looking on your network\u{2026}")
+                    }
+                }
+            } footer: {
+                // A little room before the camera's own fields (their section has no header to set it apart).
+                Color.clear.frame(height: 0)
+            }
+            .disabled(checking)
+        }
+    }
+
+    func use(_ camera: FoundCamera) {
+        host = camera.host
+        if name.isEmpty || !idEdited { name = camera.suggestedName }
     }
 
     var streamSummary: String {

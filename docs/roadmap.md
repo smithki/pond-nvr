@@ -43,7 +43,7 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Goal | Status | Notes |
 |---|---|---|
 | Device information | done | `GetDeviceInformation` for any camera Reolink's API doesn't answer. |
-| Discovery | next | WS-Discovery (multicast UDP 3702) finds cameras for Add Camera, instead of typing an address. |
+| Discovery | done | ONVIF discovery, Reolink's own discovery (Reolinks don't answer ONVIF's), and a look at the local network's addresses for RTSP (554) or ONVIF (8000), all at once; on opening, daily, and in Add Camera. Add Camera lists what it finds; the toolbar offers new cameras until added or ignored. `pond camera discover`. |
 | Stream addresses | done | Media `GetProfiles`, then `GetStreamUri` (Media2's when there is one); asked when a camera is added, editable in its settings. `pond camera onvif ID` shows what a camera says. |
 | Camera events | done | Motion, person, vehicle and animal detection, and doorbell presses (see HomeKit above). |
 | PTZ | later | Continuous move, zoom and presets; in the app a pad on the tile, presets in a menu. HomeKit has no PTZ, so presets could appear as switches. |

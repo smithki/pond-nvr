@@ -100,6 +100,32 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Find Cameras' card, over the top right of whatever view is showing: part of the window (no popover
+        // window to resize), so it grows and shrinks with its content like any view. A click anywhere else
+        // closes it, as a popover's would.
+        .overlay {
+            if model.showingFoundCameras {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false } }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if model.showingFoundCameras {
+                // Its arrow under the button's middle.
+                let width: CGFloat = 400, margin: CGFloat = 12
+                let arrowX = width - (model.findCamerasButtonFromTrailing - margin)
+                FoundCamerasPanel(model: model) {
+                    withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false }
+                }
+                .padding(.top, 10)
+                .frame(width: width)
+                .glassEffect(.regular, in: Callout(arrowX: arrowX))
+                .padding([.top, .trailing], margin)
+                .animation(.snappy(duration: 0.3), value: arrowX)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / width, y: 0)).combined(with: .opacity))
+            }
+        }
         // Switching views animates the toolbar (its glass morphs as items come and go) but not the views:
         // the one leaving would play its tiles' exit animations over the one arriving.
         .transaction(value: model.mode) { $0.animation = nil }
@@ -152,6 +178,9 @@ struct ContentView: View {
                 .fixedSize()
                 .disabled(model.config == nil)
             }
+            // Find Cameras, just before Add Camera and in its glass: always there (an item that came and went
+            // would rebuild Add Camera's glass each time), showing the cameras found when there are some.
+            ToolbarItem(placement: .primaryAction) { FindCamerasButton() }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.settingsTab = .cameras
@@ -165,6 +194,15 @@ struct ContentView: View {
         }
         .toolbar(removing: .title)
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
+        // Cameras on the network: looked for as the app opens, then again once a day while it stays open
+        // (checked each hour).
+        .task {
+            if model.config != nil { await model.findCameras() }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+                if model.config != nil { await model.findCamerasIfDue() }
+            }
+        }
         .task {
             if launchArgument("--settings") != nil { openSettings() }
             // --camera ID: that camera's settings, open (for trying them out, and pictures of them).
@@ -173,6 +211,8 @@ struct ContentView: View {
                 model.cameraToEdit = id
                 openSettings()
             }
+            // --add-camera: Add Camera, open (likewise).
+            if CommandLine.arguments.contains("--add-camera") { model.addingCamera = true }
             if let dir = ProcessInfo.processInfo.environment["POND_SNAPSHOTS"] { await Snapshots.take(into: dir, model: model) }
         }
         .task {
@@ -373,5 +413,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             while let sheet = window.attachedSheet { window.endSheet(sheet) }
         }
         NSApp.terminate(nil)
+    }
+}
+
+/// Find Cameras in the toolbar: a look at the network for cameras that aren't set up, on a click (it also
+/// looks on its own: as the app opens, and daily), its icon pulsing while it looks. When it has found some,
+/// "Cameras Found" with a green viewfinder and count instead (something to do), each to add or ignore.
+struct FindCamerasButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let cameras = model.newCameras
+        let found = !cameras.isEmpty
+        let looking = model.findingCameras && !found
+        Button {
+            if !found, !model.findingCameras { Task { await model.findCameras() } }
+            withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras.toggle() }
+        } label: {
+            // Not animated when cameras turn up: the toolbar's glass takes the new width at once (it doesn't
+            // animate items), so the words simply appear.
+            if found {
+                HStack(spacing: 6) {
+                    Image(systemName: "camera.viewfinder").foregroundStyle(.green)
+                    Text(cameras.count == 1 ? "Camera Found" : "Cameras Found")
+                    Text("\(cameras.count)")
+                        .monospacedDigit()
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.green.opacity(0.18), in: Capsule())
+                }
+                .padding(.horizontal, 4)
+            } else {
+                Label("Find Cameras", systemImage: "camera.viewfinder")
+                    .symbolEffect(.pulse, isActive: looking)
+            }
+        }
+        .transaction(value: found) { $0.animation = nil }
+        .reportingMiddleFromTrailing { if model.findCamerasButtonFromTrailing != $0 { model.findCamerasButtonFromTrailing = $0 } }
+        .help(cameras.isEmpty ? "Look for cameras on your network that aren\u{2019}t set up in Pond"
+                              : "Cameras on your network that aren\u{2019}t set up in Pond: add them, or ignore them")
+        .disabled(model.config == nil)
+    }
+}
+
+/// Find Cameras' card: the cameras found, each to add or ignore, and the ignored ones folded away, each to
+/// show again.
+struct FoundCamerasPanel: View {
+    var model: AppModel
+    var close: () -> Void
+    @State private var showingIgnored = false
+
+    var body: some View {
+        let cameras = model.newCameras
+        VStack(alignment: .leading, spacing: 12) {
+            if cameras.isEmpty {
+                if model.findingCameras {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text("Looking for cameras on your network\u{2026}")
+                    }
+                } else {
+                    Text("No new cameras on your network").font(.headline)
+                }
+            } else {
+                Text(cameras.count == 1 ? "A camera on your network" : "Cameras on your network").font(.headline)
+            }
+            ForEach(cameras) { camera in
+                FoundCameraRow(camera: camera) {
+                    Button("Ignore") { model.ignore(camera) }
+                    Button("Add\u{2026}") {
+                        close()
+                        model.add(camera)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            Text(cameras.isEmpty
+                 ? "Pond also looks as it opens, and once a day. Cameras already set up aren\u{2019}t listed."
+                 : "Found on your network and not set up in Pond. Ignored ones aren\u{2019}t mentioned again.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            let ignored = model.ignoredFound
+            if !ignored.isEmpty {
+                Divider()
+                // A plain fold (a disclosure group takes the keyboard's focus as the card opens).
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { showingIgnored.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .rotationEffect(.degrees(showingIgnored ? 90 : 0))
+                        Text("Ignored (\(ignored.count))").font(.headline)
+                        Spacer(minLength: 0)
+                    }
+                    // The whole row, and a little above and below, takes the click.
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                if showingIgnored {
+                    ForEach(ignored) { camera in
+                        FoundCameraRow(camera: camera, dimmed: true) {
+                            Button("Show Again") { model.showAgain(camera) }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        // Esc closes it.
+        .background {
+            Button("Close", action: close).keyboardShortcut(.cancelAction).hidden()
+        }
     }
 }

@@ -6,6 +6,9 @@ Tried: **E1 Pro** and **Video Doorbell WiFi**. Other models with RTSP and the HT
 
 ## Adding one
 
+Pond finds Reolink cameras on your network by Reolink's own discovery (a broadcast they answer with the name they were given), since they don't answer ONVIF discovery; Add Camera lists them.
+
+
 ```sh
 pond camera add porch --host 192.168.1.20 --name "Front porch"
 ```

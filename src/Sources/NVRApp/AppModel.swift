@@ -103,6 +103,16 @@ final class AppModel {
     /// A moment to show on the timeline (set from the live view), taken by the timeline when it appears.
     var timelineJump: TimelineJump?
     var addingCamera = false
+    /// Find Cameras' card, open over the top right of the main window, and how far the button it points at
+    /// is (its middle) from the window's trailing edge.
+    var showingFoundCameras = false
+    var findCamerasButtonFromTrailing: CGFloat = 64
+    /// Cameras on the network (found at launch, at most daily, and when Add Camera opens), whether a look is
+    /// under way, the ones not to mention again, and the one Add Camera starts from. See DiscoveryModel.
+    var foundCameras: [FoundCamera] = AppModel.keptFoundCameras()
+    var findingCameras = false
+    var ignoredCameras: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AppModel.ignoredCamerasKey) ?? [])
+    var addingFrom: FoundCamera?
 
     init(store: ConfigStore = ConfigStore(path: ProcessInfo.processInfo.environment[Brand.configVariable] ?? ConfigStore.defaultPath),
          passwords: PasswordKeeper? = nil,

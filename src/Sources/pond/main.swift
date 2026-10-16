@@ -141,6 +141,45 @@ if args == ["migrate"] {
 /// login service runs, which serves them itself); `pond homekit code` prints the setup codes for the service's
 /// accessories; `pond homekit reset ID` forgets a camera's HomeKit identity and pairings, so it can be added
 /// again.
+/// `pond camera discover [--seconds N]`: the ONVIF cameras on the local network (WS-Discovery), each with
+/// whether it is set up already. Needs no login.
+if args.count >= 2, args[0] == "camera", args[1] == "discover" {
+    let seconds = args.firstIndex(of: "--seconds").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 3
+    let cameras = (try? ConfigStore(path: configPath).load())?.cameras ?? []
+    // --trace (or --any, every device): ONVIF discovery's answers, each as it comes, first.
+    if args.contains("--trace") || args.contains("--any") {
+        let semaphore = DispatchSemaphore(value: 0)
+        let printTrace: @Sendable (String) -> Void = { line in print("  … " + line) }
+        let anyDevice = args.contains("--any")
+        Task.detached {
+            _ = await ONVIFDiscovery.probe(seconds: seconds, anyDevice: anyDevice, trace: printTrace)
+            semaphore.signal()
+        }
+        semaphore.wait()
+    }
+    print("… looking for cameras on the local network (ONVIF and Reolink discovery, and cameras that take video connections)")
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var found: [FoundCamera] = []
+    Task.detached {
+        found = await CameraFinder.find(seconds: seconds)
+        semaphore.signal()
+    }
+    semaphore.wait()
+    if found.isEmpty {
+        print("No camera found. A camera on another network (or VLAN) can't be seen from here; add it by its address.")
+        exit(0)
+    }
+    for camera in found {
+        let known = cameras.first { $0.host == camera.host }
+        let how = [camera.maker.map { "\($0) discovery" }, camera.answersONVIF ? "ONVIF" : nil].compactMap { $0 }
+        let what = camera.hardware.flatMap { $0 == camera.name ? nil : " (\($0))" } ?? ""
+        let found = how.isEmpty ? "video port open" : how.joined(separator: ", ")
+        print("\(known == nil ? "+" : "✓") \(camera.title)\(what) at \(camera.host), \(found)"
+              + (known.map { ": set up as \($0.id)" } ?? ": not set up; add it with pond camera add ID --host \(camera.host)"))
+    }
+    exit(0)
+}
+
 /// `pond camera onvif ID`: what the camera says over ONVIF (where its service is, its clock, what it is, its
 /// services and media profiles, and the stream addresses Pond would choose), for setting up a camera of a
 /// make Pond doesn't know, and for reports of how a camera behaves. Changes nothing.

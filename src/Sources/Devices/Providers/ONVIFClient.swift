@@ -37,6 +37,13 @@ public final class ONVIFClient: @unchecked Sendable {
         return nil
     }
 
+    /// Whether ONVIF's device service answers at `host` on `port` (its time, which needs no login).
+    public static func answers(host: String, port: Int) async -> Bool {
+        guard let url = URL(string: "http://\(host):\(port)/onvif/device_service") else { return false }
+        let body = "<GetSystemDateAndTime xmlns=\"http://www.onvif.org/ver10/device/wsdl\"/>"
+        return await post(url, ONVIF.plainEnvelope(body), timeout: 3)?.contains("SystemDateAndTime") == true
+    }
+
     private static func find(host: String, port: Int?, username: String, password: String) async -> ONVIFClient? {
         for port in port.map({ [$0] }) ?? ports {
             guard let url = URL(string: "http://\(host):\(port)/onvif/device_service") else { continue }

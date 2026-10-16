@@ -115,6 +115,7 @@ public struct CLI {
       camera move ID POSITION|top|bottom           the camera's place in the order the app shows them
       camera remove ID [--delete-recordings] [--yes]
       camera identify ID [--provider reolink|onvif|video]   ask the camera what it is; video: its video only
+      camera discover                              cameras on the local network, and which are set up
       camera onvif ID [--trace] [--events [S]]     what the camera says over ONVIF: service, profiles, streams, events
 
     HomeKit

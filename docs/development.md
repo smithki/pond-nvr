@@ -58,6 +58,7 @@ The package is in `src/`; `swift build --package-path src` and Xcode (open `src/
 - **Notes sit under the row they explain**: `LabeledContent { control } label: { Text(title); Text(note) }`, or a picker whose label has two texts; never loose text at the end of a section.
 - **A choice between two values** (camera or doorbell) is a segmented control, not a menu.
 - **The toolbar uses native items.** Custom glass in the toolbar hung the layout. A control that belongs to one view (the rail's toggle) is added and removed with it, not hidden.
+- **A panel whose content changes height is a card in the window, not a popover.** A popover is a window of its own, and AppKit animates its resizing out of step with SwiftUI, so everything in it jitters. Find Cameras' card is an overlay with Liquid Glass and an arrow pointing at its toolbar button (`Callout.swift`), so it grows and shrinks like any view.
 - **Glass is never drawn into a drag image**: drags get a plain preview (`DragPreview`); drawing glass that way crashed the app.
 - **Vendor-neutral wording**: name a camera's own app only through its provider (`appName`, "the Reolink app"), else "the camera's own app". Say "ID", HomeKit, HKSV, RTSP, macOS.
 - **The timeline's live mode is only ever chosen** by the viewer (LIVE or L); playing recording pauses at its end rather than switching to live.

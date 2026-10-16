@@ -14,6 +14,16 @@ Pond records what a camera sends over RTSP, without re-encoding it, so a camera 
 
 Without motion from the camera (no ONVIF events, video only, or no ONVIF at all), a camera still records continuously, shows live and works in the Home app's live view; HomeKit Secure Video needs motion to start a recording, so it waits for Pond's own detection. Reports of other models are welcome.
 
+## Finding cameras
+
+Add Camera lists the cameras on your network that aren't set up, and **Find Cameras** in the main window's toolbar looks whenever you like. When it finds cameras that aren't set up, it turns into **Cameras Found** with a count until you add or ignore them. Ignored cameras are listed apart in its card, each with **Show Again**, and Add Camera leaves them out unless you choose **Show Ignored**. Pond looks every way at once, none needing a login:
+
+- **ONVIF discovery**: cameras that answer it say their name and model (most makes with ONVIF switched on).
+- **Reolink's own discovery**: Reolink cameras don't answer ONVIF discovery, but answer this, with the name given in the Reolink app.
+- **A look at this Mac's own network** for addresses that take video (RTSP, port 554) or answer ONVIF on port 8000, for cameras that answer neither; they're named as your router names them.
+
+It looks each time Pond opens, once a day while it stays open, and each time Add Camera opens. A camera on another network or VLAN can't be found; add it by its address. `pond camera discover` shows the same from a terminal.
+
 ## What every camera needs
 
 - **RTSP on**, with a username and password.
