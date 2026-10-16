@@ -288,6 +288,8 @@ struct AddCameraSheet: View {
     @State private var added = false
     /// Add Camera lists the ignored cameras on the network too, when asked.
     @State private var showingIgnored = false
+    /// Name has the keyboard as the sheet opens (not the first camera found on the network).
+    @FocusState private var nameFocused: Bool
     @State private var kind = Config.Camera.Kind.camera
     /// What the camera said it is, during the check.
     @State private var device: Config.Device?
@@ -330,8 +332,10 @@ struct AddCameraSheet: View {
             ScrollViewReader { proxy in
             Form {
                 foundSection
-                Section {
+                // Headed, as each section is, so it's set apart from the cameras on the network above it.
+                Section("Camera") {
                     TextField("Name", text: $name, prompt: Text("Front porch"))
+                        .focused($nameFocused)
                         .onChange(of: name) { if !idEdited { id = slug(name) } }
                     // Each note under its own row's label.
                     LabeledContent {
@@ -430,6 +434,8 @@ struct AddCameraSheet: View {
                 model.addingFrom = nil
             }
         }
+        .defaultFocus($nameFocused, true)
+        .onAppear { nameFocused = true }
         .task { await model.findCameras() }
     }
 
@@ -477,9 +483,6 @@ struct AddCameraSheet: View {
                             .help("Looking on your network\u{2026}")
                     }
                 }
-            } footer: {
-                // A little room before the camera's own fields (their section has no header to set it apart).
-                Color.clear.frame(height: 0)
             }
             .disabled(checking)
         }

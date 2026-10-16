@@ -9,6 +9,13 @@ enum Snapshots {
     static func take(into dir: String, model: AppModel) async {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try? await Task.sleep(for: .seconds(1))
+        // With --add-camera: just Add Camera, once the cameras on the network are in.
+        if model.addingCamera {
+            try? await Task.sleep(for: .seconds(6))
+            save(NSApp.windows.first { $0.isVisible && $0.sheetParent != nil }, to: "\(dir)/add-camera.png")
+            NSApp.terminate(nil)
+            return
+        }
         for mode in Mode.allCases {
             model.mode = mode
             try? await Task.sleep(for: .seconds(2.5))

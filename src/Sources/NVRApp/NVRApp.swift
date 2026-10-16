@@ -183,6 +183,8 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) { FindCamerasButton() }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    // Find Cameras' card closed: Add Camera lists the cameras on the network too.
+                    withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false }
                     model.settingsTab = .cameras
                     model.addingCamera = true
                 } label: {
