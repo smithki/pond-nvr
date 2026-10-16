@@ -57,11 +57,18 @@ public final class ONVIFClient: @unchecked Sendable {
     }
 
     /// The reply to `body`, sent to `service` with the login; a SOAP fault or no answer throws.
-    func call(_ service: URL, _ body: String) async throws(Failure) -> XMLDocument {
-        let envelope = ONVIF.envelope(body, username: username, password: password, created: Date().addingTimeInterval(clockOffset))
+    /// `action` and the service as WS-Addressing headers, which a subscription's requests need; `timeout` for
+    /// one the camera holds open (PullMessages).
+    func call(_ service: URL, _ body: String, action: String? = nil, timeout: TimeInterval = 10) async throws(Failure) -> XMLDocument {
+        let addressing = action.map {
+            "<wsa:Action xmlns:wsa=\"http://www.w3.org/2005/08/addressing\">\($0)</wsa:Action>"
+                + "<wsa:To xmlns:wsa=\"http://www.w3.org/2005/08/addressing\">\(ONVIF.escape(service.absoluteString))</wsa:To>"
+        } ?? ""
+        let envelope = ONVIF.envelope(body, username: username, password: password, created: Date().addingTimeInterval(clockOffset),
+                                      header: addressing)
         let action = body.split(separator: " ").first.map { String($0.dropFirst()) } ?? "?"
         let started = Date()
-        let (text, outcome) = await Self.exchange(service, envelope)
+        let (text, outcome) = await Self.exchange(service, envelope, timeout: timeout)
         trace?("\(action) → \(service.absoluteString): \(outcome) in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
         guard let text else { throw Failure(description: "no answer from \(service.absoluteString) (\(outcome))") }
         guard let document = try? XMLDocument(xmlString: text) else { throw Failure(description: "an answer that isn't XML") }
@@ -217,6 +224,7 @@ extension ONVIF {
     /// Media (profiles and stream addresses), as ONVIF names the service.
     public static let mediaNamespace = media
     public static let media2Namespace = media2
+    public static let eventsNamespace = events
     static let media = "http://www.onvif.org/ver10/media/wsdl"
     static let media2 = "http://www.onvif.org/ver20/media/wsdl"
     static let events = "http://www.onvif.org/ver10/events/wsdl"

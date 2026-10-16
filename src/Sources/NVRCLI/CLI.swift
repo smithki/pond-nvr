@@ -115,7 +115,7 @@ public struct CLI {
       camera move ID POSITION|top|bottom           the camera's place in the order the app shows them
       camera remove ID [--delete-recordings] [--yes]
       camera identify ID [--provider reolink|onvif]   ask the camera what it is (model, serial, doorbell)
-      camera onvif ID [--trace]                    what the camera says over ONVIF: service, profiles, stream addresses
+      camera onvif ID [--trace] [--events [S]]     what the camera says over ONVIF: service, profiles, streams, events
 
     HomeKit
       homekit code                                 setup codes and QR codes for the cameras not yet in a home

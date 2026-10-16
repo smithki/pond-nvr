@@ -4,7 +4,9 @@ Any camera that sends H.264 over RTSP can be recorded, watched live and added to
 
 ## ONVIF cameras
 
-Many cameras (Hikvision, Dahua, Amcrest, Axis, TP-Link Tapo and others) speak ONVIF. Pond uses it to find the camera's stream addresses (its media profiles: the largest H.264 one is the main stream, the smallest the sub-stream) and to read its maker, model, serial number and firmware. It logs in with a WS-Security password digest, so the password itself is not sent, allowing for a camera whose clock is off. Motion events are not read yet, so HomeKit Secure Video does not start recordings for these cameras; that is next on the [roadmap](../roadmap.md#onvif).
+Many cameras (Hikvision, Dahua, Amcrest, Axis, TP-Link Tapo and others) speak ONVIF. Pond uses it to find the camera's stream addresses (its media profiles: the largest H.264 one is the main stream, the smallest the sub-stream) and to read its maker, model, serial number and firmware. It logs in with a WS-Security password digest, so the password itself is not sent, allowing for a camera whose clock is off. Its **events** drive HomeKit: Pond subscribes to them (a pull-point subscription, renewed as it goes), and any motion detector the camera reports, plain motion or its person, vehicle and animal detection, turns HomeKit's motion sensor on, which starts HomeKit Secure Video recordings. A doorbell's button press, reported under a topic such as `Visitor` or `Doorbell`, rings in the Home app.
+
+`pond camera onvif ID --events [SECONDS]` prints the camera's events as they come, with what Pond makes of them (`→ motion`, `→ still`, `→ pressed`), to see what a camera reports.
 
 ## Adding one
 

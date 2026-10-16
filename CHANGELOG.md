@@ -28,12 +28,13 @@ The first version: recording, the app and HomeKit.
 - **Native HomeKit Accessory Protocol** in Swift: SRP-6a pair setup, pair verify, encrypted sessions, the accessory database, events, timed writes, Bonjour. Each camera is a standalone accessory, added from the app or with `pond camera set ID --homekit on`; its identity and pairings are kept in the Keychain (`pond-homekit`).
 - **Snapshots, live video and sound**: the camera's H.264 over SRTP (sub-stream, or main for a viewer with the bandwidth, switching on a reconfigure), the camera's AAC converted to AAC-ELD, 1–4 viewers at once on one camera connection.
 - **Optional re-encoding** for the Home app (`homekitVideo`): the main stream sized and encoded per viewer on the Mac's video hardware, adapting to each viewer's connection from its RTCP reports.
-- **HomeKit Secure Video** (`homekitRecording`, "Allow recording in the Home app"): the HomeKit Data Stream, the recording services, a prebuffer, and recordings re-encoded to the hub's choice, started by the camera's own motion (Reolink). The app shows whether a camera is recording, its last clip, and why it won't record.
+- **HomeKit Secure Video** (`homekitRecording`, "Allow recording in the Home app"): the HomeKit Data Stream, the recording services, a prebuffer, and recordings re-encoded to the hub's choice, started by the camera's own motion (Reolink's API, or any camera's ONVIF events). The app shows whether a camera is recording, its last clip, and why it won't record.
 - **Doorbells**: a video doorbell accessory that rings on a press of a Reolink doorbell's button, and records to HomeKit Secure Video on motion or a ring.
 
 ### Cameras
 - **Camera checks** (`pond camera add`, `test`): Digest login, both streams' codecs and resolutions, then the video's frame rate, keyframe spacing and bitrate, with warnings about privacy mode, H.265 and keyframes too far apart.
 - **Device details** (`pond camera identify`): maker, model, serial number, firmware and doorbell, from Reolink's API or ONVIF.
+- **Motion over ONVIF**: Pond subscribes to an ONVIF camera's events, and its motion, person, vehicle and animal detection drive HomeKit's motion sensor (so HomeKit Secure Video records cameras of any make with ONVIF events); a doorbell's visitor event rings. `pond camera onvif ID --events` prints them as they come.
 - **Stream addresses found for you**: adding a camera asks it where its streams are, through its make's API (Reolink) or ONVIF (its media profiles), and they can be typed or changed in Add Camera and the camera's settings; `pond camera add --main --sub` gives them by hand. `pond camera onvif ID` shows what a camera says over ONVIF, step by step.
 - Camera passwords are kept in the login Keychain (service `pond`), never in the settings file.
 
@@ -42,7 +43,6 @@ The first version: recording, the app and HomeKit.
 
 ### Known gaps
 - Only H.264 cameras; H.265 is not supported yet.
-- Motion for HKSV and doorbell presses come from Reolink's API only; other brands need ONVIF events.
 - Detection, event clips, descriptions and search are not built yet; the Events view shows made-up events with `POND_MOCK_EVENTS=1`.
 - Zones are edited by hand in the settings file.
 - `make test-docker` has not been run yet.

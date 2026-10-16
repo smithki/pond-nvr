@@ -30,8 +30,8 @@ Status: **done**, **in progress**, **next**, **later**.
 | Re-encoding for the Home app | done | Optional per camera: sized and encoded per viewer on the Mac's video hardware, steered by each viewer's RTCP reports (`RateControl`). Not for cameras that send B-frames. |
 | Fast start | done | `StreamHub` replays the video since the latest keyframe; `instantLive` keeps the sub-stream open. |
 | HomeKit Secure Video | done | Recording on the camera's motion, from a prebuffer, re-encoded to the hub's choice; status and "Allow recording" in the app. Needs a home hub and iCloud+. |
-| Doorbells | done | A video doorbell accessory that rings on a press (Reolink, through its API) and records to HomeKit Secure Video on motion or a ring. A 4:3 doorbell is recorded fitted inside the size the hub chooses. Tried with a Reolink Video Doorbell WiFi. |
-| Motion from ONVIF cameras | next | A PullPoint subscription for the camera's motion events, so HKSV works beyond Reolink. |
+| Doorbells | done | A video doorbell accessory that rings on a press (Reolink's API, or ONVIF events) and records to HomeKit Secure Video on motion or a ring. A 4:3 doorbell is recorded fitted inside the size the hub chooses. Tried with a Reolink Video Doorbell WiFi. |
+| Motion from ONVIF cameras | done | A pull-point subscription to the camera's events: any motion, person, vehicle or animal detector drives the motion sensor, and a doorbell's visitor event rings. Tried end to end over ONVIF with a Reolink doorbell. |
 | Talkback | later | The Home app's microphone to the camera's speaker: see two-way audio under ONVIF. |
 
 The Home app on a Mac without a microphone plays no live sound from any camera; that is the Home app's behaviour, not Pond's.
@@ -45,7 +45,7 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Device information | done | `GetDeviceInformation` for any camera Reolink's API doesn't answer. |
 | Discovery | next | WS-Discovery (multicast UDP 3702) finds cameras for Add Camera, instead of typing an address. |
 | Stream addresses | done | Media `GetProfiles`, then `GetStreamUri` (Media2's when there is one); asked when a camera is added, editable in its settings. `pond camera onvif ID` shows what a camera says. |
-| Camera events | next | Motion and person events (see HomeKit above). |
+| Camera events | done | Motion, person, vehicle and animal detection, and doorbell presses (see HomeKit above). |
 | PTZ | later | Continuous move, zoom and presets; in the app a pad on the tile, presets in a menu. HomeKit has no PTZ, so presets could appear as switches. |
 | Two-way audio | later | The ONVIF backchannel (RTSP with `Require: www.onvif.org/ver20/backchannel`, then G.711 µ-law RTP to the camera), for push-to-talk in the app and HomeKit talkback. |
 | Imaging | later | Day/night and IR. |

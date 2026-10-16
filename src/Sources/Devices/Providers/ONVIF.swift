@@ -18,6 +18,11 @@ public struct ONVIFProvider: CameraProvider {
         guard let client = await ONVIFClient.connect(host: host, username: username, password: password) else { return nil }
         return try? await client.streams()
     }
+
+    /// Motion (and a doorbell's button) from the camera's ONVIF events.
+    public func events(host: String, username: String, password: String) -> CameraEvents? {
+        ONVIFEvents(host: host, username: username, password: password)
+    }
 }
 
 extension ONVIFClient {
@@ -35,7 +40,7 @@ extension ONVIFClient {
 /// ONVIF over SOAP, with the WS-Security username token every ONVIF camera takes.
 public enum ONVIF {
     static func envelope(_ body: String, username: String, password: String, nonce: [UInt8] = .random(16),
-                         created: Date = Date()) -> String {
+                         created: Date = Date(), header: String = "") -> String {
         let createdText = ISO8601DateFormatter().string(from: created)
         let digest = Data(Insecure.SHA1.hash(data: Data(nonce) + Data(createdText.utf8) + Data(password.utf8)))
         return """
@@ -45,7 +50,7 @@ public enum ONVIF {
         <Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">\(digest.base64EncodedString())</Password>\
         <Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">\(Data(nonce).base64EncodedString())</Nonce>\
         <Created xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">\(createdText)</Created>\
-        </UsernameToken></Security></s:Header><s:Body>\(body)</s:Body></s:Envelope>
+        </UsernameToken></Security>\(header)</s:Header><s:Body>\(body)</s:Body></s:Envelope>
         """
     }
 

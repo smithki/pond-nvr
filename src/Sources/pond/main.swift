@@ -146,6 +146,10 @@ if args == ["migrate"] {
 /// make Pond doesn't know, and for reports of how a camera behaves. Changes nothing.
 if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
     let tracing = args.contains("--trace")
+    // --events [SECONDS]: the camera's events as they come, for that long (60 s).
+    let eventSeconds: Double? = args.firstIndex(of: "--events").map { i in
+        i + 1 < args.count ? Double(args[i + 1]) ?? 60 : 60
+    }
     guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }) else {
         FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
         exit(1)
@@ -191,6 +195,34 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
             print("✓ sub-stream:  \(streams.sub)")
             if streams.main != camera.main || streams.sub != camera.sub {
                 print("These differ from the camera's settings. To use them: pond camera set \(camera.id) --main \(streams.main) --sub \(streams.sub)")
+            }
+            if let eventSeconds {
+                guard let events = services[ONVIF.eventsNamespace] else {
+                    print("✗ The camera has no events service.")
+                    status = 1
+                    return
+                }
+                let subscription = try await client.subscribe(events: events)
+                print("✓ subscribed to its events; watching for \(Int(eventSeconds)) s (walk past it, press its button)")
+                var tracker = ONVIFEventTracker()
+                let until = Date().addingTimeInterval(eventSeconds)
+                while Date() < until {
+                    let asked = Date()
+                    let events = try await client.pull(subscription, seconds: max(1, min(10, Int(until.timeIntervalSinceNow))))
+                    let received = Date()
+                    for event in events {
+                        let change = tracker.take(event)
+                        let data = event.data.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+                        let meaning = [change.motion.map { $0 ? "→ motion" : "→ still" }, change.pressed ? "→ pressed" : nil]
+                            .compactMap { $0 }.joined(separator: " ")
+                        // How long after it happened (the camera's clock, corrected) it arrived, and how long the pull
+                        // had been waiting: a camera that holds events until the pull's timeout shows here.
+                        let late = event.time.map { String(format: " · %.1f s after it happened", received.timeIntervalSince($0.addingTimeInterval(-client.clockOffset))) } ?? ""
+                        let waited = String(format: " (pull answered after %.1f s)", received.timeIntervalSince(asked))
+                        print("  \(event.operation.isEmpty ? "" : event.operation + " ")\(event.topic) \(data) \(meaning)\(event.operation == "Initialized" ? "" : late + waited)")
+                    }
+                }
+                await client.unsubscribe(subscription)
             }
         } catch {
             print("✗ \(error.description)")
