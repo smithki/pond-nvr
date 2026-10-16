@@ -61,7 +61,9 @@ final class Harness {
 
     deinit { try? FileManager.default.removeItem(atPath: dir) }
 
-    var cli: CLI { CLI(store: store, credentials: credentials, prober: prober, console: console) }
+    /// What a camera says its stream addresses are (nil: the CLI asks nothing).
+    var findStreams: CLI.StreamFinding?
+    var cli: CLI { CLI(store: store, credentials: credentials, prober: prober, console: console, findStreams: findStreams) }
 
     @discardableResult
     func run(_ args: String...) -> Int32 { cli.run(args) }

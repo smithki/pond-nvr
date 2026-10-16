@@ -278,7 +278,8 @@ final class AppModel {
     }
 
     /// Changes name, address (host) and username.
-    func edit(_ id: String, name: String, host: String, username: String) -> Bool {
+    /// Without `main` and `sub`, the stream addresses follow the host; with them, they are as given.
+    func edit(_ id: String, name: String, host: String, username: String, main: String? = nil, sub: String? = nil) -> Bool {
         update { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
             config.cameras[i].name = name
@@ -288,6 +289,8 @@ final class AppModel {
                 parts?.host = host
                 if let url = parts?.string { config.cameras[i][keyPath: keyPath] = url }
             }
+            if let main { config.cameras[i].main = main }
+            if let sub { config.cameras[i].sub = sub }
         }
     }
 

@@ -292,10 +292,17 @@ struct AddCameraSheet: View {
     @State private var homeKitChosen: Bool?
     /// What the camera does to the storage, from the rate the check measured.
     @State private var impact: StorageOutlook.Impact?
+    /// The stream addresses: typed in, or asked of the camera when checking (and where they came from).
+    @State private var mainURL = ""
+    @State private var subURL = ""
+    @State private var streamsFrom: String?
+    @State private var showStreams = false
 
     var camera: Config.Camera {
         var c = Config.Camera.reolink(id: id, name: name.isEmpty ? id : name, host: host.trimmingCharacters(in: .whitespaces),
                                       username: username)
+        if !mainURL.isEmpty { c.main = mainURL.trimmingCharacters(in: .whitespaces) }
+        if !subURL.isEmpty { c.sub = subURL.trimmingCharacters(in: .whitespaces) }
         c.kind = kind
         c.device = device
         return c
@@ -308,6 +315,9 @@ struct AddCameraSheet: View {
         if host.trimmingCharacters(in: .whitespaces).isEmpty { return "Give the camera's address." }
         if username.isEmpty { return "Give the username." }
         if password.isEmpty { return "Give the password." }
+        if [mainURL, subURL].contains(where: { !$0.isEmpty && !StreamAddressField.isValid($0) }) {
+            return StreamAddressField.problem
+        }
         return nil
     }
 
@@ -341,6 +351,19 @@ struct AddCameraSheet: View {
                 Section("Login") {
                     TextField("Username", text: $username)
                     SecureField("Password", text: $password)
+                }
+                .disabled(checking || added)
+                Section {
+                    FoldRow(title: "Stream addresses", summary: streamSummary, expanded: $showStreams)
+                    if showStreams {
+                        Group {
+                            StreamAddressField(title: "Main stream", note: StreamAddressField.mainNote, address: $mainURL,
+                                               prompt: "Asked of the camera")
+                            StreamAddressField(title: "Sub-stream", note: StreamAddressField.subNote, address: $subURL,
+                                               prompt: "Asked of the camera")
+                        }
+                        .padding(.leading, FoldRow.indent)
+                    }
                 }
                 .disabled(checking || added)
                 if checking || result != nil {
@@ -399,9 +422,21 @@ struct AddCameraSheet: View {
         .frame(maxHeight: height)
     }
 
+    var streamSummary: String {
+        if let streamsFrom { return "From \(streamsFrom)" }
+        return mainURL.isEmpty && subURL.isEmpty ? "Asked of the camera" : "Typed in"
+    }
+
     func checkAndAdd() async {
         checking = true
         result = nil
+        // The stream addresses, unless typed in: asked of the camera (its make's, or ONVIF's); else Reolink's.
+        if mainURL.isEmpty, subURL.isEmpty,
+           let found = await model.findStreams(host: camera.host, username: username, password: password) {
+            mainURL = found.main
+            subURL = found.sub
+            streamsFrom = found.from
+        }
         let r = await model.check(camera, password: password, seconds: 6)
         if r.passed {
             // Reached: ask what it is (model, serial, doorbell), for HomeKit and the settings.
@@ -472,6 +507,9 @@ struct EditCameraSheet: View {
     enum Field { case password, address }
     @State private var name = ""
     @State private var host = ""
+    /// The stream addresses, as they would be saved.
+    @State private var mainURL = ""
+    @State private var subURL = ""
     @State private var username = ""
     @State private var newID = ""
     @State private var password = ""
@@ -497,11 +535,8 @@ struct EditCameraSheet: View {
     var edited: Config.Camera {
         var c = camera
         c.username = username
-        for keyPath in [\Config.Camera.main, \Config.Camera.sub] {
-            var parts = URLComponents(string: c[keyPath: keyPath])
-            parts?.host = host.trimmingCharacters(in: .whitespaces)
-            if let url = parts?.string { c[keyPath: keyPath] = url }
-        }
+        c.main = mainURL.trimmingCharacters(in: .whitespaces)
+        c.sub = subURL.trimmingCharacters(in: .whitespaces)
         return c
     }
 
@@ -509,6 +544,7 @@ struct EditCameraSheet: View {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return "Give the camera a name." }
         if host.trimmingCharacters(in: .whitespaces).isEmpty { return "Give the camera's address." }
         if username.isEmpty { return "Give the username." }
+        if ![mainURL, subURL].allSatisfy(StreamAddressField.isValid) { return StreamAddressField.problem }
         if newID != camera.id, !Config.isSlug(newID) {
             return "The ID must be lowercase letters, digits and dashes, starting with a letter."
         }
@@ -537,9 +573,21 @@ struct EditCameraSheet: View {
             footer
         }
         .frame(width: 560, height: height)
+        // A new address for the camera moves the stream addresses with it (those on its old address).
+        .onChange(of: host) { old, new in
+            func moved(_ url: String) -> String {
+                guard var parts = URLComponents(string: url), parts.host == old.trimmingCharacters(in: .whitespaces) else { return url }
+                parts.host = new.trimmingCharacters(in: .whitespaces)
+                return parts.string ?? url
+            }
+            mainURL = moved(mainURL)
+            subURL = moved(subURL)
+        }
         .onAppear {
             name = camera.name
             host = camera.host
+            mainURL = camera.main
+            subURL = camera.sub
             username = camera.username
             newID = camera.id
             kind = camera.kind
@@ -752,8 +800,8 @@ struct EditCameraSheet: View {
                         Text("Camera ID")
                         Text("Names the camera\u{2019}s folders, its Keychain item and its HomeKit accessory. Changing it moves the password; recordings already made keep the old folder.")
                     }
-                    LabeledContent("Main stream") { address(edited.main) }
-                    LabeledContent("Sub-stream") { address(edited.sub) }
+                    StreamAddressField(title: "Main stream", note: StreamAddressField.mainNote, address: $mainURL)
+                    StreamAddressField(title: "Sub-stream", note: StreamAddressField.subNote, address: $subURL)
                     Toggle(isOn: $instantLive) {
                         Text("Start live view instantly")
                         Text("Keeps the sub-stream open, so live views in the Home app and Pond, and snapshots, start at once instead of after a few seconds. Costs one more connection to the camera and about 0.3 Mbit/s on your network. On by default for a camera in HomeKit.")
@@ -822,16 +870,6 @@ struct EditCameraSheet: View {
         .padding(16)
     }
 
-    func address(_ url: String) -> some View {
-        Text(url)
-            .font(.body.monospaced())
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.vertical, 2)
-    }
-
     /// Logs in with the new password if one is typed, the saved one otherwise, at the address and username as
     /// they would be saved.
     func check() async -> (lines: [CheckLine], passed: Bool) {
@@ -856,7 +894,8 @@ struct EditCameraSheet: View {
             }
         }
         guard model.edit(camera.id, name: name.trimmingCharacters(in: .whitespaces),
-                         host: host.trimmingCharacters(in: .whitespaces), username: username) else { return }
+                         host: host.trimmingCharacters(in: .whitespaces), username: username,
+                         main: edited.main, sub: edited.sub) else { return }
         if !password.isEmpty, !model.setPassword(password, for: camera.id) { return }
         if kind != saved.kind { model.setKind(camera.id, kind) }
         if homeKitViewers != saved.homeKitViewerSlots { model.setHomeKitViewers(camera.id, homeKitViewers) }
@@ -960,5 +999,74 @@ struct KindPicker: View {
         .labelsHidden()
         .pickerStyle(.segmented)
         .fixedSize()
+    }
+}
+
+/// A stream address: shown in its row (shortened in the middle if long), typed in or corrected in a popover
+/// wide enough for a whole one, with what the stream is used for under its name.
+struct StreamAddressField: View {
+    let title: String
+    let note: String
+    @Binding var address: String
+    /// What the row says while there is no address.
+    var prompt = "None"
+    @State private var editing = false
+
+    static let mainNote = "Recorded, and used for large tiles and HomeKit Secure Video."
+    static let subNote = "Used for small tiles, snapshots and the Home app\u{2019}s live view."
+    static let problem = "A stream address starts with rtsp:// and has no login in it."
+
+    /// An rtsp:// address without a login (the password is kept in the Keychain).
+    static func isValid(_ address: String) -> Bool {
+        let trimmed = address.trimmingCharacters(in: .whitespaces)
+        guard let parts = URLComponents(string: trimmed), parts.scheme?.lowercased() == "rtsp", parts.host?.isEmpty == false
+        else { return false }
+        return parts.user == nil && parts.password == nil
+    }
+
+    // As the Type and ID rows look: the name with its note wrapping under it on the left, the address and its
+    // button on the right at the name's line. Laid out here rather than by LabeledContent, which stacks the
+    // right side under a long note.
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(note)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(address.isEmpty ? prompt : address)
+                .font(address.isEmpty ? .body : .system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 200, alignment: .trailing)
+                .help(address)
+            Button("Edit\u{2026}") { editing = true }
+                .popover(isPresented: $editing, arrowEdge: .bottom) { editor }
+        }
+    }
+
+    var editor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            TextField(title, text: $address, prompt: Text("rtsp://"))
+                .labelsHidden()
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { editing = false }
+            Text(!address.isEmpty && !Self.isValid(address) ? Self.problem : note)
+                .font(.subheadline)
+                .foregroundStyle(!address.isEmpty && !Self.isValid(address) ? .orange : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Done") { editing = false }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
     }
 }

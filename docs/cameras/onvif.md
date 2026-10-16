@@ -4,20 +4,20 @@ Any camera that sends H.264 over RTSP can be recorded, watched live and added to
 
 ## ONVIF cameras
 
-Many cameras (Hikvision, Dahua, Amcrest, Axis, TP-Link Tapo and others) speak ONVIF. Today Pond uses it to read the camera's maker, model, serial number and firmware (`GetDeviceInformation`, logging in with a WS-Security password digest, so the password itself is not sent). The stream addresses still have to be given by hand, and motion events are not read yet, so HomeKit Secure Video does not start recordings for these cameras. Both are next on the [roadmap](../roadmap.md#onvif).
+Many cameras (Hikvision, Dahua, Amcrest, Axis, TP-Link Tapo and others) speak ONVIF. Pond uses it to find the camera's stream addresses (its media profiles: the largest H.264 one is the main stream, the smallest the sub-stream) and to read its maker, model, serial number and firmware. It logs in with a WS-Security password digest, so the password itself is not sent, allowing for a camera whose clock is off. Motion events are not read yet, so HomeKit Secure Video does not start recordings for these cameras; that is next on the [roadmap](../roadmap.md#onvif).
 
 ## Adding one
 
-Find the camera's RTSP addresses in its manual or its own app; they often look like `rtsp://HOST:554/stream1` and `…/stream2`, or `rtsp://HOST:554/Streaming/Channels/101` and `…/102`. Then:
+**Add Camera** in the app, or `pond camera add`, asks the camera for its stream addresses before checking it: through its make's own API if Pond knows it (Reolink), else through ONVIF. The addresses are shown under **Stream addresses** in Add Camera, and can be changed later in the camera's settings (Advanced).
 
 ```sh
-pond camera add garden --host 192.168.1.30 --name "Garden" --no-test
-pond camera set garden --main rtsp://192.168.1.30:554/stream1 --sub rtsp://192.168.1.30:554/stream2
-pond camera test garden                         # log in, read both streams, watch the video
-pond camera identify garden --provider onvif    # the camera's details, through ONVIF
+pond camera add garden --host 192.168.1.30 --name "Garden"   # finds the stream addresses, checks the camera
+pond camera onvif garden                                       # what the camera says over ONVIF, step by step
 ```
 
-Add these cameras from the terminal for now: the app's Add Camera assumes Reolink's stream addresses, and the camera's settings show the addresses (under Advanced) without editing them yet. Once added, the app does everything else. The addresses are kept without a login; the password is kept in the Keychain.
+`pond camera onvif ID` shows where the camera's ONVIF service is, whether its clock agrees, what it is, its services and media profiles, and the stream addresses Pond would choose (`--trace` shows each request and how long the camera took). It changes nothing; it says how to use the addresses if they differ from the camera's settings.
+
+A camera that doesn't say where its streams are gets Reolink's addresses; give them yourself with `--main` and `--sub` (or in the app), from the camera's manual or its own app. They often look like `rtsp://HOST:554/stream1` and `…/stream2`, or `rtsp://HOST:554/Streaming/Channels/101` and `…/102`. The addresses are kept without a login; the password is kept in the Keychain.
 
 ## Settings on the camera
 
@@ -28,4 +28,4 @@ Add these cameras from the terminal for now: the app's Add Camera assumes Reolin
 
 ## Cameras without ONVIF
 
-A camera with RTSP but no ONVIF works the same way, without its details: add it, set its stream addresses, and check it. The app then names "the camera's own app" where something needs changing.
+A camera with RTSP but no ONVIF works the same way, without its details: add it with its stream addresses (Add Camera's **Stream addresses**, or `--main` and `--sub`). The app then names "the camera's own app" where something needs changing.

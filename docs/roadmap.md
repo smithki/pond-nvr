@@ -44,7 +44,7 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 |---|---|---|
 | Device information | done | `GetDeviceInformation` for any camera Reolink's API doesn't answer. |
 | Discovery | next | WS-Discovery (multicast UDP 3702) finds cameras for Add Camera, instead of typing an address. |
-| Stream addresses | next | Media `GetProfiles` and `GetStreamUri` give the main and sub-stream URLs; until then they are typed into `pond camera set`, and the app should let them be edited too. |
+| Stream addresses | done | Media `GetProfiles`, then `GetStreamUri` (Media2's when there is one); asked when a camera is added, editable in its settings. `pond camera onvif ID` shows what a camera says. |
 | Camera events | next | Motion and person events (see HomeKit above). |
 | PTZ | later | Continuous move, zoom and presets; in the app a pad on the tile, presets in a menu. HomeKit has no PTZ, so presets could appear as switches. |
 | Two-way audio | later | The ONVIF backchannel (RTSP with `Require: www.onvif.org/ver20/backchannel`, then G.711 µ-law RTP to the camera), for push-to-talk in the app and HomeKit talkback. |

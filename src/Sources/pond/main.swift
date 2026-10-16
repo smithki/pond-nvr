@@ -141,6 +141,66 @@ if args == ["migrate"] {
 /// login service runs, which serves them itself); `pond homekit code` prints the setup codes for the service's
 /// accessories; `pond homekit reset ID` forgets a camera's HomeKit identity and pairings, so it can be added
 /// again.
+/// `pond camera onvif ID`: what the camera says over ONVIF (where its service is, its clock, what it is, its
+/// services and media profiles, and the stream addresses Pond would choose), for setting up a camera of a
+/// make Pond doesn't know, and for reports of how a camera behaves. Changes nothing.
+if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
+    let tracing = args.contains("--trace")
+    guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }) else {
+        FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
+        exit(1)
+    }
+    guard let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ There is no password for \(camera.id) in the Keychain. Set it with: pond camera password \(camera.id)\n".utf8))
+        exit(1)
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var status: Int32 = 0
+    Task.detached {
+        defer { semaphore.signal() }
+        guard let client = await ONVIFClient.connect(host: camera.host, username: camera.username, password: password) else {
+            print("✗ Nothing answered ONVIF at \(camera.host) (ports \(ONVIFClient.ports.map(String.init).joined(separator: ", "))). Is ONVIF on in the camera's settings?")
+            status = 1
+            return
+        }
+        if tracing { client.trace = { print("  … \($0)") } }
+        print("✓ ONVIF at \(client.deviceService.absoluteString)")
+        print(client.clockOffset == 0 ? "✓ the camera's clock agrees with this Mac's"
+              : String(format: "! the camera's clock is %+.0f s from this Mac's; logins allow for it", client.clockOffset))
+        do throws(ONVIFClient.Failure) {
+            let device = try await client.deviceInformation()
+            print("✓ \([device.manufacturer, device.model].filter { !$0.isEmpty }.joined(separator: " ")), firmware \(device.firmware ?? "?")")
+            let services = try await client.services()
+            // "http://www.onvif.org/ver20/media/wsdl" as "media (ver20)".
+            let named = services.keys.map { key -> String in
+                let parts = key.split(separator: "/").map(String.init)
+                return parts.count >= 3 ? "\(parts[parts.count - 2]) (\(parts[parts.count - 3]))" : key
+            }
+            print("✓ services: \(named.sorted().joined(separator: ", "))")
+            guard let media = services[ONVIF.mediaNamespace] else {
+                print("✗ The camera has no media service, so no stream addresses from it.")
+                status = 1
+                return
+            }
+            let profiles = try await client.profiles(media: media)
+            for p in profiles {
+                print("  profile \(p.token) (\(p.name)): \(p.encoding) \(p.width)×\(p.height)\(p.fps.map { " at \($0) fps" } ?? "")")
+            }
+            let streams = try await client.streams(media: media, media2: services[ONVIF.media2Namespace], profiles: profiles)
+            print("✓ main stream: \(streams.main)")
+            print("✓ sub-stream:  \(streams.sub)")
+            if streams.main != camera.main || streams.sub != camera.sub {
+                print("These differ from the camera's settings. To use them: pond camera set \(camera.id) --main \(streams.main) --sub \(streams.sub)")
+            }
+        } catch {
+            print("✗ \(error.description)")
+            status = 1
+        }
+    }
+    semaphore.wait()
+    exit(status)
+}
+
 /// `pond camera identify ID`: asks the camera what it is (maker, model, serial number, firmware, doorbell or
 /// not) and keeps the answer in its settings, for HomeKit and the app. `--provider reolink|onvif` asks only
 /// that one.
@@ -260,6 +320,24 @@ let service: ServiceRunning = RecordingAndHomeKit(statusPath: HomeKitStatus.path
 #else
 let service: ServiceRunning = RealService()
 #endif
+#if canImport(NVRMac)
+/// A camera's stream addresses, asked of it: its make's known ones (Reolink's API recognising it), else ONVIF's.
+let findStreams: CLI.StreamFinding = { host, username, password in
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var found: (main: String, sub: String, how: String)?
+    Task.detached {
+        if let f = await CameraProviders.findStreams(host: host, username: username, password: password) {
+            found = (f.main, f.sub, f.provider == "onvif" ? "ONVIF" : f.provider.capitalized)
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return found
+}
+#else
+let findStreams: CLI.StreamFinding? = nil
+#endif
 let cli = CLI(store: ConfigStore(path: configPath), credentials: credentials, prober: RTSPProber(),
-              service: service, launchd: launchd, executablePath: executable, console: TerminalConsole())
+              service: service, launchd: launchd, executablePath: executable, console: TerminalConsole(),
+              findStreams: findStreams)
 exit(cli.run(args))

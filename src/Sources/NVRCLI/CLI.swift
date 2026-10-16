@@ -15,12 +15,16 @@ public struct CLI {
     let launchd: Launchd?
     let executablePath: String
     let console: Console
+    /// Asks a camera for its stream addresses (its brand's known ones, or ONVIF's); nil where that can't be
+    /// done (Linux, tests), and then a new camera gets Reolink's.
+    let findStreams: StreamFinding?
 
     /// `credentials` and `launchd` are nil where there is no Keychain or launchd (Linux).
     public init(store: ConfigStore, credentials: CredentialStore?, prober: CameraProber,
                 clips: ClipRecording = RTSPClipRecorder(), service: ServiceRunning = RealService(),
                 launchd: Launchd? = nil, executablePath: String = CommandLine.arguments.first ?? "pond",
-                console: Console) {
+                console: Console, findStreams: StreamFinding? = nil) {
+        self.findStreams = findStreams
         self.store = store
         self.credentials = credentials
         self.prober = prober
@@ -30,6 +34,9 @@ public struct CLI {
         self.executablePath = executablePath
         self.console = console
     }
+
+    /// A camera's stream addresses, found from its address and login; nil if it doesn't say.
+    public typealias StreamFinding = @Sendable (_ host: String, _ username: String, _ password: String) -> (main: String, sub: String, how: String)?
 
     /// Runs one command line (without the program name) and returns the exit code.
     public func run(_ arguments: [String]) -> Int32 {
@@ -95,6 +102,7 @@ public struct CLI {
     Cameras
       camera list
       camera add ID --host HOST [--name NAME] [--username USER] [--password-stdin] [--no-test]
+                 [--main URL] [--sub URL]       stream addresses; else asked of the camera (its make, or ONVIF)
       camera set ID [--name NAME] [--host HOST] [--username USER] [--main URL] [--sub URL]
                     [--kind camera|doorbell] [--homekit on|off] [--homekit-viewers 1-4] [--instant-live on|off]
                     [--homekit-video camera|reencoded] [--homekit-recording on|off]
@@ -107,6 +115,7 @@ public struct CLI {
       camera move ID POSITION|top|bottom           the camera's place in the order the app shows them
       camera remove ID [--delete-recordings] [--yes]
       camera identify ID [--provider reolink|onvif]   ask the camera what it is (model, serial, doorbell)
+      camera onvif ID [--trace]                    what the camera says over ONVIF: service, profiles, stream addresses
 
     HomeKit
       homekit code                                 setup codes and QR codes for the cameras not yet in a home

@@ -1,54 +1,39 @@
 // ONVIF, which most cameras that are not Reolink's (and many that are) answer: SOAP over HTTP, with the
-// WS-Security username token. So far only what a camera is (GetDeviceInformation).
+// WS-Security username token: what a camera is, and its streams (ONVIFClient).
 import CryptoKit
 import Foundation
 import NVRCore
 
-/// Any ONVIF camera: identifies it; no doorbell button yet (ONVIF events would bring it).
+/// Any ONVIF camera: what it is, and its stream addresses; no doorbell button yet (ONVIF events would bring it).
 public struct ONVIFProvider: CameraProvider {
     public let id = "onvif"
     public init() {}
 
     public func identify(host: String, username: String, password: String) async -> Config.Device? {
-        await ONVIF.deviceInformation(host: host, username: username, password: password)
-            .map { var d = $0; d.provider = id; return d }
+        guard let client = await ONVIFClient.connect(host: host, username: username, password: password) else { return nil }
+        return try? await client.deviceInformation()
+    }
+
+    public func findStreams(host: String, username: String, password: String) async -> (main: String, sub: String)? {
+        guard let client = await ONVIFClient.connect(host: host, username: username, password: password) else { return nil }
+        return try? await client.streams()
+    }
+}
+
+extension ONVIFClient {
+    /// What the camera says it is (GetDeviceInformation).
+    public func deviceInformation() async throws(Failure) -> Config.Device {
+        let reply = try await call(deviceService, "<GetDeviceInformation xmlns=\"http://www.onvif.org/ver10/device/wsdl\"/>")
+        guard let model = reply.first("Model")?.trimmed, !model.isEmpty else { throw Failure(description: "no model in its answer") }
+        func text(_ name: String) -> String? { reply.first(name)?.trimmed.flatMap { $0.isEmpty ? nil : $0 } }
+        return Config.Device(manufacturer: text("Manufacturer") ?? "", model: model, serial: text("SerialNumber"),
+                             firmware: text("FirmwareVersion"), isDoorbell: model.localizedCaseInsensitiveContains("doorbell"),
+                             provider: "onvif")
     }
 }
 
 /// ONVIF over SOAP, with the WS-Security username token every ONVIF camera takes.
-enum ONVIF {
-    /// Where ONVIF's device service usually is: port 80, or 8000 (Reolink and others).
-    static let ports = [80, 8000, 8080]
-
-    static func deviceInformation(host: String, username: String, password: String) async -> Config.Device? {
-        let body = "<GetDeviceInformation xmlns=\"http://www.onvif.org/ver10/device/wsdl\"/>"
-        for port in ports {
-            guard let reply = await call(host: host, port: port, body: body, username: username, password: password)
-            else { continue }
-            guard let model = value(of: "Model", in: reply) else { return nil }
-            return Config.Device(manufacturer: value(of: "Manufacturer", in: reply) ?? "", model: model,
-                                 serial: value(of: "SerialNumber", in: reply), firmware: value(of: "FirmwareVersion", in: reply),
-                                 isDoorbell: model.localizedCaseInsensitiveContains("doorbell"))
-        }
-        return nil
-    }
-
-    /// The reply's text, or nil if nothing answered or it was not a success.
-    static func call(host: String, port: Int, body: String, username: String, password: String) async -> String? {
-        guard let url = URL(string: "http://\(host):\(port)/onvif/device_service") else { return nil }
-        var request = URLRequest(url: url, timeoutInterval: 3)
-        request.httpMethod = "POST"
-        request.setValue("application/soap+xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(envelope(body, username: username, password: password).utf8)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 3
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
-        guard let (data, response) = try? await session.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
+public enum ONVIF {
     static func envelope(_ body: String, username: String, password: String, nonce: [UInt8] = .random(16),
                          created: Date = Date()) -> String {
         let createdText = ISO8601DateFormatter().string(from: created)

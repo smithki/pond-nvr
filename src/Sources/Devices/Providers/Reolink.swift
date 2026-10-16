@@ -187,6 +187,9 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
             }
             // Older models answer GetMdState (motion only) rather than GetEvents.
             var motionOnly = false
+            // A process's first connections fail while macOS decides whether it may use the local network:
+            // a first failure is tried again shortly before it is reported.
+            var failedOnce = false
             while !Task.isCancelled {
                 do throws(ReolinkAPI.Failure) {
                     if motionOnly {
@@ -198,6 +201,7 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
                         continue
                     }
                     let value = try await api.command("GetEvents", param: ["channel": 0])
+                    failedOnce = false
                     report(.watching)
                     let movingNow = Self.motion(in: value)
                     if movingNow != moving { motion(movingNow) }
@@ -218,6 +222,11 @@ final class ReolinkEvents: CameraEvents, @unchecked Sendable {
                 } catch .loggedOut {
                     try? await api.login()
                 } catch {
+                    if !failedOnce {
+                        failedOnce = true
+                        try? await Task.sleep(for: .seconds(2))
+                        continue
+                    }
                     report(.unreachable)
                     try? await Task.sleep(for: .seconds(10))
                 }

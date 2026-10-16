@@ -91,25 +91,41 @@ extension CLI {
         guard let host = try args.option("--host") else { throw UsageError("Give the camera's address with --host.") }
         let name = try args.option("--name") ?? id
         let username = try args.option("--username") ?? "admin"
+        let givenMain = try args.option("--main")
+        let givenSub = try args.option("--sub")
         let skipTest = args.flag("--no-test")
         guard Config.isSlug(id) else {
             throw UsageError("The ID must be lowercase letters, digits and dashes, starting with a letter.")
         }
         let credentials = try requireCredentials()
-        var config = try load()
+        let config = try load()
         if config.cameras.contains(where: { $0.id == id }) {
             console.err("✗ There is already a camera \(id).")
             throw Failure()
         }
-        let camera = Config.Camera.reolink(id: id, name: name, host: host, username: username)
-        config.cameras.append(camera)
-        let problems = config.problems()
+        var camera = Config.Camera.reolink(id: id, name: name, host: host, username: username)
+        if let givenMain { camera.main = givenMain }
+        if let givenSub { camera.sub = givenSub }
+        var check = config
+        check.cameras.append(camera)
+        let problems = check.problems()
         guard problems.isEmpty else {
             for p in problems { console.err("✗ \(p)") }
             throw Failure()
         }
         let password = try readPassword(&args, for: id)
         try args.done()
+        // The stream addresses, unless given: asked of the camera (its brand's, or ONVIF's), else Reolink's.
+        if givenMain == nil, givenSub == nil, !skipTest, let findStreams {
+            console.out("… asking \(host) for its stream addresses")
+            if let found = findStreams(host, username, password) {
+                camera.main = found.main
+                camera.sub = found.sub
+                console.out("✓ stream addresses from \(found.how)")
+            } else {
+                console.out("! \(host) didn't say where its streams are; trying Reolink's addresses (set others with --main and --sub)")
+            }
+        }
         if !skipTest {
             guard probe(camera, password: password, watch: 6) else {
                 console.err("✗ Camera \(id) was not added. To add it anyway, while it is offline: --no-test")

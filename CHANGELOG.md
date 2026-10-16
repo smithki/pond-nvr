@@ -34,6 +34,7 @@ The first version: recording, the app and HomeKit.
 ### Cameras
 - **Camera checks** (`pond camera add`, `test`): Digest login, both streams' codecs and resolutions, then the video's frame rate, keyframe spacing and bitrate, with warnings about privacy mode, H.265 and keyframes too far apart.
 - **Device details** (`pond camera identify`): maker, model, serial number, firmware and doorbell, from Reolink's API or ONVIF.
+- **Stream addresses found for you**: adding a camera asks it where its streams are, through its make's API (Reolink) or ONVIF (its media profiles), and they can be typed or changed in Add Camera and the camera's settings; `pond camera add --main --sub` gives them by hand. `pond camera onvif ID` shows what a camera says over ONVIF, step by step.
 - Camera passwords are kept in the login Keychain (service `pond`), never in the settings file.
 
 ### The `pond` command
@@ -41,7 +42,6 @@ The first version: recording, the app and HomeKit.
 
 ### Known gaps
 - Only H.264 cameras; H.265 is not supported yet.
-- Cameras other than Reolink are added from the terminal (their stream addresses can't be typed into the app yet).
 - Motion for HKSV and doorbell presses come from Reolink's API only; other brands need ONVIF events.
 - Detection, event clips, descriptions and search are not built yet; the Events view shows made-up events with `POND_MOCK_EVENTS=1`.
 - Zones are edited by hand in the settings file.

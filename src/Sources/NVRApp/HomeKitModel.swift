@@ -164,6 +164,13 @@ extension AppModel {
         await DeviceReader.read(host: host, username: username, password: password)
     }
 
+    /// A new camera's stream addresses, asked of it with the password just typed: its make's known ones, else
+    /// ONVIF's. The words say where they came from ("Reolink", "ONVIF").
+    func findStreams(host: String, username: String, password: String) async -> (main: String, sub: String, from: String)? {
+        guard let found = await CameraProviders.findStreams(host: host, username: username, password: password) else { return nil }
+        return (found.main, found.sub, found.provider == "onvif" ? "ONVIF" : found.provider.capitalized)
+    }
+
     /// Asks the camera what it is and keeps the answer; a doorbell is marked as one. pond does it (it reads
     /// the password), and writes the settings; they are read again after.
     func identify(_ id: String) async {

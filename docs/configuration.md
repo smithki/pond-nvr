@@ -80,7 +80,7 @@ GB here are 1,000,000,000 bytes, as drives are sold. One camera recording its 25
 
 ```sh
 pond camera list
-pond camera add ID --host HOST [--name NAME] [--username USER] [--password-stdin] [--no-test]
+pond camera add ID --host HOST [--name NAME] [--username USER] [--main URL] [--sub URL] [--password-stdin] [--no-test]
 pond camera set ID [--name NAME] [--host HOST] [--username USER] [--main URL] [--sub URL]
 pond camera password ID [--password-stdin] [--no-test]
 pond camera test ID [--seconds N]
@@ -89,7 +89,7 @@ pond camera move ID POSITION|top|bottom
 pond camera remove ID [--delete-recordings] [--yes]
 ```
 
-`add` fills in Reolink's stream addresses from the host (for other cameras, set `--main` and `--sub`; see [ONVIF and other RTSP cameras](cameras/onvif.md)) (`--host` on `set` changes the host in both). `add` and `password` log in to the camera before saving anything, so a wrong password is caught at once; `--no-test` skips that for a camera that is offline. The password is asked for without echo, or read from standard input with `--password-stdin` (for scripts: `security find-generic-password … -w | pond camera password porch --password-stdin`). `move` changes a camera's place in the list (counted from 1): the order is the cameras' priority, which the app follows in the live grid and the timeline, and where the app's drag-to-reorder saves to. `rename` carries the Keychain item over; `remove` deletes the camera and its password, after confirmation, and leaves its recordings to retention; with `--delete-recordings` it deletes its recordings and event clips too (the app's Remove Camera and Recordings).
+`add` asks the camera for its stream addresses (Reolink's own, or ONVIF's) unless `--main` and `--sub` give them, and falls back to Reolink's (see [ONVIF and other RTSP cameras](cameras/onvif.md)); `--host` on `set` changes the host in both. `add` and `password` log in to the camera before saving anything, so a wrong password is caught at once; `--no-test` skips that for a camera that is offline. The password is asked for without echo, or read from standard input with `--password-stdin` (for scripts: `security find-generic-password … -w | pond camera password porch --password-stdin`). `move` changes a camera's place in the list (counted from 1): the order is the cameras' priority, which the app follows in the live grid and the timeline, and where the app's drag-to-reorder saves to. `rename` carries the Keychain item over; `remove` deletes the camera and its password, after confirmation, and leaves its recordings to retention; with `--delete-recordings` it deletes its recordings and event clips too (the app's Remove Camera and Recordings).
 
 | Setting | What it is |
 |---|---|

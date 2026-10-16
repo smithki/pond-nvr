@@ -371,3 +371,36 @@ final class FakeLaunchd: Launchd, @unchecked Sendable {
         }
     }
 }
+
+@Suite struct CameraAddStreamTests {
+    @Test func addAsksTheCameraForItsStreams() throws {
+        let h = try Harness()
+        defer { try? FileManager.default.removeItem(atPath: h.dir) }
+        h.console.input = "s3cret\n"
+        h.findStreams = { host, _, _ in ("rtsp://\(host):554/stream1", "rtsp://\(host):554/stream2", "ONVIF") }
+        #expect(h.run("camera", "add", "garden", "--host", "192.168.1.30", "--password-stdin") == 0)
+        let camera = try #require(try h.config.cameras.first)
+        #expect(camera.main == "rtsp://192.168.1.30:554/stream1" && camera.sub == "rtsp://192.168.1.30:554/stream2")
+        #expect(h.console.lines.contains("✓ stream addresses from ONVIF"))
+    }
+
+    @Test func givenAddressesAreKeptAndNothingIsAsked() throws {
+        let h = try Harness()
+        defer { try? FileManager.default.removeItem(atPath: h.dir) }
+        h.console.input = "s3cret\n"
+        h.findStreams = { _, _, _ in Issue.record("asked anyway"); return nil }
+        #expect(h.run("camera", "add", "garden", "--host", "192.168.1.30", "--main", "rtsp://192.168.1.30/a",
+                      "--sub", "rtsp://192.168.1.30/b", "--password-stdin") == 0)
+        let camera = try #require(try h.config.cameras.first)
+        #expect(camera.main == "rtsp://192.168.1.30/a" && camera.sub == "rtsp://192.168.1.30/b")
+    }
+
+    @Test func aCameraThatDoesntSayGetsReolinksAddresses() throws {
+        let h = try Harness()
+        defer { try? FileManager.default.removeItem(atPath: h.dir) }
+        h.console.input = "s3cret\n"
+        h.findStreams = { _, _, _ in nil }
+        #expect(h.run("camera", "add", "porch", "--host", "192.168.1.20", "--password-stdin") == 0)
+        #expect(try h.config.cameras.first?.main == "rtsp://192.168.1.20:554/h264Preview_01_main")
+    }
+}

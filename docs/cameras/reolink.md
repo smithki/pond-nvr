@@ -46,4 +46,5 @@ What Reolink's RTSP server does, all of which Pond copes with:
 - **Few connections**: an E1 serves only a few RTSP clients at once, and the next one gets no answer, or the video stalls about a minute in. Close the Reolink app and other viewers if a camera keeps dropping.
 - **Uneven timestamps**: steps between frames vary a lot; Pond keeps each frame's own time.
 - **The sub-stream's description** sometimes leaves out the codec parameters; Pond reads them from the video instead.
+- **Over ONVIF**, an E1 Pro answered everything but the stream-address request, which it never answered; Pond asks Reolink cameras through their own API, so this doesn't matter for adding them.
 - **Doorbells** send a 4:3 sub-stream that looks small in the Home app; choose re-encoding for the Home app's picture in the camera's HomeKit settings for a sharper one.

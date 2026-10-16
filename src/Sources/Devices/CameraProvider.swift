@@ -13,8 +13,10 @@ public protocol CameraProvider: Sendable {
     func identify(host: String, username: String, password: String) async -> Config.Device?
     /// What the camera notices (motion, a doorbell's button), if this provider can see it for this camera.
     func events(host: String, username: String, password: String) -> CameraEvents?
-    /// The main and sub-stream addresses for a camera at `host`, if this provider knows them.
+    /// The main and sub-stream addresses for a camera at `host`, if this provider knows them without asking.
     func streams(host: String) -> (main: String, sub: String)?
+    /// The main and sub-stream addresses, asked of the camera (logging in); nil if it isn't this provider's.
+    func findStreams(host: String, username: String, password: String) async -> (main: String, sub: String)?
     /// The brand's own app, as advice names it ("the Reolink app"); nil to say "the camera's own app".
     var appName: String? { get }
     /// What the brand's app calls the lighter stream ("Fluent"), for advice on where to change it.
@@ -24,6 +26,12 @@ public protocol CameraProvider: Sendable {
 extension CameraProvider {
     public func events(host: String, username: String, password: String) -> CameraEvents? { nil }
     public func streams(host: String) -> (main: String, sub: String)? { nil }
+    /// By default: the known addresses, for a camera this provider recognises.
+    public func findStreams(host: String, username: String, password: String) async -> (main: String, sub: String)? {
+        guard let known = streams(host: host), await identify(host: host, username: username, password: password) != nil
+        else { return nil }
+        return known
+    }
     public var appName: String? { nil }
     public var subStreamName: String? { nil }
 }
@@ -57,4 +65,16 @@ public enum CameraProviders {
     public static let all: [CameraProvider] = [ReolinkProvider(), ONVIFProvider()]
 
     public static func provider(_ id: String?) -> CameraProvider? { all.first { $0.id == id } }
+
+    /// A camera's stream addresses, from the first provider that can say: its brand's known addresses, else
+    /// what it describes over ONVIF. Nil if none can (the addresses are then typed in).
+    public static func findStreams(host: String, username: String, password: String) async
+        -> (main: String, sub: String, provider: String)? {
+        for provider in all {
+            if let found = await provider.findStreams(host: host, username: username, password: password) {
+                return (found.main, found.sub, provider.id)
+            }
+        }
+        return nil
+    }
 }
