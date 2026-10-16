@@ -47,8 +47,11 @@ final class AppModel {
     /// and whether a password changed since.
     private var recorderSettings: RecorderSettings?
     private var passwordChangedSinceStart = false
-    /// The start, restart or removal going on, if any.
+    /// The start, restart or removal going on, if any, whether it starts the recorder, and when the last
+    /// start or restart was asked for.
     private var serviceChange: Task<Void, Never>?
+    private var serviceChangeStarts = false
+    private var restartedAt: Date?
 
     /// The recorder runs with settings other than the saved ones: changed since it started, and not changed
     /// back.
@@ -377,6 +380,13 @@ final class AppModel {
     /// Start Service was pressed lately, and live view isn't there yet.
     var isServiceStarting: Bool { serviceStarting.map { Date().timeIntervalSince($0) < 45 } ?? false }
 
+    /// What a tile without live video says while the service starts or restarts (instead of offering to
+    /// start it); nil when it isn't.
+    var serviceStartingWords: String? {
+        if isRestartingRecorder { return "Restarting Pond\u{2019}s service\u{2026}" }
+        return isServiceStarting ? "Starting Pond\u{2019}s service\u{2026}" : nil
+    }
+
     func refreshService() {
         serviceState = service.state
         // Running, and not known since when: it started with what is saved now (the app's launch).
@@ -414,6 +424,16 @@ final class AppModel {
     /// Whether the recorder is being started, restarted or removed now.
     var isChangingService: Bool { serviceChange != nil }
 
+    /// Restarting, as people see it: from the button until the recorder runs again (launchd stops it, then
+    /// starts it a moment later; it is not "stopped" meanwhile). Up to 15 s, after which a stopped recorder
+    /// says so.
+    var isRestartingRecorder: Bool {
+        if isChangingService, serviceChangeStarts { return true }
+        guard let restartedAt, Date().timeIntervalSince(restartedAt) < 15 else { return false }
+        if case .running = serviceState { return false }
+        return true
+    }
+
     /// Starts, restarts or removes the recorder off the main thread: launchd waits for the recorder to stop
     /// (it finishes its recordings and HomeKit first, seconds), which on the main thread froze the app. One
     /// at a time; the settings it starts with are those saved when asked.
@@ -422,6 +442,17 @@ final class AppModel {
         if let serviceChange { return serviceChange }
         let service = self.service
         let settings = config.map(RecorderSettings.init)
+        serviceChangeStarts = starts
+        // Taken as started at once (every button answers alike: the Restart buttons go, the toolbar says
+        // Restarting… until it runs), and put back if it fails.
+        let before = (recorderSettings, passwordChangedSinceStart)
+        if starts {
+            restartedAt = Date()
+            // The live views wait for it (rather than offering to start it) until their video comes back.
+            serviceStarting = Date()
+            recorderSettings = settings
+            passwordChangedSinceStart = false
+        }
         let task = Task { [weak self] in
             let failure = await Task.detached { () -> String? in
                 do { try work(service); return nil } catch { return "\(error)" }
@@ -429,12 +460,17 @@ final class AppModel {
             guard let self else { return }
             if let failure {
                 alert = failure
-            } else if starts {
-                recorderSettings = settings
-                passwordChangedSinceStart = false
+                if starts { (recorderSettings, passwordChangedSinceStart) = before }
+                restartedAt = nil
             }
             serviceChange = nil
             refreshService()
+            // Until it runs again (a moment after launchd starts it), checked often, so the toolbar and
+            // settings go from Restarting… to Recording as soon as it does.
+            while starts, isRestartingRecorder {
+                try? await Task.sleep(for: .milliseconds(500))
+                refreshService()
+            }
         }
         serviceChange = task
         return task

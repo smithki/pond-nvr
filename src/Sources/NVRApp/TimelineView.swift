@@ -1355,9 +1355,10 @@ struct TimelineLive: View {
                             Image(systemName: "wifi.exclamationmark").font(.largeTitle).foregroundStyle(.secondary)
                             Text("Can\u{2019}t connect").font(.headline)
                             Text(reason).font(.callout).foregroundStyle(.secondary)
-                        } else if stream.state == .serviceStopped || stream.state == .serviceBehind, model.isServiceStarting {
+                        } else if stream.state == .serviceStopped || stream.state == .serviceBehind,
+                                  let starting = model.serviceStartingWords {
                             ProgressView().controlSize(.large)
-                            Text("Starting Pond\u{2019}s service\u{2026}").font(.callout).foregroundStyle(.secondary)
+                            Text(starting).font(.callout).foregroundStyle(.secondary)
                         } else if stream.state == .serviceStopped || stream.state == .serviceBehind {
                             let stopped = stream.state == .serviceStopped
                             Image(systemName: stopped ? "pause.circle" : "arrow.clockwise.circle")

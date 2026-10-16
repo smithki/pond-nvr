@@ -205,6 +205,11 @@ struct RecorderStatusButton: View {
         Button { model.needsRestart ? askingRestart.toggle() : action() } label: {
             HStack(spacing: 6) {
                 switch model.serviceState {
+                case _ where model.isRestartingRecorder:
+                    // An icon, not a ProgressView: one of those takes the item out of its toolbar group.
+                    Image(systemName: "arrow.clockwise").foregroundStyle(.secondary)
+                        .symbolEffect(.rotate, options: .repeating)
+                    Text("Restarting\u{2026}")
                 case .running where model.needsRestart:
                     Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.orange)
                     Text("Restart Recorder")

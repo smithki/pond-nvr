@@ -13,6 +13,12 @@ struct RecorderView: View {
             Section {
                 LabeledContent("Status") {
                     switch model.serviceState {
+                    case _ where model.isRestartingRecorder:
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Restarting\u{2026}")
+                        }
+                        .foregroundStyle(.secondary)
                     case .notInstalled:
                         Label("Not installed", systemImage: "circle.dashed").foregroundStyle(.secondary)
                     case let .running(pid):

@@ -1222,10 +1222,10 @@ struct CameraTile: View {
             TileMessage(symbol: "eye.slash", title: "No picture",
                         detail: "The camera is connected but sends no video. Is privacy mode on?", compact: compact)
         case .serviceStopped, .serviceBehind:
-            if model.isServiceStarting {
+            if let starting = model.serviceStartingWords {
                 VStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    if !compact { Text("Starting Pond\u{2019}s service\u{2026}").font(.callout).foregroundStyle(.secondary) }
+                    if !compact { Text(starting).font(.callout).foregroundStyle(.secondary) }
                 }
                 .environment(\.colorScheme, .dark)
             } else if status == .serviceStopped {
