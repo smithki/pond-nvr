@@ -25,7 +25,9 @@ To learn what a camera is (model, serial number, firmware, doorbell or not), pon
 | UDP ports per live stream | SRTP to the viewing device | the device that set up the stream |
 | One TCP port per camera recording to HKSV | HomeKit Data Stream | the home hub, with keys from its HAP session |
 | A Unix socket, `streams.sock` | Live video for the app (`StreamRelay`) | this user only (next to the settings file) |
-| A Unix socket, `controls.sock` | Camera controls for the app and the CLI (`ControlServer`): moving, positions, settings, talking through a camera's speaker | this user only (next to the settings file) |
+| A Unix socket, `controls.sock` | Camera controls for the app and the CLI (`ControlServer`): moving, positions, settings, privacy, talking through a camera's speaker | this user only (next to the settings file) |
+
+A camera made private (`privacy.json`, next to the settings file) is neither recorded, served live, nor served to HomeKit until made public; recordings made before stay as they are. See [controls.md](controls.md#privacy).
 
 The app's own UI is local only; there is no web server. macOS asks once for Local Network access: for `pond` the first time the login service connects to a camera (until it is allowed, connections fail with "No route to host" and are retried), and again when the HAP servers start.
 

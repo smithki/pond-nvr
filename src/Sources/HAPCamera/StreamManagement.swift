@@ -41,6 +41,8 @@ public final class StreamManagement: @unchecked Sendable {
     /// Problems and recoveries of the live view, for the status.
     var problem: (@Sendable (HomeKitStatus.Problem.Kind) -> Void)?
     var playing: (@Sendable () -> Void)?
+    /// Whether a live view may start (not while the camera is private).
+    var allowed: @Sendable () -> Bool = { true }
     /// The accessory's microphone is muted in the Home app: no sound is sent.
     var microphoneMuted: @Sendable () -> Bool = { false }
     private var prepared: PreparedStream?
@@ -157,6 +159,10 @@ public final class StreamManagement: @unchecked Sendable {
 
     private func start(_ video: [TLV8Item], audio audioTLV: [TLV8Item]?) {
         guard let prepared = lock.withLock({ prepared }) else { return }
+        guard allowed() else {
+            log("HomeKit live: not started: the camera is private")
+            return
+        }
         let attributes = video.value(0x03).flatMap { try? TLV8.decode($0) } ?? []
         let rtp = video.value(0x04).flatMap { try? TLV8.decode($0) } ?? []
         let width = LE.u16(attributes.value(0x01)) ?? 1280, height = LE.u16(attributes.value(0x02)) ?? 720

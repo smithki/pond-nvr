@@ -79,6 +79,9 @@ struct RecordingAndHomeKit: ServiceRunning {
     let statusPath: String
 
     func run(config: Config, passwords: [String: String], for seconds: Double?, log: EventLog) {
+        // Which cameras are private, kept beside the settings; applied by everything below as it changes.
+        PrivacyState.shared.load(path: PrivacyState.path(nextTo: statusPath))
+        for id in PrivacyState.shared.privateCameras.sorted() { log.log(id, "private: not recorded, shown live or served to HomeKit") }
         let host = HomeKitHost(records: CredentialHomeKitRecords(store: KeychainCredentialStore(service: Brand.homeKitKeychainService))) {
             line in log.log("homekit", line)
         }
@@ -93,7 +96,7 @@ struct RecordingAndHomeKit: ServiceRunning {
         let cameras = config.cameras
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
             guard let camera = cameras.first(where: { $0.main == url || $0.sub == url }),
-                  let password = passwords[camera.id] else { return nil }
+                  !PrivacyState.shared.isPrivate(camera.id), let password = passwords[camera.id] else { return nil }
             return (camera.username, password)
         }) { line in log.log("pond", line) }
         relay.start()
@@ -105,7 +108,10 @@ struct RecordingAndHomeKit: ServiceRunning {
         controls.start()
         // Cameras set to start live view at once: their sub-stream held open, so a viewer joins it mid-way.
         let keepers = cameras.filter(\.keepsLiveReady).compactMap { camera in
-            passwords[camera.id].map { StreamKeeper(url: camera.sub, username: camera.username, password: $0) }
+            passwords[camera.id].map { password in
+                StreamKeeper(url: camera.sub, username: camera.username, password: password,
+                             paused: { PrivacyState.shared.isPrivate(camera.id) })
+            }
         }
         for keeper in keepers { keeper.start() }
         RealService().run(config: config, passwords: passwords, for: seconds, log: log)
@@ -284,6 +290,53 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
     }
     semaphore.wait()
     exit(status)
+}
+
+/// `pond camera privacy ID [on|off]`: whether Pond keeps the camera private (not recorded, shown live or served to
+/// HomeKit), or makes it so. Through the service, which applies it at once (and has the camera itself follow,
+/// where its provider can); without the service running, kept for when it starts.
+if args.count >= 3, args[0] == "camera", args[1] == "privacy" {
+    guard let config = try? ConfigStore(path: configPath).load(), let camera = config.cameras.first(where: { $0.id == args[2] }) else {
+        FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
+        exit(1)
+    }
+    var wanted: Bool?
+    if args.count > 3 {
+        switch args[3] {
+        case "on": wanted = true
+        case "off": wanted = false
+        default:
+            FileHandle.standardError.write(Data("✗ Privacy is on or off.\n".utf8))
+            exit(1)
+        }
+    }
+    let service = ControlClient(path: ControlSocket.path(nextTo: configPath))
+    var isPrivate: Bool
+    if service.isAvailable {
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var reply = ControlSocket.Reply()
+        Task.detached {
+            reply = await service.ask(wanted.map { .init(camera: camera.id, action: "privacy.set", value: .on($0)) }
+                                      ?? .init(camera: camera.id, action: "privacy.list"))
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if let error = reply.error {
+            FileHandle.standardError.write(Data("✗ \(error.description)\n".utf8))
+            exit(1)
+        }
+        isPrivate = reply.privateCameras?.contains(camera.id) ?? false
+    } else {
+        let state = PrivacyState(path: PrivacyState.path(nextTo: configPath))
+        if let wanted {
+            state.set(camera.id, private: wanted)
+            print("· The service isn\u{2019}t running; it applies this when it starts.")
+        }
+        isPrivate = state.isPrivate(camera.id)
+    }
+    print(isPrivate ? "\(camera.name) is private: not recorded, shown live or served to HomeKit."
+                    : "\(camera.name) is not private.")
+    exit(0)
 }
 
 /// `pond camera item ID [ITEM [VALUE | do]]`: the camera's other controls, as items (night mode, image settings,

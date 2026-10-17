@@ -102,6 +102,33 @@ extension AppModel {
         await control(camera, .init(camera: camera, action: "item.do", item: item))
     }
 
+    // MARK: Privacy
+
+    var privacyPath: String { PrivacyState.path(nextTo: store.path) }
+
+    func isPrivate(_ camera: String) -> Bool { privateCameras.contains(camera) }
+
+    /// Which cameras are private, as kept (made so here, from the CLI, or by the Home app turning one off).
+    func refreshPrivacy() {
+        guard Date().timeIntervalSince(privacyChanged) > 1.5 else { return }
+        let now = PrivacyState(path: privacyPath).privateCameras
+        if now != privateCameras { withAnimation(.snappy(duration: 0.3)) { privateCameras = now } }
+    }
+
+    /// Makes a camera private or not: shown at once; through the service, which applies it (and has the camera
+    /// follow, where it can), or kept for it to apply when it starts.
+    func setPrivacy(_ camera: String, _ on: Bool) async {
+        privacyChanged = Date()
+        withAnimation(.snappy(duration: 0.3)) {
+            if on { privateCameras.insert(camera) } else { privateCameras.remove(camera) }
+        }
+        if controlClient.isAvailable {
+            if await control(camera, .init(camera: camera, action: "privacy.set", value: .on(on))) == nil { refreshPrivacy() }
+        } else {
+            PrivacyState(path: privacyPath).set(camera, private: on)
+        }
+    }
+
     /// Starts or stops talking through a camera (one at a time).
     func toggleTalk(_ camera: String) async {
         if let talking {

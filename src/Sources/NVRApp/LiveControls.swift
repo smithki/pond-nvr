@@ -642,6 +642,8 @@ struct LiveControlsDock: View {
     @Environment(AppModel.self) private var model
     let camera: Config.Camera
     let controls: Config.Controls
+    /// Shown (not slid away): only then does it ask the cameras' rail for room.
+    var open = true
     @State private var mover = PTZMover()
     /// The camera shown, which follows `camera` a moment later, in an update of its own (the stage switches
     /// cameras without animation, which would otherwise swap the controls at once): so they crossfade.
@@ -770,24 +772,17 @@ struct LiveControlsDock: View {
                 try? await Task.sleep(for: .seconds(0.4))
                 measured = true
             }
-            // The window made too narrow for the dock beside the sidebar: the rail makes room, as when the
-            // sidebar opens. Made wide enough again, the rail comes back, the sidebar open or not.
-            .onChange(of: available) { _, width in
-                let narrowest = self.width(.narrow, controls: current.controls, camera: current.camera.id)
-                if model.railMadeRoom, !showRail, !withSidebar, width - model.railWidth >= narrowest + 8 {
-                    withAnimation(LiveView.dockAnimation) { showRail = true }
-                    model.railMadeRoom = false
-                    return
-                }
-                guard model.adjustmentsInSidebar, showRail, !withSidebar, width < narrowest else { return }
-                withAnimation(LiveView.dockAnimation) { showRail = false }
-                model.railMadeRoom = true
+            .onChange(of: available) { _, width in fitRail(width) }
+            .onChange(of: width(.narrow, controls: current.controls, camera: current.camera.id), initial: true) { _, narrowest in
+                if abs(model.dockNarrowest - narrowest) > 1 { model.dockNarrowest = narrowest }
             }
+            .onChange(of: open) { fitRail(available) }
+            .onDisappear { model.railLimit = nil }
             // The rail shown by hand with no room for it beside the sidebar and the dock: the sidebar gives way
             // (the latest asked for wins).
             .onChange(of: showRail) { _, shown in
-                guard shown, model.adjustmentsInSidebar,
-                      available - model.railWidth < self.width(.narrow, controls: current.controls, camera: current.camera.id)
+                guard shown, model.adjustmentsInSidebar, !model.sidebarFloats,
+                      available - model.railWidth - LiveView.railGap < self.width(.narrow, controls: current.controls, camera: current.camera.id)
                 else { return }
                 adjusting = false
             }
@@ -810,19 +805,18 @@ struct LiveControlsDock: View {
             .onChange(of: adjusting && !DockContents.adjustments(current.controls).isEmpty, initial: true) { _, open in
                 guard model.adjustmentsInSidebar != open else { return }
                 withSidebar = true
-                // No room beside the sidebar for even the narrowest dock: the cameras' rail makes room (and comes
-                // back with the sidebar's going, unless shown or hidden meanwhile).
-                if open, showRail, available - LiveView.sidebarRoom < width(.narrow, controls: current.controls, camera: current.camera.id) {
+                // No room beside the sidebar for even the narrowest dock: the cameras' rail makes room. It comes
+                // back with the sidebar's going only if there's room for it then (checked once it has gone).
+                if open, showRail, !model.sidebarFloats,
+                   available - LiveView.sidebarRoom < width(.narrow, controls: current.controls, camera: current.camera.id) {
                     withAnimation(LiveView.dockAnimation) { showRail = false }
                     model.railMadeRoom = true
-                } else if !open, model.railMadeRoom {
-                    if !showRail { withAnimation(LiveView.dockAnimation) { showRail = true } }
-                    model.railMadeRoom = false
                 }
                 withAnimation(LiveView.dockAnimation) { model.adjustmentsInSidebar = open }
                 Task {
                     try? await Task.sleep(for: .seconds(0.6))
                     withSidebar = false
+                    fitRail(available)
                 }
             }
             .onDisappear { model.adjustmentsInSidebar = false }
@@ -835,8 +829,11 @@ struct LiveControlsDock: View {
         let narrow = arrangement == .narrow
         let natural = contentWidth(arrangement, controls: controls, camera: camera.id)
         let insets = insets(controls, narrow: narrow)
-        // Too narrow even for the narrowest: its controls smaller, never past its edges.
-        let scale = min(1, max(0.1, (available - insets) / natural))
+        // Too narrow even for the narrowest, with the rail out of the way: the whole dock smaller (its glass with
+        // its controls), never past its edges. Rare: the rail makes room first.
+        // (Not while the rail is still there: it steps aside first, and the dock shrunk for that moment
+        // was seen growing back.)
+        let scale = showRail && open ? 1 : min(1, max(0.1, available / (natural + insets)))
         return ZStack {
             DockContents(camera: camera, controls: controls, arrangement: arrangement,
                          left: side(for: controls, camera: camera.id), right: everydayWidth, mover: mover,
@@ -845,8 +842,6 @@ struct LiveControlsDock: View {
                 .transition(.opacity)
         }
         .frame(width: natural)
-        .scaleEffect(scale)
-        .frame(width: natural * scale)
         .padding(.leading, narrow ? 16 : 24)
         .padding(.trailing, adjustable ? 16 + Self.sidebarButton + 1 : narrow ? 16 : 24)
         .padding(.vertical, 16)
@@ -868,6 +863,7 @@ struct LiveControlsDock: View {
         // both (inside, the controls and strip moved while the glass took its new size at once).
         .animation(LiveView.dockAnimation, value: natural)
         .animation(LiveView.dockAnimation, value: narrow)
+        .scaleEffect(scale)
         // The right edge's name while the pointer rests there: just outside it, or, with no room beside the
         // dock (a narrow window), just above it.
         .overlay(alignment: .topTrailing) {
@@ -962,6 +958,23 @@ struct LiveControlsDock: View {
             closeMore()
             return .handled
         }
+    }
+
+    /// The cameras' rail and the open dock side by side: the window made too narrow for the dock's narrowest,
+    /// the rail makes room (as when the sidebar opens), and comes back once there's room again (or the dock
+    /// closes). The rail can't be dragged wider than leaves the dock room.
+    func fitRail(_ width: CGFloat) {
+        let narrowest = self.width(.narrow, controls: current.controls, camera: current.camera.id)
+        let limit: CGFloat? = open && showRail ? model.railWidth + width - narrowest : nil
+        if model.railLimit != limit { model.railLimit = limit }
+        if model.railMadeRoom, !showRail, !withSidebar, !open || width - model.railWidth - LiveView.railGap >= narrowest + 8 {
+            withAnimation(LiveView.dockAnimation) { showRail = true }
+            model.railMadeRoom = false
+            return
+        }
+        guard open, showRail, !withSidebar, width < narrowest else { return }
+        withAnimation(LiveView.dockAnimation) { showRail = false }
+        model.railMadeRoom = true
     }
 
     /// Its controls' widths, as they lay themselves out.
@@ -1063,6 +1076,7 @@ struct DockContents: View {
                 HStack(alignment: .top, spacing: 16) {
                     if let day = item("dayNight") { ItemView(camera: camera, item: day) }
                     picture
+                    privacy
                 }
                 HStack(alignment: .top, spacing: 16) {
                     ControlSection(title: "Positions") { positionsMenu(iconOnly: narrow, measuring: measuring) }
@@ -1093,12 +1107,14 @@ struct DockContents: View {
         ForEach(controls.items.filter { $0.id.hasPrefix("tour.") }) { tour in ItemView(camera: camera, item: tour) }
     }
 
-    /// What's used most, always in the same places: day and night and a picture of it; talking and how loud.
+    /// What's used most, always in the same places: day and night, a picture of it and its privacy; talking
+    /// and how loud.
     var everyday: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 18) {
                 if let day = item("dayNight") { ItemView(camera: camera, item: day) }
                 picture
+                privacy
             }
             HStack(alignment: .top, spacing: 18) {
                 talk
@@ -1216,6 +1232,30 @@ struct DockContents: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.roundedRectangle(radius: 12))
             .help("Save a picture of what \(camera.name) shows now (to Pictures › Pond)")
+            // Private: there's no picture to save.
+            .disabled(model.isPrivate(camera.id))
+        }
+    }
+
+    /// Pond's privacy for the camera: lit while it's private (not recorded, shown live or in the Home app).
+    var privacy: some View {
+        let on = model.isPrivate(camera.id)
+        let label = Image(systemName: on ? "eye.slash.fill" : "eye")
+            .font(.system(size: 16, weight: .semibold))
+            .contentTransition(.symbolEffect(.replace))
+            .frame(width: 38, height: 34)
+        let toggle = { Task { await model.setPrivacy(camera.id, !on) } }
+        return ControlSection(title: "Privacy") {
+            Group {
+                if on {
+                    Button { _ = toggle() } label: { label }.buttonStyle(.glassProminent)
+                } else {
+                    Button { _ = toggle() } label: { label }.buttonStyle(.glass)
+                }
+            }
+            .buttonBorderShape(.roundedRectangle(radius: 12))
+            .help(on ? "Turn privacy off: record and show \(camera.name) again"
+                     : "Make \(camera.name) private: not recorded, shown live or in the Home app")
         }
     }
 

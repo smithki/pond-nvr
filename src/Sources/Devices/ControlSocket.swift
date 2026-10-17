@@ -22,7 +22,8 @@ public enum ControlSocket {
     public struct Request: Codable, Sendable {
         public var camera: String
         /// "controls", "ptz.move", "ptz.stop", "ptz.presets", "ptz.goto", "ptz.save", "ptz.remove",
-        /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk".
+        /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
+        /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
@@ -50,10 +51,13 @@ public enum ControlSocket {
         public var value: Config.Controls.Value?
         public var values: [String: Config.Controls.Value]?
         public var sampleRate: Double?
+        /// The cameras made private in Pond.
+        public var privateCameras: [String]?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
-                    values: [String: Config.Controls.Value]? = nil, sampleRate: Double? = nil) {
+                    values: [String: Config.Controls.Value]? = nil, sampleRate: Double? = nil, privateCameras: [String]? = nil) {
+            self.privateCameras = privateCameras
             self.error = error
             self.controls = controls
             self.presets = presets
@@ -163,8 +167,12 @@ public final class ControlServer: @unchecked Sendable {
     /// Each camera's controls, worked out once and kept.
     private var controls: [String: CameraControls] = [:]
 
-    public init(path: String, lookup: @escaping Lookup, log: @escaping @Sendable (String) -> Void) {
+    /// Which cameras are private (Pond's own privacy, which "privacy.set" changes).
+    let privacy: PrivacyState
+
+    public init(path: String, privacy: PrivacyState = .shared, lookup: @escaping Lookup, log: @escaping @Sendable (String) -> Void) {
         self.path = path
+        self.privacy = privacy
         self.lookup = lookup
         self.log = log
     }
@@ -235,6 +243,11 @@ public final class ControlServer: @unchecked Sendable {
         // Requests until the app hangs up (or it's quiet for a long while).
         while let text = try? reader.line(timeout: 300) {
             guard let request = try? JSONDecoder().decode(ControlSocket.Request.self, from: Data(text.utf8)) else { return }
+            if request.action == "privacy.list" {
+                let reply = ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
+                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
+                continue
+            }
             guard let controls = cameraControls(request.camera) else {
                 _ = try? client.send(ControlSocket.line(ControlSocket.Reply(error: .failed("no camera \(request.camera)"))))
                 continue
@@ -243,10 +256,30 @@ public final class ControlServer: @unchecked Sendable {
                 talk(controls, camera: request.camera, client: client, reader: &reader)
                 return
             }
-            let reply = blocking { await Self.perform(request, on: controls) }
+            let reply = request.action == "privacy.set"
+                ? setPrivacy(request, on: controls)
+                : blocking { await Self.perform(request, on: controls) }
             if let error = reply.error, error != .notSupported { log("! controls: \(request.camera) \(request.action): \(error)") }
             guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
         }
+    }
+
+    /// Pond's privacy for the camera, at once (the service stops recording and showing it); then the camera's
+    /// own privacy mode where its provider can switch it, without waiting for it.
+    private func setPrivacy(_ request: ControlSocket.Request, on controls: CameraControls) -> ControlSocket.Reply {
+        guard case let .on(on)? = request.value else { return ControlSocket.Reply(error: .failed("on or off?")) }
+        if privacy.set(request.camera, private: on) { log("· \(request.camera): \(on ? "private" : "no longer private")") }
+        let camera = request.camera, log = self.log
+        Task {
+            do throws(ControlFailure) {
+                try await controls.withPrivacy { c throws(ControlFailure) in try await c.set(on) }
+                log("· \(camera): the camera's own privacy mode \(on ? "on" : "off")")
+            } catch .notSupported {
+            } catch {
+                log("! \(camera): the camera's own privacy mode: \(error)")
+            }
+        }
+        return ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
     }
 
     static func perform(_ request: ControlSocket.Request, on controls: CameraControls) async -> ControlSocket.Reply {

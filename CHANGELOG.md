@@ -45,6 +45,7 @@ The first version: recording, the app and HomeKit.
 - **Adjustments**: the camera's other settings in a sidebar from the dock's right edge: brightness, contrast, saturation, sharpness, setting home, relays, and whatever its make's API adds. The cameras' rail makes room for it when the window is narrow.
 - **Talking back** over ONVIF's RTSP backchannel (G.711), from a tile or the dock.
 - **The best way for each control**: every control goes through the camera's chosen way, then its make's own API, then ONVIF, passing over one that turns out not to work; one shared login per camera (cameras allow only a few). Reolink's API serves PTZ, positions, day and night and volume; ONVIF the rest.
+- **Privacy**: any camera can be made private (in the dock, the list's menu or its settings): not recorded, shown live or served to HomeKit, where it shows as off, until turned off; applied at once, and kept across restarts. The Home app's own camera off stays HomeKit's and never turns privacy off. `pond camera privacy ID [on|off]`.
 - `pond camera controls|ptz|item|night-mode|talk|abilities` try them from a terminal ([docs/controls.md](docs/controls.md)).
 
 ### The `pond` command

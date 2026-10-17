@@ -43,6 +43,13 @@ public final class Prebuffer: @unchecked Sendable {
     private var items: [Item] = []
     private var listeners: [UUID: @Sendable (Item) -> Void] = [:]
     private var stopped = false
+    private var pausedWhen: @Sendable () -> Bool = { false }
+    /// Not to be read just now (the camera is private): the stream let go and what was kept dropped, until it
+    /// may be read again.
+    public var paused: @Sendable () -> Bool {
+        get { lock.withLock { pausedWhen } }
+        set { lock.withLock { pausedWhen = newValue } }
+    }
     /// The camera's sound (its AAC AudioSpecificConfig as hex), once the stream is open.
     public private(set) var audioConfig: String?
 
@@ -89,7 +96,13 @@ public final class Prebuffer: @unchecked Sendable {
     private func run() {
         var pause = 2.0
         while !isStopped {
+            if paused() {
+                lock.withLock { items = [] }
+                Thread.sleep(forTimeInterval: 1)
+                continue
+            }
             if read() { pause = 2 }
+            if paused() { continue }
             let until = Date().addingTimeInterval(pause)
             while !isStopped, Date() < until { Thread.sleep(forTimeInterval: 0.2) }
             pause = min(pause * 2, 30)
@@ -108,7 +121,8 @@ public final class Prebuffer: @unchecked Sendable {
         var audioClock = session.audio.map { RTPClock(rate: $0.clockRate > 0 ? $0.clockRate : 16000) }
         var videoUnwrap = TimestampUnwrapper(), audioUnwrap = TimestampUnwrapper()
         var any = false
-        while !isStopped {
+        let paused = self.paused
+        while !isStopped, !paused() {
             guard let packet = try? session.next(timeout: 1) else { return any }
             let now = Date().timeIntervalSince1970
             switch packet.channel {

@@ -15,7 +15,7 @@ struct NVRApp: App {
             ContentView()
                 .environment(model)
                 .preferredColorScheme(appearance.scheme)
-                .frame(minWidth: 820, minHeight: 560)
+                .frame(minWidth: LiveView.minimumWindowWidth, minHeight: 560)
         }
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
@@ -223,6 +223,7 @@ struct ContentView: View {
             while !Task.isCancelled {
                 if tick % 2 == 0 { model.refreshService() }
                 model.refreshHomeKit()
+                model.refreshPrivacy()
                 tick += 1
                 try? await Task.sleep(for: .seconds(2))
             }

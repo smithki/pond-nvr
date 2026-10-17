@@ -53,8 +53,10 @@ enum CameraHealth: Equatable {
     case notRecording(since: Date?)
     /// Just added: its first minute isn't saved yet. Not a problem, but said, so the empty camera is explained.
     case startingToRecord
+    /// Made private in Pond: not recorded or shown, by choice. Not a problem.
+    case keptPrivate
 
-    var isProblem: Bool { self != .ok && self != .startingToRecord }
+    var isProblem: Bool { self != .ok && self != .startingToRecord && self != .keptPrivate }
     /// Has something to say on the tile.
     var showsBadge: Bool { self != .ok }
 
@@ -65,6 +67,7 @@ enum CameraHealth: Equatable {
         case .noPicture: "No picture"
         case .notRecording: "Not recording"
         case .startingToRecord: "Starting to record"
+        case .keptPrivate: "Private"
         }
     }
 
@@ -75,6 +78,7 @@ enum CameraHealth: Equatable {
         case .noPicture: "eye.slash"
         case .notRecording: "record.circle"
         case .startingToRecord: "hourglass"
+        case .keptPrivate: "eye.slash"
         }
     }
 
@@ -87,6 +91,7 @@ enum CameraHealth: Equatable {
             "Nothing recorded since \(since.formatted(date: .omitted, time: .shortened))."
         case .notRecording(nil): "Nothing recorded yet."
         case .startingToRecord: "Just added. The first minute of recording is saved about a minute after it starts."
+        case .keptPrivate: "Private: not recorded, shown live or in the Home app."
         }
     }
 

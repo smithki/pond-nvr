@@ -105,9 +105,14 @@ public final class HomeKitHost: @unchecked Sendable {
     private var status = HomeKitStatus()
     private var watchers: [CameraEvents] = []
     private let lock = NSLock()
+    /// Pond's privacy: a private camera has no live view, snapshots or motion in HomeKit, and shows as off in
+    /// the Home app; turning it off or on there makes it private or not.
+    let privacy: PrivacyState
+    private var privacyObservers: [UUID] = []
 
-    public init(records: HomeKitRecords, log: @escaping @Sendable (String) -> Void) {
+    public init(records: HomeKitRecords, privacy: PrivacyState = .shared, log: @escaping @Sendable (String) -> Void) {
         self.records = records
+        self.privacy = privacy
         self.log = log
     }
 
@@ -213,7 +218,22 @@ public final class HomeKitHost: @unchecked Sendable {
         snapshots.keyframe = { streams.lazy.compactMap(\.latestKeyframe).first }
         let name = camera.name
         let log = self.log
+        let privacy = self.privacy
+        for stream in streams { stream.allowed = { !privacy.isPrivate(id) } }
+        // Nor its main stream held for HomeKit Secure Video's prebuffer.
+        recording?.prebuffer?.paused = { privacy.isPrivate(id) }
+        // Private: off in the Home app and its live views ended (the Home app's own on and off is HomeKit's,
+        // and never changes Pond's privacy).
+        recording?.setPrivate(privacy.isPrivate(id))
+        let observer = privacy.observe { [weak recording] camera, isPrivate in
+            guard camera == id else { return }
+            recording?.setPrivate(isPrivate)
+            if isPrivate { for stream in streams { stream.stop() } }
+        }
+        lock.withLock { privacyObservers.append(observer) }
         server.snapshot = { [weak self] width, height in
+            // None while private (the Home app shows the camera as off).
+            if privacy.isPrivate(id) { return nil }
             let jpeg = await snapshots.jpeg(width: width, height: height)
             if jpeg == nil {
                 log("! HomeKit: no snapshot from \(name)")
@@ -306,7 +326,9 @@ public final class HomeKitHost: @unchecked Sendable {
             return false
         }
         let motion = MotionHold(accessory: accessory, name: name, log: log)
-        events.start(motion: { moving in motion.set(moving) }, pressed: { [weak accessory] in
+        // Private: no motion (nothing watches the camera). A doorbell still rings: someone is at the door.
+        let privacy = self.privacy
+        events.start(motion: { moving in motion.set(moving && !privacy.isPrivate(id)) }, pressed: { [weak accessory] in
             guard doorbell else { return }
             log("HomeKit: \(name) rang")
             accessory?.ring()
@@ -325,6 +347,8 @@ public final class HomeKitHost: @unchecked Sendable {
         }
         for e in events { e.stop() }
         for r in all { r.listener.stop() }
+        for observer in lock.withLock({ privacyObservers }) { privacy.forget(observer) }
+        lock.withLock { privacyObservers = [] }
         lock.withLock {
             for id in status.cameras.keys { status.cameras[id]?.running = false; status.cameras[id]?.viewers = 0 }
         }

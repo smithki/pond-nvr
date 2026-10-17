@@ -131,6 +131,15 @@ extension ItemControl {
     public func perform() async throws(ControlFailure) { throw .notSupported }
 }
 
+// MARK: - Privacy
+
+/// The camera's own privacy mode: it stops sending video and sound itself (Pond's privacy, PrivacyState, works
+/// for every camera; this is the camera following it, where its provider can switch it).
+public protocol PrivacyControl: Sendable {
+    func isOn() async throws(ControlFailure) -> Bool
+    func set(_ on: Bool) async throws(ControlFailure)
+}
+
 // MARK: - Talking back
 
 public protocol TalkControl: Sendable {
@@ -172,6 +181,7 @@ public actor CameraControls {
 
     private var ptzChoice: Choice<any PTZControl> = .unknown
     private var talkChoice: Choice<any TalkControl> = .unknown
+    private var privacyChoice: Choice<any PrivacyControl> = .unknown
     /// Each item, by id, from the first provider that declares it; nil until asked. `itemsRetry`: a provider
     /// couldn't be asked, so they're asked again after then.
     private var itemChoice: [String: (control: any ItemControl, index: Int)]?
@@ -211,6 +221,24 @@ public actor CameraControls {
         talkChoice = await resolve(talkChoice) { await $0.talk(access) }
         if case let .chosen(control, _, _) = talkChoice { return control }
         return nil
+    }
+
+    public func privacy() async -> (any PrivacyControl)? {
+        privacyChoice = await resolve(privacyChoice) { await $0.privacy(access) }
+        if case let .chosen(control, _, _) = privacyChoice { return control }
+        return nil
+    }
+
+    /// Does `work` with the camera's own privacy mode; if that provider says it can't, with the next one.
+    public func withPrivacy<T: Sendable>(_ work: (any PrivacyControl) async throws(ControlFailure) -> T) async throws(ControlFailure) -> T {
+        while true {
+            guard let control = await privacy() else { throw .notSupported }
+            do {
+                return try await work(control)
+            } catch .notSupported {
+                privacyChoice = await passOver(privacyChoice) { await $0.privacy(access) }
+            }
+        }
     }
 
     /// Everything it can be controlled with, worked out (for the settings).

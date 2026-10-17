@@ -68,4 +68,27 @@ import Testing
         #expect(kept.states.last?.selected == Self.hubChoice)
         #expect(throws: HAPStatus.self) { try management.characteristic(HAPType.selectedCameraRecordingConfiguration)!.write(.tlv8([9])) }
     }
+
+    /// Private in Pond: off in the Home app; the Home app turning it on keeps its choice for later but doesn't
+    /// end the privacy (the hub writes it again on reconnecting, and with home and away modes).
+    @Test func privacyIsOneWay() throws {
+        let recording = RecordingController(options: RecordingOptions(doorbell: false), state: nil) { _ in }
+        defer { recording.stop() }
+        let camera = CameraAccessory(name: "Porch", details: AccessoryDetails(device: nil, cameraID: "porch"), recording: recording)
+        let mode = try #require(camera.accessory.services.first { $0.type == "21A" })
+        let active = try #require(mode.characteristic(HAPType.homeKitCameraActive))
+        #expect(active.value == .int(1))
+        recording.setPrivate(true)
+        #expect(active.value == .int(0))
+        _ = try active.write(.int(1))
+        #expect(!recording.cameraOn)
+        // Privacy over: as the Home app last had it.
+        recording.setPrivate(false)
+        #expect(recording.cameraOn && active.value == .int(1))
+        // The Home app's own off stays off when privacy ends.
+        _ = try active.write(.int(0))
+        recording.setPrivate(true)
+        recording.setPrivate(false)
+        #expect(!recording.cameraOn)
+    }
 }

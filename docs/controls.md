@@ -41,6 +41,19 @@ A camera set to **Video only** has none. Each control is resolved on its own:
 
 What a camera has is worked out when it's identified (or with `pond camera controls ID --save`) and kept in its settings (`device.controls`), so the app shows only what works without asking the camera first.
 
+## Privacy
+
+A camera made **private** isn't recorded, shown live or served to HomeKit until it's made public again: Pond's own privacy, so it works for every camera. The service keeps which cameras are private in `privacy.json` beside the settings and applies a change at once, without a restart:
+
+- the recorder closes the camera's segment and lets go of its connection;
+- live views in the app end, and new ones aren't served (`StreamRelayServer` asks again while a stream is read);
+- the sub-stream held ready for instant live view, and HomeKit Secure Video's prebuffer, let go too;
+- in HomeKit there are no live views, snapshots, motion or recordings, and the Home app shows the camera as off. A doorbell still rings: someone is at the door.
+
+The link with HomeKit is one way. The Home app's own camera on and off stays HomeKit's: the hub writes it again whenever it reconnects, and with home and away modes, so it never changes Pond's privacy. Pond keeps the Home app's setting, and when privacy ends the camera goes back to it.
+
+A provider that can switch a camera's own privacy mode offers a `PrivacyControl`; the service then has the camera follow Pond's privacy as well (none does yet: Reolink's privacy mode is in its own Baichuan protocol). In the app: **Privacy** in the dock, **Make Private** in a camera's menu in the list, and **Private** in its settings; `pond camera privacy ID [on|off]` from a terminal.
+
 ## Connections
 
 `CameraSessions` keeps one connection per camera and protocol in the service, shared by every control: one ONVIF client (its services and profile, asked once) and one Reolink login. Cameras allow only a few logins at once (a Reolink answers "max session" when they're used up, shown as busy), so logins are shared, made one at a time, and logged out when the service stops; CLI commands log out when done.

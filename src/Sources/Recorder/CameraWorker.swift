@@ -1,6 +1,7 @@
 // Records one camera continuously, on its own thread: connect, record segments, and when anything fails,
 // close the current segment and connect again after a pause that grows (1 s up to 30 s). Privacy mode is
-// recognised and retried every 30 s without filling the log.
+// recognised and retried every 30 s without filling the log. A camera made private in Pond (PrivacyState) isn't
+// recorded: its segment is closed and its connection let go until it's made public again.
 import Foundation
 import Ingest
 import NVRCore
@@ -10,6 +11,8 @@ public final class CameraWorker: @unchecked Sendable {
         case connecting
         case recording(since: Date)
         case privacyMode
+        /// Made private in Pond: not recorded, by choice.
+        case keptPrivate
         case offline(String)
         case storageUnavailable(String)
         case stopped
@@ -23,6 +26,8 @@ public final class CameraWorker: @unchecked Sendable {
     let stallSeconds: Double
     /// Where the camera's stream comes from, shared with HomeKit.
     let hub: StreamHub
+    let privacy: PrivacyState
+    private var privacyObserver: UUID?
 
     private let lock = NSCondition()
     private var stopping = false
@@ -37,8 +42,10 @@ public final class CameraWorker: @unchecked Sendable {
     }
 
     public init(camera: Config.Camera, password: String, recordingsRoot: String, log: EventLog,
-                segmentSeconds: Double = 60, stallSeconds: Double = 10, hub: StreamHub = .shared) {
+                segmentSeconds: Double = 60, stallSeconds: Double = 10, hub: StreamHub = .shared,
+                privacy: PrivacyState = .shared) {
         self.hub = hub
+        self.privacy = privacy
         self.camera = camera
         self.password = password
         root = recordingsRoot
@@ -48,6 +55,14 @@ public final class CameraWorker: @unchecked Sendable {
     }
 
     public func start() {
+        // Made private or public: woken at once.
+        let id = camera.id
+        privacyObserver = privacy.observe { [weak self] camera, _ in
+            guard camera == id, let self else { return }
+            self.lock.lock()
+            self.lock.broadcast()
+            self.lock.unlock()
+        }
         let t = Thread { [self] in run() }
         t.name = "pond camera \(camera.id)"
         thread = t
@@ -61,6 +76,16 @@ public final class CameraWorker: @unchecked Sendable {
         lock.broadcast()
         let deadline = Date().addingTimeInterval(timeout)
         while !finished, lock.wait(until: deadline) {}
+        lock.unlock()
+        if let privacyObserver { privacy.forget(privacyObserver) }
+    }
+
+    /// Waits while the camera is private (woken when that changes, or when stopped).
+    private func waitWhilePrivate() {
+        lock.lock()
+        while !stopping, privacy.isPrivate(camera.id) {
+            _ = lock.wait(until: Date().addingTimeInterval(5))
+        }
         lock.unlock()
     }
 
@@ -85,6 +110,8 @@ public final class CameraWorker: @unchecked Sendable {
     }
 
     private enum Stall: Error {
+        /// Made private in Pond while recording.
+        case keptPrivate
         case privacy
         case noVideo(Double)
     }
@@ -99,6 +126,16 @@ public final class CameraWorker: @unchecked Sendable {
         var lastReported = Date()
 
         while !isStopping {
+            if privacy.isPrivate(camera.id) {
+                log.log(camera.id, "private: not recording")
+                setStatus(.keptPrivate)
+                waitWhilePrivate()
+                if isStopping { break }
+                log.log(camera.id, "no longer private")
+                backoff = 1
+                lastProblem = nil
+                continue
+            }
             setStatus(.connecting)
             var recorder: StreamRecorder?
             do {
@@ -110,6 +147,7 @@ public final class CameraWorker: @unchecked Sendable {
                 var senderPackets: UInt32?
                 var announced = false
                 while !isStopping {
+                    if privacy.isPrivate(camera.id) { throw Stall.keptPrivate }
                     let packet = try session.next(timeout: 1)
                     let now = Date()
                     if let packet {
@@ -142,6 +180,8 @@ public final class CameraWorker: @unchecked Sendable {
                 files.handle(r.finish())
             } catch {
                 files.handle(recorder?.finish() ?? [])
+                // Private: the segment is closed and the connection let go; not a problem.
+                if case Stall.keptPrivate = error { continue }
                 let problem: String
                 var wait = backoff
                 switch error {

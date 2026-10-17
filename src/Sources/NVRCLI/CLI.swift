@@ -118,6 +118,15 @@ public struct CLI {
       camera discover                              cameras on the local network, and which are set up
       camera onvif ID [--trace] [--events [S]]     what the camera says over ONVIF: service, profiles, streams, events
 
+    Controls (through the service when it runs; --via reolink|onvif tries one way alone)
+      camera privacy ID [on|off]                   private: not recorded, shown live or served to HomeKit
+      camera controls ID [--save]                  what the camera can be controlled with, and which way each goes
+      camera ptz ID presets | goto PRESET | move PAN TILT [ZOOM] [--for S] | stop
+      camera item ID [ITEM [VALUE | do]]           its other controls: day and night, picture, volume, home, relays
+      camera night-mode ID [auto|day|night]
+      camera talk ID [--tone S]                    a quiet tone through the camera's speaker
+      camera abilities ID                          everything the camera says it can do, every way Pond asks
+
     HomeKit
       homekit code                                 setup codes and QR codes for the cameras not yet in a home
       homekit reset ID                             forget a camera's HomeKit identity and pairings

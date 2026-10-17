@@ -108,7 +108,8 @@ struct ByteReader {
 
 /// In the service: answers the app's requests for streams from the shared camera connections.
 public final class StreamRelayServer: @unchecked Sendable {
-    /// A stream's login, if it is one of the service's cameras'.
+    /// A stream's login, if it is one of the service's cameras' and may be shown (not private); asked again
+    /// while it's read, so a camera made private stops being shown at once.
     public typealias Lookup = @Sendable (_ url: String) -> (username: String, password: String)?
 
     let path: String
@@ -194,9 +195,18 @@ public final class StreamRelayServer: @unchecked Sendable {
         }
         defer { source.close() }
         guard send(StreamRelay.Reply(video: source.video, audio: source.audio), to: client) else { return }
+        var checked = Date()
         while true {
             // The app sends nothing after its request: the socket turns readable only when it hangs up.
             do { _ = try client.receive(timeout: 0) } catch { return }
+            // No longer to be shown (made private): ended.
+            if Date().timeIntervalSince(checked) > 0.5 {
+                checked = Date()
+                if lookup(request.url) == nil {
+                    try? client.send(StreamRelay.frame(StreamRelay.endChannel, []))
+                    return
+                }
+            }
             do throws(RTSPError) {
                 guard let packet = try source.next(timeout: 0.5) else { continue }
                 let channel = packet.replayed ? packet.channel | StreamRelay.replayedBit : packet.channel
@@ -224,14 +234,18 @@ public final class StreamKeeper: @unchecked Sendable {
     let username: String
     let password: String
     let hub: StreamHub
+    /// Not to be held open just now (the camera is private): let go until it may be again.
+    let paused: @Sendable () -> Bool
     private let lock = NSLock()
     private var stopped = false
 
-    public init(url: String, username: String, password: String, hub: StreamHub = .shared) {
+    public init(url: String, username: String, password: String, hub: StreamHub = .shared,
+                paused: @escaping @Sendable () -> Bool = { false }) {
         self.url = url
         self.username = username
         self.password = password
         self.hub = hub
+        self.paused = paused
     }
 
     var isStopped: Bool { lock.withLock { stopped } }
@@ -248,12 +262,17 @@ public final class StreamKeeper: @unchecked Sendable {
     private func run() {
         var pause = 2.0
         while !isStopped {
+            if paused() {
+                Thread.sleep(forTimeInterval: 1)
+                continue
+            }
             if let source = try? hub.open(url: url, username: username, password: password) {
                 pause = 2
-                while !isStopped {
+                while !isStopped, !paused() {
                     do { _ = try source.next(timeout: 0.5) } catch { break }
                 }
                 source.close()
+                if paused() { continue }
             }
             let until = Date().addingTimeInterval(pause)
             while !isStopped, Date() < until { Thread.sleep(forTimeInterval: 0.2) }

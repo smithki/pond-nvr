@@ -41,6 +41,11 @@ struct LiveView: View {
     /// The dock is shown once what's in it is known (a camera's positions, its night mode): opening before, it
     /// shifted as they arrived. Known once a session; switching cameras after, the dock stays open.
     @State private var dockReady = false
+    /// The rail has just stepped aside for the controls: a note says so for a moment.
+    @State private var railNote = false
+    /// The live view's width (the rail, the stage and the adjustments' column).
+    @State private var contentWidth: CGFloat = 0
+    @State private var railNoteTask: Task<Void, Never>?
 
     private var controlsOpen: Bool { controlsWanted && dockReady }
     @State private var snapshots = CameraSnapshots()
@@ -112,7 +117,7 @@ struct LiveView: View {
                                     VStack(spacing: 8) {
                                         controlsButton
                                         // Centred, as wide as it needs (it lays itself out for narrower windows).
-                                        LiveControlsDock(camera: docked.camera, controls: docked.controls)
+                                        LiveControlsDock(camera: docked.camera, controls: docked.controls, open: controlsOpen)
                                             .opacity(controlsOpen ? 1 : 0)
                                     }
                                     .padding(.horizontal, 12)
@@ -126,9 +131,22 @@ struct LiveView: View {
                                 .transition(.opacity)
                         }
                     }
+                    // In a window too narrow for the dock and the adjustments side by side: the adjustments over
+                    // the stage's right side, down to just above the dock (its edge stays clear).
+                    .overlay(alignment: .topTrailing) {
+                        if let docked, controlsOpen, model.adjustmentsInSidebar, model.sidebarFloats {
+                            AdjustmentsView(camera: docked.camera, controls: docked.controls)
+                                .frame(width: Self.sidebarRoom - 12)
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .padding([.top, .trailing], 12)
+                                .padding(.bottom, Self.dockToggleRoom + 12 + LiveControlsDock.height() + 12)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                     // The docked camera's adjustments, down the right as the rail is down the left: the picture
                     // keeps its height.
-                    if let docked, controlsOpen, model.adjustmentsInSidebar {
+                    if let docked, controlsOpen, model.adjustmentsInSidebar, !model.sidebarFloats {
                         AdjustmentsView(camera: docked.camera, controls: docked.controls)
                             .frame(width: Self.sidebarRoom - 12)
                             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -167,6 +185,32 @@ struct LiveView: View {
                         .hidden()
                 }
                 .animation(.snappy(duration: 0.25), value: showRail)
+                // Whether the adjustments fit beside the stage (the rail out of the way if need be) or float over it.
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+                .onChange(of: contentWidth - Self.stageMargins - Self.sidebarRoom < model.dockNarrowest, initial: true) { _, floats in
+                    if model.sidebarFloats != floats { model.sidebarFloats = floats }
+                }
+                // The rail stepped aside for the controls: said for a moment, where it was, then gone.
+                .overlay(alignment: .topLeading) {
+                    Label("Cameras hidden to make room for the controls", systemImage: "sidebar.leading")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(.regularMaterial, in: .capsule)
+                        .padding(14)
+                        .opacity(railNote ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.3), value: railNote)
+                        .allowsHitTesting(false)
+                }
+                .onChange(of: model.railMadeRoom) { _, madeRoom in
+                    railNoteTask?.cancel()
+                    railNote = madeRoom
+                    guard madeRoom else { return }
+                    railNoteTask = Task {
+                        try? await Task.sleep(for: .seconds(2.5))
+                        if !Task.isCancelled { railNote = false }
+                    }
+                }
                 // Shown again by hand: no longer hidden for the sidebar's sake.
                 .onChange(of: showRail) { _, shown in if shown { model.railMadeRoom = false } }
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
@@ -197,6 +241,7 @@ struct LiveView: View {
     /// How a camera is doing. Staleness of recordings counts while the recorder runs; in the mock (where
     /// nothing records), against the newest recording of any camera, so a camera that stopped stands out.
     func health(_ id: String, cameras: [Config.Camera]) -> CameraHealth {
+        if model.isPrivate(id) { return .keptPrivate }
         let asOf: Date? = model.isRecording ? Date()
             : MockEvents.enabled ? cameras.compactMap { snapshots[$0.id]?.time }.max() : nil
         return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
@@ -209,6 +254,16 @@ struct LiveView: View {
     static let dockToggleRoom: CGFloat = 52
     /// What the adjustments' sidebar takes from the stage: its width and its margin.
     static let sidebarRoom: CGFloat = 292
+    /// The narrowest dock of a camera with every everyday control (day and night, a picture, privacy;
+    /// positions, talking, volume, home), as measured.
+    static let narrowestDock: CGFloat = 604
+    static let stageMargins: CGFloat = 24
+    /// What the cameras' rail takes from the stage besides its own width: the gap between them.
+    static let railGap: CGFloat = 18
+    /// The window's narrowest: that dock with the stage's margins (the cameras' rail out of the way, the
+    /// adjustments floating over the stage), so the dock never has to shrink; narrow enough that Pond fits in
+    /// half of any Mac's screen beside another app.
+    static let minimumWindowWidth: CGFloat = 640
     /// The longest the dock waits for what it holds before opening.
     static let dockWait = 0.8
     /// The show and hide button's height (a large glass capsule).
@@ -234,13 +289,12 @@ struct LiveView: View {
         .help(controlsOpen ? "Hide the controls (\u{2325}\u{2318}L)" : "Show this camera\u{2019}s controls (\u{2325}\u{2318}L)")
     }
 
-    /// The camera whose controls go under the stage: the one watched on its own, if it has any to show
-    /// there (talking back is on the tile).
+    /// The camera whose controls go under the stage: the one watched on its own. Every camera has some (a
+    /// picture of it, its privacy), besides what it can be controlled with.
     func docked(_ cameras: [Config.Camera]) -> (camera: Config.Camera, controls: Config.Controls)? {
         let ids = staged(cameras)
-        guard ids.count == 1, let camera = cameras.first(where: { $0.id == ids[0] }), let controls = model.controls(for: camera),
-              controls.ptz != nil || !controls.items.isEmpty else { return nil }
-        return (camera, controls)
+        guard ids.count == 1, let camera = cameras.first(where: { $0.id == ids[0] }) else { return nil }
+        return (camera, model.controls(for: camera) ?? Config.Controls())
     }
 
     func setControls(open: Bool) {
@@ -255,13 +309,13 @@ struct LiveView: View {
     }
 
     /// The shortcut: shows or hides the controls of the camera watched on its own; with several on the stage,
-    /// the first that has controls is watched on its own with them open.
+    /// the first that can be moved or adjusted (else the first) is watched on its own with them open.
     func shortcut(_ cameras: [Config.Camera]) {
         if docked(cameras) != nil { return setControls(open: !controlsWanted) }
         let ids = staged(cameras)
         guard let id = ids.first(where: { id in
             cameras.first { $0.id == id }.flatMap { model.controls(for: $0) }.map { $0.ptz != nil || !$0.items.isEmpty } == true
-        }) else { return }
+        }) ?? ids.first else { return }
         openControls(id)
     }
 
@@ -420,6 +474,7 @@ struct CameraRail: View {
     let reorder: (String, String) -> Void
     @AppStorage("liveRailWidth") private var width = CameraRail.defaultWidth
     @State private var dragStart: Double?
+    @Environment(AppModel.self) private var model
 
     static let defaultWidth = 220.0
     static let widths = 180.0 ... 460.0
@@ -481,7 +536,9 @@ struct CameraRail: View {
             ResizeHandle { dx in
                 let start = dragStart ?? width
                 dragStart = start
-                width = (start + dx).clamped(to: Self.widths)
+                // No wider than leaves the open controls room.
+                let widest = max(Self.widths.lowerBound, min(Self.widths.upperBound, model.railLimit ?? .infinity))
+                width = (start + dx).clamped(to: Self.widths.lowerBound ... widest)
             } onEnd: {
                 dragStart = nil
             } onReset: {
@@ -621,7 +678,10 @@ struct RailThumbnail: View {
             Color.black
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .overlay {
-                    if let snapshot {
+                    // Private: not even its last picture.
+                    if model.isPrivate(camera.id) {
+                        Image(systemName: "eye.slash").font(.title3).foregroundStyle(.tertiary)
+                    } else if let snapshot {
                         Image(decorative: snapshot.image, scale: 1).resizable().aspectRatio(contentMode: .fill)
                             // A camera with a problem shows its last picture faded, so it stands out at a glance.
                             .opacity(health.isProblem ? 0.4 : 1)
@@ -683,9 +743,12 @@ struct RailThumbnail: View {
         .onTapGesture(perform: click)
         .contextMenu {
             Button("Watch Only This", action: solo)
-            // Its controls, with it on its own: only for a camera that has them.
-            if model.controls(for: camera).map({ $0.ptz != nil || !$0.items.isEmpty }) == true {
-                Button("Control This Camera", systemImage: "slider.horizontal.3", action: openControls)
+            // Its controls, with it on its own.
+            Button("Control This Camera", systemImage: "slider.horizontal.3", action: openControls)
+            if model.isPrivate(camera.id) {
+                Button("Turn Off Privacy", systemImage: "eye") { Task { await model.setPrivacy(camera.id, false) } }
+            } else {
+                Button("Make Private", systemImage: "eye.slash") { Task { await model.setPrivacy(camera.id, true) } }
             }
             Button(onStage ? "Take Off the Screen" : "Add to the Screen", action: toggle)
                 .disabled(onStage && !canRemove)
@@ -1073,11 +1136,13 @@ struct RecedeEffect: GeometryEffect {
 }
 
 /// What a tile is showing.
-enum TileStatus: Equatable {
+enum TileStatus: Hashable {
     case noPassword, connecting, playing, noPicture
     /// Live view comes through the service: it isn't running, or hasn't taken this camera on.
     case serviceStopped, serviceBehind
     case failed(String)
+    /// Made private in Pond: not shown (nor recorded).
+    case keptPrivate
 }
 
 /// Each tile's status, collected by the stage.
@@ -1178,13 +1243,14 @@ struct CameraTile: View {
     /// Its speaker has the microphone.
     var talking: Bool { model.talking?.camera == camera.id }
     /// It has controls for the dock under the stage.
-    var hasDockControls: Bool { model.controls(for: camera).map { $0.ptz != nil || !$0.items.isEmpty } == true }
+    var hasDockControls: Bool { true }
 
     /// Show the hover controls: the pointer is on the tile, or in its popover.
     var hovering: Bool { pointerInside || popoverOpen }
 
     var status: TileStatus {
         if let frozen { return frozen }
+        if model.isPrivate(camera.id) { return .keptPrivate }
         if noPassword { return .noPassword }
         switch stream?.state {
         case .playing?: return .playing
@@ -1204,7 +1270,8 @@ struct CameraTile: View {
         Group {
             ZStack {
                 Color.black
-                if let snapshot, !playing || frozen != nil {
+                // Private: not even its last picture.
+                if let snapshot, !playing || frozen != nil, status != .keptPrivate {
                     // Dimmed behind a message; a stand-in for a playing tile shows it plainly. Whole, as the video
                     // is (a squarer camera gets bars at the sides), so nothing jumps when the video takes over.
                     Image(decorative: snapshot, scale: 1).resizable().aspectRatio(contentMode: .fit)
@@ -1213,9 +1280,12 @@ struct CameraTile: View {
                 if frozen == nil {
                     // The stream taking over underneath, drawing all along (unseen, a view doesn't draw, and one
                     // shown later rose from black); the current one over it until the new one is ready.
+                    // Made private: faded out where it is (then stopped); taken out at once, its view was drawn
+                    // shrinking into a corner as the change animated.
+                    let hidden = model.isPrivate(camera.id)
                     ForEach([incoming, stream].compactMap { $0 }) { s in
                         VideoLayerView(layer: s.layer, videoSize: s.size)
-                            .opacity(s.state == .playing ? 1 : 0)
+                            .opacity(s.state == .playing && !hidden ? 1 : 0)
                     }
                 }
             }
@@ -1228,9 +1298,17 @@ struct CameraTile: View {
             // scale animates with the tile as one piece, where changing fonts and spacing would make the
             // icon, title and detail each drift to their new places.
             .overlay {
-                status(compact: compact)
-                    .scaleEffect(compact ? 0.8 : 1)
-                    .offset(y: compact ? -10 : 0)
+                // Always there, centred on the tile; a new message (made private, say) fades in where it
+                // belongs, not laid out from a corner as the change animates.
+                ZStack {
+                    status(compact: compact)
+                        .id(status)
+                        .transition(.opacity)
+                }
+                // The tile's size whatever it holds: grown from nothing, it drew the message drifting in.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scaleEffect(compact ? 0.8 : 1)
+                .offset(y: compact ? -10 : 0)
             }
             .overlay(alignment: .bottomLeading) { badges(compact: compact).padding(compact ? 7 : 10) }
             // The overlays below are always laid out and only faded in and out: views added or removed
@@ -1283,9 +1361,9 @@ struct CameraTile: View {
                     .allowsHitTesting(false)
             }
             .overlay {
-                // Something is wrong: the tile's edge says so too.
+                // Something is wrong, or it's private: the tile's edge says so too.
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(health.tint.opacity(health.isProblem ? 0.7 : 0), lineWidth: 2)
+                    .strokeBorder(health.tint.opacity(health.showsEdge ? 0.7 : 0), lineWidth: 2)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -1297,8 +1375,13 @@ struct CameraTile: View {
         .preference(key: TileStatuses.self, value: frozen == nil ? [camera.id: status] : [:])
         .onChange(of: audible) { _, heard in stream?.muted = !heard }
         .onDisappear { stopStreams() }
-        .task(id: "\(camera.id) \(camera.main) \(camera.sub) \(camera.username) \(mainStream)") {
+        .task(id: "\(camera.id) \(camera.main) \(camera.sub) \(camera.username) \(mainStream) \(model.isPrivate(camera.id))") {
             guard frozen == nil else { return }
+            // Private: not connected at all (once the picture has faded).
+            guard !model.isPrivate(camera.id) else {
+                try? await Task.sleep(for: .seconds(0.4))
+                return stopStreams()
+            }
             await play()
         }
     }
@@ -1354,7 +1437,8 @@ struct CameraTile: View {
                 }
             }
             .onChange(of: hovering && frozen == nil, initial: true) { _, show in showGear(show) }
-            if model.isRecording {
+            // Not while it's private: it isn't being recorded.
+            if model.isRecording, !model.isPrivate(camera.id) {
                 HStack(spacing: 5) {
                     Circle().fill(.red).frame(width: compact ? 7 : 8, height: compact ? 7 : 8)
                     if !compact { Text("REC").font(.callout.weight(.bold)) }
@@ -1423,6 +1507,10 @@ struct CameraTile: View {
             .environment(\.colorScheme, .dark)
         case .playing:
             EmptyView()
+        case .keptPrivate:
+            TileMessage(symbol: "eye.slash", title: "Private",
+                        detail: "Not recorded, shown or in the Home app until you turn privacy off.", compact: compact,
+                        action: ("Turn Off Privacy", { Task { await model.setPrivacy(camera.id, false) } }))
         case .noPicture:
             TileMessage(symbol: "eye.slash", title: "No picture",
                         detail: "The camera is connected but sends no video. Is privacy mode on?", compact: compact)
@@ -1557,8 +1645,13 @@ extension CameraHealth {
         case .offline: .red
         case .noPicture, .notRecording: .orange
         case .startingToRecord: .gray
+        // Private: a quiet dark blue-purple, apart from the problems' warm colours.
+        case .keptPrivate: .indigo
         }
     }
+
+    /// The tile's edge in its colour: for a problem, and for privacy.
+    var showsEdge: Bool { isProblem || self == .keptPrivate }
 }
 
 /// A camera's problem, as a small glass badge in the problem's colour.
@@ -1721,6 +1814,8 @@ struct TileMessage: View {
                             Button(action.label, action: action.perform)
                                 .buttonStyle(.glass)
                                 .controlSize(.regular)
+                                // Its own width, not the title's (which the detail hangs from).
+                                .fixedSize()
                         }
                     }
                     .alignmentGuide(.bottom) { $0[.top] - 6 }

@@ -51,6 +51,8 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Imaging | done | Day/night (IR cut filter), brightness, contrast, saturation, sharpness; speaker volume; relay outputs. The everyday ones in the dock, the rest in its Adjustments sidebar. |
 | Controls through a make's own API | done | Providers per make, ONVIF the fallback: each control is resolved on its own, from the camera's chosen provider, then any that fit, then ONVIF. Reolink's HTTP API for PTZ, day/night and volume. |
 | HomeKit talkback | later | The Home app's microphone to the camera's speaker, through the same backchannel. |
+| Privacy | done | Per camera, for every camera: not recorded, shown live or served to HomeKit (shown as off in the Home app), applied at once by the service; in the dock, the list's menu, its settings and `pond camera privacy`. |
+| Privacy on the camera itself | later | Through a provider: the camera's own privacy mode following Pond's, starting with Reolink's (in Baichuan). |
 | Reolink's own protocol (Baichuan) | later | For what Reolink's HTTP API and ONVIF don't offer, such as two-way audio on cameras without an ONVIF backchannel; a provider like the others. |
 | More of a make's own controls | later | Reolink's IR lights, status light, privacy mode, siren and chime volume, as items in the Adjustments sidebar. |
 
@@ -62,10 +64,11 @@ A doctor for each camera: what's going wrong, since when, and what to try. First
 
 | Goal | Status | Notes |
 |---|---|---|
-| Vitals from the service | next | Per camera, from what Pond already sees, with no extra requests to the camera: connections (how long they last, reconnects, stalls, refusals, network errors, telling the Mac's own network trouble from the camera's), video (frame rate against what was promised, lost packets, keyframe spacing, bitrate, jitter), clock drift, gaps in recordings, and the controls' answers (failures and how long they took). Kept as 5-minute counts for a day, in `camera-health.json` beside the settings. |
+| Vitals from the service | next | Per camera, from what Pond already sees, with no extra requests to the camera: connections (how long they last, reconnects, stalls, refusals, network errors, telling the Mac's own network trouble from the camera's), video (frame rate against what was promised, lost packets, keyframe spacing, bitrate, jitter), clock drift, gaps in recordings, and the controls' answers (failures and how long they took). Kept for a week in Pond’s SQLite database (`pond.sqlite`, on the internal disk; its first use), as 5-minute counts and each incident; pruned by age, apart from recording retention. |
 | Diagnosis | next | Rules turning vitals into findings with a severity, the evidence, how long and how often, and what to try: unstable video, dropping off the network, the Mac's network, frames missing, keyframes far apart, clock drifting, controls failing, recording gaps, privacy mode. A finding clears after a calm spell, so nothing flickers. |
 | The doctor in Settings | next | Every camera with its state; a camera's findings, its vitals over the day, Run Check Now (a short test stream and a control read, only when asked), and Copy Report (without passwords or addresses). |
-| In the live view | next | A mark on a camera's tile and in the rail when something is wrong (not for notices), its headline on hover, and a click opens the doctor. Never a pop-up. |
+| In the live view | next | A mark on a camera's tile and in the rail for a problem, or a warning with a fix to make (not for notices), its headline on hover, and a click opens the doctor. Never a pop-up. |
+| Thresholds | next | Fixed defaults (stalls an hour, packet loss, keyframe spacing, clock drift, control failures), shown with the actual figures; changeable as an advanced setting in the doctor, and **Ignore** per finding per camera. Privacy is never a problem: a private camera's gaps are explained, not flagged. |
 | What cameras say about themselves | later | Through the providers, gently (every few minutes, more often while a problem is open): ONVIF's device information, clock and monitoring events (last reboot, processor use); Reolink's CPU, Wi-Fi signal, connected users and SD card. They feed the same rules ("CPU at 96% while video stalls: the camera is overloaded"). |
 
 ## Detection, events, search

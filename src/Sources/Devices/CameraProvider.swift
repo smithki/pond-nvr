@@ -36,6 +36,8 @@ public protocol CameraProvider: Sendable {
     /// Its other controls for this camera, as declared items (Controls.swift): the dock draws them by group.
     func items(_ access: CameraAccess) async -> Offer<[any ItemControl]>
     func talk(_ access: CameraAccess) async -> Offer<any TalkControl>
+    /// The camera's own privacy mode, if this provider can switch it (Pond's own privacy needs none).
+    func privacy(_ access: CameraAccess) async -> Offer<any PrivacyControl>
 }
 
 extension CameraProvider {
@@ -53,6 +55,7 @@ extension CameraProvider {
     public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> { .no }
     public func items(_ access: CameraAccess) async -> Offer<[any ItemControl]> { .no }
     public func talk(_ access: CameraAccess) async -> Offer<any TalkControl> { .no }
+    public func privacy(_ access: CameraAccess) async -> Offer<any PrivacyControl> { .no }
 }
 
 extension Config.Device {

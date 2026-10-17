@@ -147,6 +147,13 @@ public final class RecordingController: @unchecked Sendable {
     private var session: RecordingSession?
     /// Called with the state whenever it changes, to keep it.
     var saved: (@Sendable (RecordingState) -> Void)?
+    /// Private in Pond: off in HomeKit whatever the Home app has set (which is kept, `state.cameraActive`, and
+    /// shown again when privacy ends). The Home app's own on and off stays HomeKit's: it never changes Pond's
+    /// privacy (the hub writes it again whenever it reconnects, and with home and away automations).
+    private var privateInPond = false
+    /// Camera Operating Mode's HomeKit Camera Active and the sensors' Status Active, to change from here.
+    private var cameraActiveCharacteristic: Characteristic?
+    private var statusActiveCharacteristics: [Characteristic] = []
     /// Told how recording is going, for the app (HomeKitStatus).
     var statusChanged: (@Sendable (HomeKitStatus.Recording) -> Void)?
     private var status = HomeKitStatus.Recording()
@@ -158,7 +165,7 @@ public final class RecordingController: @unchecked Sendable {
         let changed = lock.withLock { () -> HomeKitStatus.Recording? in
             var next = status
             let s = state
-            next.on = s.active && s.cameraActive
+            next.on = s.active && s.cameraActive && !privateInPond
             next.sound = s.audioActive
             next.chosen = s.selected != nil
             if next.lastClip == nil { next.lastClip = s.lastClip }
@@ -197,6 +204,28 @@ public final class RecordingController: @unchecked Sendable {
     }
 
     public var current: RecordingState { lock.withLock { state } }
+
+    /// On in HomeKit: the Home app has it on, and it isn't private in Pond.
+    var cameraOn: Bool { lock.withLock { state.cameraActive && !privateInPond } }
+
+    /// Private in Pond or not: the Home app told the camera is off, or as it had it again.
+    func setPrivate(_ isPrivate: Bool) {
+        let changed = lock.withLock { () -> Bool in
+            defer { privateInPond = isPrivate }
+            return privateInPond != isPrivate
+        }
+        guard changed else { return }
+        tellCameraOn()
+        report { _ in }
+    }
+
+    /// Tells the Home app whether the camera is on, and its sensors whether they're active.
+    private func tellCameraOn() {
+        let on = cameraOn
+        let (characteristic, sensors) = lock.withLock { (cameraActiveCharacteristic, statusActiveCharacteristics) }
+        characteristic?.update(.int(on ? 1 : 0))
+        for status in sensors { status.update(.bool(on)) }
+    }
 
     func change(_ edit: (inout RecordingState) -> Void) {
         let next = lock.withLock { () -> RecordingState? in
@@ -255,13 +284,21 @@ public final class RecordingController: @unchecked Sendable {
         ])
 
         let cameraActive = Characteristic(type: HAPType.homeKitCameraActive, format: .uint8, permissions: [.read, .write, .notify],
-                                          value: .int(s.cameraActive ? 1 : 0))
+                                          value: .int(cameraOn ? 1 : 0))
         cameraActive.onWrite = { [weak self] value throws(HAPStatus) in
-            guard let on = value.flag else { throw .invalidValue }
-            self?.change { $0.cameraActive = on }
-            // The camera off in HomeKit: its sensors say so.
-            for status in statusActive { status.update(.bool(on)) }
+            guard let self, let on = value.flag else { throw .invalidValue }
+            // Kept as the Home app's; the camera off in HomeKit, its sensors say so. Private in Pond, it stays
+            // off: said again just after this write is answered.
+            change { $0.cameraActive = on }
+            for status in statusActive { status.update(.bool(cameraOn)) }
+            if on, lock.withLock({ privateInPond }) {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.tellCameraOn() }
+            }
             return nil
+        }
+        lock.withLock {
+            cameraActiveCharacteristic = cameraActive
+            statusActiveCharacteristics = statusActive
         }
         let eventSnapshots = Characteristic(type: HAPType.eventSnapshotsActive, format: .uint8, permissions: [.read, .write, .notify],
                                             value: .int(s.eventSnapshots ? 1 : 0))
@@ -334,6 +371,12 @@ public final class RecordingController: @unchecked Sendable {
         guard message.body["type"]?.string == "ipcamera.recording", message.body["target"]?.string == "controller",
               let streamID = message.body["streamId"]?.int else { return refuse(5, "a request Pond doesn't know", .other) }
         guard s.active, s.cameraActive else { return refuse(1, "recording is off in the Home app", .notAllowed) }
+        // Not a problem to show: private by choice.
+        if lock.withLock({ privateInPond }) {
+            log("HomeKit: a recording asked while the camera is private; refused")
+            connection.send(message.response(status: 6, body: .dictionary([("status", .int(1))])))
+            return
+        }
         guard let bytes = s.selected, let selected = SelectedRecording(bytes) else {
             return refuse(9, "no recording settings chosen", .notChosen)
         }

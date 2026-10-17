@@ -634,6 +634,12 @@ struct EditCameraSheet: View {
                     TextField("Name", text: $name)
                     TextField("Address", text: $host, prompt: Text("192.168.1.30"))
                         .focused($focused, equals: .address)
+                    // At once, like HomeKit (not on Save).
+                    Toggle(isOn: Binding(get: { model.isPrivate(camera.id) },
+                                         set: { on in Task { await model.setPrivacy(camera.id, on) } })) {
+                        Text("Private")
+                        Text("Not recorded, shown live or in the Home app until you turn this off. The Home app shows it as off meanwhile.")
+                    }
                 }
 
                 homeKitSection

@@ -16,7 +16,7 @@ Without motion from the camera (no ONVIF events, video only, or no ONVIF at all)
 
 ## Controls
 
-Watching one camera on its own, **Controls** under it opens a dock of what the camera can do, and only that: a pad to move it, its kept positions (each with a picture of what it shows), day and night, a picture saved to Pictures › Pond, talking through its speaker and its volume. Its other settings (brightness, contrast, saturation, sharpness, setting home, relays, and any its make adds) are in the **Adjustments** sidebar, opened from the dock's right edge. ⌥⌘L shows and hides the dock; a camera's menu in the list has **Control This Camera**.
+Watching one camera on its own, **Controls** under it opens a dock of what the camera can do, and only that: a pad to move it, its kept positions (each with a picture of what it shows), day and night, a picture saved to Pictures › Pond, talking through its speaker and its volume. Its other settings (brightness, contrast, saturation, sharpness, setting home, relays, and any its make adds) are in the **Adjustments** sidebar, opened from the dock's right edge. **Privacy** in the dock (or **Make Private** in its menu in the list) stops Pond recording it, showing it and serving it to HomeKit until turned off, for any camera. ⌥⌘L shows and hides the dock; a camera's menu in the list has **Control This Camera**.
 
 Each control goes through the best way Pond has for that camera: its make's own API where Pond knows one, ONVIF for everything else. [controls.md](../controls.md) has how that's chosen; `pond camera controls ID` shows it for a camera.
 
