@@ -46,11 +46,27 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Discovery | done | ONVIF discovery, Reolink's own discovery (Reolinks don't answer ONVIF's), and a look at the local network's addresses for RTSP (554) or ONVIF (8000), all at once; on opening, daily, and in Add Camera. Add Camera lists what it finds; the toolbar offers new cameras until added or ignored. `pond camera discover`. |
 | Stream addresses | done | Media `GetProfiles`, then `GetStreamUri` (Media2's when there is one); asked when a camera is added, editable in its settings. `pond camera onvif ID` shows what a camera says. |
 | Camera events | done | Motion, person, vehicle and animal detection, and doorbell presses (see HomeKit above). |
-| PTZ | later | Continuous move, zoom and presets; in the app a pad on the tile, presets in a menu. HomeKit has no PTZ, so presets could appear as switches. |
-| Two-way audio | later | The ONVIF backchannel (RTSP with `Require: www.onvif.org/ver20/backchannel`, then G.711 µ-law RTP to the camera), for push-to-talk in the app and HomeKit talkback. |
-| Imaging | later | Day/night and IR. |
+| PTZ | done | Continuous move, zoom and presets (kept, removed, gone to), home and preset tours. In the app: a pad and the positions, each with a picture of what it shows, in the live view's dock. |
+| Two-way audio | done | The ONVIF backchannel (RTSP with `Require: www.onvif.org/ver20/backchannel`, then G.711 RTP to the camera): push-to-talk in the app and `pond camera talk`. |
+| Imaging | done | Day/night (IR cut filter), brightness, contrast, saturation, sharpness; speaker volume; relay outputs. The everyday ones in the dock, the rest in its Adjustments sidebar. |
+| Controls through a make's own API | done | Providers per make, ONVIF the fallback: each control is resolved on its own, from the camera's chosen provider, then any that fit, then ONVIF. Reolink's HTTP API for PTZ, day/night and volume. |
+| HomeKit talkback | later | The Home app's microphone to the camera's speaker, through the same backchannel. |
+| Reolink's own protocol (Baichuan) | later | For what Reolink's HTTP API and ONVIF don't offer, such as two-way audio on cameras without an ONVIF backchannel; a provider like the others. |
+| More of a make's own controls | later | Reolink's IR lights, status light, privacy mode, siren and chime volume, as items in the Adjustments sidebar. |
 
-Not every camera speaks ONVIF, and some do two-way audio only through their own protocol; the camera check should say what a camera supports, so the app shows only the controls that work.
+Not every camera speaks ONVIF, and some do two-way audio only through their own protocol; the camera check says what a camera supports, so the app shows only the controls that work.
+
+## Camera health
+
+A doctor for each camera: what's going wrong, since when, and what to try. First from what Pond sees itself, the same for every make; then from what cameras report about themselves.
+
+| Goal | Status | Notes |
+|---|---|---|
+| Vitals from the service | next | Per camera, from what Pond already sees, with no extra requests to the camera: connections (how long they last, reconnects, stalls, refusals, network errors, telling the Mac's own network trouble from the camera's), video (frame rate against what was promised, lost packets, keyframe spacing, bitrate, jitter), clock drift, gaps in recordings, and the controls' answers (failures and how long they took). Kept as 5-minute counts for a day, in `camera-health.json` beside the settings. |
+| Diagnosis | next | Rules turning vitals into findings with a severity, the evidence, how long and how often, and what to try: unstable video, dropping off the network, the Mac's network, frames missing, keyframes far apart, clock drifting, controls failing, recording gaps, privacy mode. A finding clears after a calm spell, so nothing flickers. |
+| The doctor in Settings | next | Every camera with its state; a camera's findings, its vitals over the day, Run Check Now (a short test stream and a control read, only when asked), and Copy Report (without passwords or addresses). |
+| In the live view | next | A mark on a camera's tile and in the rail when something is wrong (not for notices), its headline on hover, and a click opens the doctor. Never a pop-up. |
+| What cameras say about themselves | later | Through the providers, gently (every few minutes, more often while a problem is open): ONVIF's device information, clock and monitoring events (last reboot, processor use); Reolink's CPU, Wi-Fi signal, connected users and SD card. They feed the same rules ("CPU at 96% while video stalls: the camera is overloaded"). |
 
 ## Detection, events, search
 
