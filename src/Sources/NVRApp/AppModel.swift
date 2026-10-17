@@ -1,6 +1,7 @@
 // The app's state: the settings (read and saved through ConfigStore, exactly as `pond` does), the camera
 // passwords (Keychain), camera checks, and the login service. Views read it and call its methods; nothing
 // else touches the settings file.
+import AppKit
 import Control
 import Devices
 import Foundation
@@ -40,7 +41,26 @@ final class AppModel {
     var talking: Talker?
     var talkLevel: Double = 0
     var presets: [String: [PTZPreset]] = [:]
-    var nightModes: [String: NightMode] = [:]
+    /// Each camera's items' values, as last read or set (by camera, then item).
+    var itemValues: [String: [String: Config.Controls.Value]] = [:]
+    /// Each position's picture ("camera/position"), from the last time it was seen; the stream each camera's
+    /// tile shows (to take them from); and the position a camera was last sent to, until it's moved by hand.
+    var presetPictures: [String: NSImage] = [:]
+    @ObservationIgnored var liveFeeds: [String: LiveStream] = [:]
+    @ObservationIgnored var atPreset: [String: String] = [:]
+    /// The camera whose other positions are open above the dock's More card.
+    var morePositionsOpen: String?
+    /// The position just kept ("camera/position"), for the dock to show where it went.
+    var justKept: String?
+    /// A picture just taken from a camera's live view: the camera (its tile flashes) and where it was saved.
+    var flash: String?
+    var savedPicture: (camera: String, file: URL)?
+    /// The docked camera's adjustments are open in the live view's sidebar.
+    var adjustmentsInSidebar = false
+    /// The cameras' rail was hidden to make room for the adjustments' sidebar (shown again when it goes).
+    var railMadeRoom = false
+    /// How wide the cameras' rail is (the last it was shown).
+    var railWidth: CGFloat = 300
     /// A control that failed, for a moment, by camera.
     var controlError: [String: String] = [:]
     /// Waits for macOS's local network permission before a check; tests replace it so they connect nowhere.

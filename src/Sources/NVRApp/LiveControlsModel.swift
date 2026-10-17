@@ -5,6 +5,7 @@ import AVFoundation
 import Devices
 import Foundation
 import NVRCore
+import SwiftUI
 
 extension AppModel {
     var controlClient: ControlClient { ControlClient(path: ControlSocket.path(nextTo: store.path)) }
@@ -38,35 +39,67 @@ extension AppModel {
     }
 
     func move(_ camera: String, _ velocity: PTZVelocity) async {
+        // Moved by hand: no longer at a position (its picture isn't taken from here).
+        if !velocity.isStill { atPreset[camera] = nil }
         await control(camera, .init(camera: camera, action: velocity.isStill ? "ptz.stop" : "ptz.move", velocity: velocity))
     }
 
-    func loadPresets(_ camera: String) async {
-        if let list = await control(camera, .init(camera: camera, action: "ptz.presets"))?.presets { presets[camera] = list }
+    func loadPresets(_ camera: String, animated: Bool = false) async {
+        if let list = await control(camera, .init(camera: camera, action: "ptz.presets"))?.presets {
+            loadPresetPictures(camera, list)
+            rememberOrder(camera, list)
+            AppModel.keepPresets(camera, list)
+            if animated {
+                withAnimation(.spring(duration: 0.45, bounce: 0.3)) { presets[camera] = list }
+            } else {
+                presets[camera] = list
+            }
+        }
     }
 
     func goTo(_ camera: String, preset: String) async {
-        await control(camera, .init(camera: camera, action: "ptz.goto", preset: preset))
+        guard await control(camera, .init(camera: camera, action: "ptz.goto", preset: preset)) != nil else { return }
+        takePresetPictureOnArrival(camera, preset)
     }
 
     func savePreset(_ camera: String, name: String, replacing: String? = nil) async {
-        guard await control(camera, .init(camera: camera, action: "ptz.save", preset: replacing, name: name)) != nil else { return }
-        await loadPresets(camera)
+        guard let saved = await control(camera, .init(camera: camera, action: "ptz.save", preset: replacing, name: name))?.preset
+        else { return }
+        // It's where it points now.
+        atPreset[camera] = saved.id
+        takePresetPicture(camera, saved.id)
+        // A new one springs into the dock (or drops into More).
+        await loadPresets(camera, animated: replacing == nil)
+        if replacing == nil { justKept = AppModel.presetKey(camera, saved.id) }
     }
 
     func removePreset(_ camera: String, preset: String) async {
         guard await control(camera, .init(camera: camera, action: "ptz.remove", preset: preset)) != nil else { return }
-        presets[camera]?.removeAll { $0.id == preset }
+        // It shrinks away and the others close up (the next from More, if any, springing into the dock).
+        withAnimation(.spring(duration: 0.4, bounce: 0.2)) { presets[camera]?.removeAll { $0.id == preset } }
+        AppModel.keepPresets(camera, presets[camera] ?? [])
+        forgetPresetPicture(camera, preset)
+        forgetOrder(camera, preset)
     }
 
-    func loadNightMode(_ camera: String) async {
-        if let mode = await control(camera, .init(camera: camera, action: "night.get"))?.mode { nightModes[camera] = mode }
+    /// Every item's value, read from the camera.
+    func loadItemValues(_ camera: String) async {
+        if let values = await control(camera, .init(camera: camera, action: "items.values"))?.values {
+            itemValues[camera, default: [:]].merge(values) { $1 }
+        }
     }
 
-    func setNightMode(_ camera: String, _ mode: NightMode) async {
-        let before = nightModes[camera]
-        nightModes[camera] = mode
-        if await control(camera, .init(camera: camera, action: "night.set", mode: mode)) == nil { nightModes[camera] = before }
+    /// Sets an item, shown at once and put back if the camera refuses.
+    func setItem(_ camera: String, _ item: String, _ value: Config.Controls.Value) async {
+        let before = itemValues[camera]?[item]
+        itemValues[camera, default: [:]][item] = value
+        if await control(camera, .init(camera: camera, action: "item.set", item: item, value: value)) == nil {
+            itemValues[camera, default: [:]][item] = before
+        }
+    }
+
+    func doItem(_ camera: String, _ item: String) async {
+        await control(camera, .init(camera: camera, action: "item.do", item: item))
     }
 
     /// Starts or stops talking through a camera (one at a time).

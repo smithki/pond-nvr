@@ -286,13 +286,16 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
     exit(status)
 }
 
+/// `pond camera item ID [ITEM [VALUE | do]]`: the camera's other controls, as items (night mode, image settings,
+/// volume, home, tours, relays): all with their values, one's value, set one (on, off, a number, a choice), or
+/// do one (an action); `night-mode` is the day-and-night item.
 /// `pond camera controls ID [--save]`: which way each of the camera's controls goes (PTZ, night mode,
 /// talking back), as the service would choose; `--save` keeps them in its settings for the app.
 /// `pond camera ptz ID presets | goto PRESET | move PAN TILT [ZOOM] [--for SECONDS] | stop` and
 /// `pond camera night-mode ID [auto|day|night]` and `pond camera talk ID [--tone SECONDS]` (a quiet tone
 /// through the camera's speaker): the controls themselves. `--via reolink|onvif` uses only that
 /// provider, for trying each.
-if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk"].contains(args[1]) {
+if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk", "item"].contains(args[1]) {
     let store = ConfigStore(path: configPath)
     guard var config = try? store.load(), let index = config.cameras.firstIndex(where: { $0.id == args[2] }) else {
         FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
@@ -329,6 +332,30 @@ if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk
     let semaphore = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var status: Int32 = 0
     nonisolated(unsafe) var found: Config.Controls?
+    /// The command line's words for an item's value, and back.
+    @Sendable func words(_ value: Config.Controls.Value?) -> String {
+        switch value {
+        case let .on(on)?: on ? "on" : "off"
+        case let .choice(c)?: c
+        case let .number(n)?: n == n.rounded() ? String(Int(n)) : String(n)
+        case nil: "?"
+        }
+    }
+    @Sendable func value(_ text: String) -> Config.Controls.Value {
+        if ["on", "true", "yes"].contains(text) { return .on(true) }
+        if ["off", "false", "no"].contains(text) { return .on(false) }
+        if let n = Double(text) { return .number(n) }
+        return .choice(text)
+    }
+    @Sendable func describe(_ item: Config.Controls.Item) -> String {
+        let kind = switch item.kind {
+        case .toggle: "on/off"
+        case let .choice(choices): choices.map(\.value).joined(separator: "|")
+        case let .slider(min, max, _): "\(Int(min))–\(Int(max))"
+        case let .action(confirm): confirm == nil ? "action" : "action, asks first"
+        }
+        return "\(item.group.rawValue): \(item.id)  \(item.title) (\(kind)) through \(item.provider)"
+    }
     Task.detached {
         defer { semaphore.signal() }
         if viaService {
@@ -345,8 +372,8 @@ if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk
                     let all = try await ask(.init(camera: id, action: "controls")).controls ?? Config.Controls()
                     found = all
                     print("PTZ: \(all.ptz.map { "\($0.provider), pan/tilt \($0.panTilt), zoom \($0.zoom), \($0.presets) presets" } ?? "none")")
-                    print("night mode: \(all.nightMode.map { "\($0.provider): \($0.choices.joined(separator: ", "))" } ?? "none")")
                     print("talking back: \(all.talk?.provider ?? "none")")
+                    for item in all.items { print("  " + describe(item)) }
                 case ("ptz", "presets"), ("ptz", ""):
                     for p in try await ask(.init(camera: id, action: "ptz.presets")).presets ?? [] { print("  \(p.id)  \(p.name)") }
                 case ("ptz", "goto"):
@@ -363,11 +390,25 @@ if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk
                     _ = try await ask(.init(camera: id, action: "ptz.stop"))
                     print("✓ stopped")
                 case ("night-mode", ""):
-                    print("night mode: \(try await ask(.init(camera: id, action: "night.get")).mode?.rawValue ?? "?")")
+                    print("night mode: \(words(try await ask(.init(camera: id, action: "item.get", item: "dayNight")).value))")
                 case ("night-mode", let mode):
-                    guard let m = NightMode(rawValue: mode) else { throw .failed("auto, day or night") }
-                    _ = try await ask(.init(camera: id, action: "night.set", mode: m))
-                    print("✓ night mode: \(m.rawValue)")
+                    _ = try await ask(.init(camera: id, action: "item.set", item: "dayNight", value: .choice(mode)))
+                    print("✓ night mode: \(mode)")
+                case ("item", ""):
+                    let items = try await ask(.init(camera: id, action: "controls")).controls?.items ?? []
+                    let values = try await ask(.init(camera: id, action: "items.values")).values ?? [:]
+                    for item in items { print("  \(describe(item)) = \(words(values[item.id]))") }
+                    if items.isEmpty { print("  (none)") }
+                case ("item", let item):
+                    if rest.count < 2 {
+                        print("\(item): \(words(try await ask(.init(camera: id, action: "item.get", item: item)).value))")
+                    } else if rest[1] == "do" {
+                        _ = try await ask(.init(camera: id, action: "item.do", item: item))
+                        print("✓ done: \(item)")
+                    } else {
+                        _ = try await ask(.init(camera: id, action: "item.set", item: item, value: value(rest[1])))
+                        print("✓ \(item): \(rest[1])")
+                    }
                 case ("talk", _):
                     let talk = try await service.talk(camera: id)
                     print("✓ talking at \(Int(talk.sampleRate)) Hz; silence for \(delay) s, then a tone for \(tone) s")
@@ -399,7 +440,7 @@ if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk
                 if let p = all.ptz {
                     print("✓ PTZ through \(p.provider): \([p.panTilt ? "pan and tilt" : nil, p.zoom ? "zoom" : nil].compactMap { $0 }.joined(separator: ", ")), \(p.presets) presets")
                 } else { print("· no PTZ") }
-                if let n = all.nightMode { print("✓ night mode through \(n.provider): \(n.choices.joined(separator: ", "))") } else { print("· no night mode") }
+                for item in all.items { print("✓ " + describe(item)) }
                 if let t = all.talk { print("✓ talking back through \(t.provider)") } else { print("· no talking back") }
             case "ptz":
                 switch rest.first ?? "presets" {
@@ -443,13 +484,24 @@ if args.count >= 3, args[0] == "camera", ["controls", "ptz", "night-mode", "talk
                 session.close()
                 print("✓ done")
             default:
-                if let mode = rest.first {
-                    guard let m = NightMode(rawValue: mode) else { throw .failed("auto, day or night") }
-                    try await controls.withNightMode { c throws(ControlFailure) in try await c.setNightMode(m) }
-                    print("✓ night mode: \(m.rawValue)")
+                // An item (night-mode: the day-and-night one).
+                let item = command == "night-mode" ? "dayNight" : rest.first
+                let operand = command == "night-mode" ? rest.first : rest.dropFirst().first
+                if let item {
+                    if let operand, operand == "do" {
+                        try await controls.withItem(item) { c throws(ControlFailure) in try await c.perform() }
+                        print("✓ done: \(item)")
+                    } else if let operand {
+                        let v = value(operand)
+                        try await controls.withItem(item) { c throws(ControlFailure) in try await c.set(v) }
+                        print("✓ \(item): \(operand)")
+                    } else {
+                        print("\(item): \(words(try await controls.withItem(item) { c throws(ControlFailure) in try await c.value() }))")
+                    }
                 } else {
-                    let m = try await controls.withNightMode { c throws(ControlFailure) in try await c.nightMode() }
-                    print("night mode: \(m.rawValue)")
+                    for control in await controls.items() {
+                        print("  \(describe(control.item)) = \(words(try? await control.value()))")
+                    }
                 }
             }
         } catch {
@@ -486,6 +538,23 @@ if args.count >= 4, args[0] == "camera", args[1] == "reolink" {
         let api = ReolinkAPI(host: camera.host, username: camera.username, password: password)
         print(await api.raw(cmd, param: sendable))
         await api.logout()
+        semaphore.signal()
+    }
+    semaphore.wait()
+    exit(0)
+}
+
+/// `pond camera onvif-call ID SERVICE BODY`: one ONVIF request (BODY, the SOAP body's XML) to SERVICE ("media",
+/// "ver20/media", "imaging", "ptz", "device"), its reply as the camera writes it.
+if args.count >= 5, args[0] == "camera", args[1] == "onvif-call" {
+    guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }),
+          let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ No such camera, or no password for it.\n".utf8))
+        exit(1)
+    }
+    let (service, body, semaphore) = (args[3], args[4], DispatchSemaphore(value: 0))
+    Task.detached {
+        print(await CapabilityProbe.call(host: camera.host, username: camera.username, password: password, service: service, body: body))
         semaphore.signal()
     }
     semaphore.wait()
@@ -615,8 +684,8 @@ if args.count >= 3, args[0] == "camera", args[1] == "identify" {
     if let serial = device.serial { print("  serial number \(serial)") }
     if let firmware = device.firmware { print("  firmware \(firmware)") }
     if let controls = device.controls {
-        let words = [controls.ptz.map { "PTZ (\($0.provider))" }, controls.nightMode.map { "night mode (\($0.provider))" },
-                     controls.talk.map { "talking back (\($0.provider))" }].compactMap { $0 }
+        let words = [controls.ptz.map { "PTZ (\($0.provider))" }, controls.talk.map { "talking back (\($0.provider))" }]
+            .compactMap { $0 } + controls.items.map { "\($0.title) (\($0.provider))" }
         print("  controls: \(words.joined(separator: ", "))")
     }
     exit(0)

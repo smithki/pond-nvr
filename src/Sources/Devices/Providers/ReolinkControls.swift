@@ -151,11 +151,18 @@ final class ReolinkPTZ: PTZControl {
 }
 
 /// Day and night through the ISP: dayNight "Auto", "Color", "Black&White".
-final class ReolinkNightMode: NightModeControl {
+final class ReolinkNightMode: ItemControl {
     let api: ReolinkAPI
-    let abilities = Config.Controls.NightMode(provider: "reolink", choices: NightMode.allCases.map(\.rawValue))
+    let item = NightMode.item(NightMode.allCases, provider: "reolink")
 
     init(api: ReolinkAPI) { self.api = api }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? { .choice(try await nightMode().rawValue) }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .choice(text) = value, let mode = NightMode(rawValue: text) else { throw .failed("auto, day or night") }
+        try await setNightMode(mode)
+    }
 
     static func mode(_ value: String) -> NightMode? {
         switch value.lowercased() {
@@ -187,6 +194,26 @@ final class ReolinkNightMode: NightModeControl {
     }
 }
 
+/// The speaker's volume, 0–100: GetAudioCfg / SetAudioCfg's volume.
+final class ReolinkVolume: ItemControl {
+    let api: ReolinkAPI
+    let item = Config.Controls.Item(id: "speakerVolume", title: "Speaker", symbol: "speaker.wave.2", group: .sound, order: 10,
+                                    kind: .slider(min: 0, max: 100, step: 1), provider: "reolink")
+
+    init(api: ReolinkAPI) { self.api = api }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? {
+        guard let volume = (try await api.control("GetAudioCfg", ["channel": 0])["AudioCfg"] as? [String: Any])?["volume"] as? Int
+        else { throw .notSupported }
+        return .number(Double(volume))
+    }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .number(volume) = value else { throw .failed("a number") }
+        _ = try await api.control("SetAudioCfg", ["AudioCfg": ["channel": 0, "volume": Int(volume.rounded())]])
+    }
+}
+
 extension ReolinkProvider {
     public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> {
         switch await CameraSessions.shared.reolinkAbility(access) {
@@ -197,12 +224,19 @@ extension ReolinkProvider {
         }
     }
 
-    public func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl> {
+    /// Its own controls, as items, where its API has them: day and night (more to come: IR lights, the status
+    /// light, privacy mode, the siren).
+    public func items(_ access: CameraAccess) async -> Offer<[any ItemControl]> {
         switch await CameraSessions.shared.reolinkAbility(access) {
-        case let .yes(ability) where ability.has("ispDayNight"):
-            return .yes(ReolinkNightMode(api: await CameraSessions.shared.reolink(access)))
+        case let .yes(ability):
+            let api = await CameraSessions.shared.reolink(access)
+            var items: [any ItemControl] = []
+            if ability.has("ispDayNight") { items.append(ReolinkNightMode(api: api)) }
+            // Its speaker's volume (talking back, its alarm); the doorbell's chime is its own.
+            if (try? await api.control("GetAudioCfg", ["channel": 0]))?["AudioCfg"] != nil { items.append(ReolinkVolume(api: api)) }
+            return .yes(items)
         case .unknown: return .unknown
-        default: return .no
+        case .no: return .no
         }
     }
 }

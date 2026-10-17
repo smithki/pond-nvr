@@ -37,7 +37,12 @@ struct LiveView: View {
     /// and the dock and stage would then jump).
     @AppStorage("liveControls") private var controlsKept = false
     @State private var controlsShown: Bool?
-    private var controlsOpen: Bool { controlsShown ?? controlsKept }
+    private var controlsWanted: Bool { controlsShown ?? controlsKept }
+    /// The dock is shown once what's in it is known (a camera's positions, its night mode): opening before, it
+    /// shifted as they arrived. Known once a session; switching cameras after, the dock stays open.
+    @State private var dockReady = false
+
+    private var controlsOpen: Bool { controlsWanted && dockReady }
     @State private var snapshots = CameraSnapshots()
     @State private var activity = CameraActivity()
     private var reorderDrag: ReorderDrag { model.reorderDrag }
@@ -82,6 +87,8 @@ struct LiveView: View {
                                    solo: solo, toggle: toggle, showAll: { showAll(cameras.map(\.id)) },
                                    openControls: { openControls($0) },
                                    drag: reorderDrag, reorder: reorder)
+                            // (How much room it takes, for the dock to know when there's room for it again.)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if $0 > 0 { model.railWidth = $0 } }
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     // The stage, and under it the controls of a camera watched on its own.
@@ -100,7 +107,7 @@ struct LiveView: View {
                             // its top edge; hidden, it slides down until only the button shows, at the bottom of
                             // the stage. Its place on the screen is only as tall as the dock while it's open.
                             Color.clear
-                                .frame(height: controlsOpen ? Self.dockToggleRoom + LiveControlsDock.height + 12 : 0)
+                                .frame(height: controlsOpen ? Self.dockToggleRoom + 12 + LiveControlsDock.height() : 0)
                                 .overlay(alignment: .top) {
                                     VStack(spacing: 8) {
                                         controlsButton
@@ -114,10 +121,44 @@ struct LiveView: View {
                                 }
                                 // Hidden, the button is over the stage; open, the stage is over the dock (tiles
                                 // growing back over its place pass over it as it goes).
-                                .zIndex(controlsOpen ? 0 : 2)
+                                // (Above it too while a camera's other positions are open, reaching up over the stage.)
+                                .zIndex(controlsOpen && model.morePositionsOpen == nil ? 0 : 2)
                                 .transition(.opacity)
                         }
                     }
+                    // The docked camera's adjustments, down the right as the rail is down the left: the picture
+                    // keeps its height.
+                    if let docked, controlsOpen, model.adjustmentsInSidebar {
+                        AdjustmentsView(camera: docked.camera, controls: docked.controls)
+                            .frame(width: Self.sidebarRoom - 12)
+                            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .padding([.trailing, .vertical], 12)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                // What the dock will hold, asked before it opens (so it opens complete, then slides up); a slow
+                // camera (logging in, busy) holds it back only a moment, then it opens and fills in.
+                .task(id: docked(cameras)?.camera.id) {
+                    guard !dockReady, let docked = docked(cameras) else { return }
+                    model.loadPresetPictures(docked.camera.id, AppModel.keptPresets(docked.camera.id))
+                    let camera = docked.camera.id
+                    @MainActor func ready() {
+                        guard !dockReady, self.docked(cameras)?.camera.id == camera else { return }
+                        withAnimation(Self.dockAnimation) { dockReady = true }
+                    }
+                    // Whichever is first: loaded, or waited long enough (the loading goes on either way).
+                    let loading = Task {
+                        if (docked.controls.ptz?.presets ?? 0) > 0 { await model.loadPresets(camera) }
+                        if !docked.controls.items.isEmpty { await model.loadItemValues(camera) }
+                        if !Task.isCancelled { ready() }
+                    }
+                    do {
+                        try await Task.sleep(for: .seconds(Self.dockWait))
+                    } catch {
+                        loading.cancel()
+                        return
+                    }
+                    ready()
                 }
                 // ⌥⌘L: a camera's controls, watching it on its own if others are on the stage too.
                 .background {
@@ -126,6 +167,8 @@ struct LiveView: View {
                         .hidden()
                 }
                 .animation(.snappy(duration: 0.25), value: showRail)
+                // Shown again by hand: no longer hidden for the sidebar's sake.
+                .onChange(of: showRail) { _, shown in if shown { model.railMadeRoom = false } }
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
                 .onChange(of: reorderDrag.camera) { _, dragged in
                     if dragged != nil, reorderDrag.source == .stage {
@@ -164,17 +207,27 @@ struct LiveView: View {
     static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)
     /// Above the dock: room for the button that shows and hides it.
     static let dockToggleRoom: CGFloat = 52
+    /// What the adjustments' sidebar takes from the stage: its width and its margin.
+    static let sidebarRoom: CGFloat = 292
+    /// The longest the dock waits for what it holds before opening.
+    static let dockWait = 0.8
     /// The show and hide button's height (a large glass capsule).
     static let controlsButtonHeight: CGFloat = 36
 
     /// Shows or hides the controls.
     var controlsButton: some View {
-        Button { setControls(open: !controlsOpen) } label: {
-            Label(controlsOpen ? "Hide Controls" : "Controls", systemImage: controlsOpen ? "chevron.down" : "chevron.up")
-                .font(.callout.weight(.semibold))
-                .contentTransition(.symbolEffect(.replace))
-                .padding(.horizontal, 6)
+        // Asked for and still being filled, it says so (a second click isn't taken for "hide").
+        let opening = controlsWanted && !dockReady
+        return Button { setControls(open: !controlsWanted) } label: {
+            HStack(spacing: 6) {
+                Label(controlsOpen ? "Hide Controls" : "Controls", systemImage: controlsOpen ? "chevron.down" : "chevron.up")
+                    .contentTransition(.symbolEffect(.replace))
+                if opening { ProgressView().controlSize(.mini) }
+            }
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 6)
         }
+        .disabled(opening)
         .buttonStyle(.glass)
         .buttonBorderShape(.capsule)
         .controlSize(.large)
@@ -186,7 +239,7 @@ struct LiveView: View {
     func docked(_ cameras: [Config.Camera]) -> (camera: Config.Camera, controls: Config.Controls)? {
         let ids = staged(cameras)
         guard ids.count == 1, let camera = cameras.first(where: { $0.id == ids[0] }), let controls = model.controls(for: camera),
-              controls.ptz != nil || controls.nightMode != nil else { return nil }
+              controls.ptz != nil || !controls.items.isEmpty else { return nil }
         return (camera, controls)
     }
 
@@ -204,10 +257,10 @@ struct LiveView: View {
     /// The shortcut: shows or hides the controls of the camera watched on its own; with several on the stage,
     /// the first that has controls is watched on its own with them open.
     func shortcut(_ cameras: [Config.Camera]) {
-        if docked(cameras) != nil { return setControls(open: !controlsOpen) }
+        if docked(cameras) != nil { return setControls(open: !controlsWanted) }
         let ids = staged(cameras)
         guard let id = ids.first(where: { id in
-            cameras.first { $0.id == id }.flatMap { model.controls(for: $0) }.map { $0.ptz != nil || $0.nightMode != nil } == true
+            cameras.first { $0.id == id }.flatMap { model.controls(for: $0) }.map { $0.ptz != nil || !$0.items.isEmpty } == true
         }) else { return }
         openControls(id)
     }
@@ -631,7 +684,7 @@ struct RailThumbnail: View {
         .contextMenu {
             Button("Watch Only This", action: solo)
             // Its controls, with it on its own: only for a camera that has them.
-            if model.controls(for: camera).map({ $0.ptz != nil || $0.nightMode != nil }) == true {
+            if model.controls(for: camera).map({ $0.ptz != nil || !$0.items.isEmpty }) == true {
                 Button("Control This Camera", systemImage: "slider.horizontal.3", action: openControls)
             }
             Button(onStage ? "Take Off the Screen" : "Add to the Screen", action: toggle)
@@ -1125,7 +1178,7 @@ struct CameraTile: View {
     /// Its speaker has the microphone.
     var talking: Bool { model.talking?.camera == camera.id }
     /// It has controls for the dock under the stage.
-    var hasDockControls: Bool { model.controls(for: camera).map { $0.ptz != nil || $0.nightMode != nil } == true }
+    var hasDockControls: Bool { model.controls(for: camera).map { $0.ptz != nil || !$0.items.isEmpty } == true }
 
     /// Show the hover controls: the pointer is on the tile, or in its popover.
     var hovering: Bool { pointerInside || popoverOpen }
@@ -1221,6 +1274,13 @@ struct CameraTile: View {
                     }
                 }
                 .padding(compact ? 6 : 10)
+            }
+            // A picture taken: a quick flash, as a shutter.
+            .overlay {
+                Color.white
+                    .opacity(model.flash == camera.id ? 0.55 : 0)
+                    .animation(model.flash == camera.id ? .easeOut(duration: 0.05) : .easeOut(duration: 0.35), value: model.flash)
+                    .allowsHitTesting(false)
             }
             .overlay {
                 // Something is wrong: the tile's edge says so too.
@@ -1424,12 +1484,14 @@ struct CameraTile: View {
                     stream = s
                     incoming = nil
                 }
+                model.liveFeeds[camera.id] = s
                 previous.stop()
             }
         } else {
             stream?.stop()
             stream = s
             s.start()
+            model.liveFeeds[camera.id] = s
         }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3600))
@@ -1440,6 +1502,7 @@ struct CameraTile: View {
 
     /// The tile has left the screen: its streams stop.
     func stopStreams() {
+        if let stream, model.liveFeeds[camera.id] === stream { model.liveFeeds[camera.id] = nil }
         stream?.stop()
         incoming?.stop()
         stream = nil

@@ -98,6 +98,21 @@ public enum CapabilityProbe {
         await api.logout()
     }
 
+    /// One request to one of the camera's ONVIF services (by the last parts of its namespace: "media",
+    /// "ver20/media", "imaging", "ptz", "device"), its reply as written, for working out what a camera wants.
+    public static func call(host: String, username: String, password: String, service: String, body: String) async -> String {
+        guard let client = await ONVIFClient.connect(host: host, username: username, password: password) else { return "✗ no ONVIF" }
+        let services = (try? await client.services()) ?? [:]
+        let url = service == "device" ? client.deviceService
+            : services.first { $0.key.hasSuffix("/\(service)/wsdl") || $0.key.hasSuffix("\(service)/wsdl") }?.value
+        guard let url else { return "✗ no service \(service): \(services.keys.sorted().joined(separator: ", "))" }
+        do throws(ONVIFClient.Failure) {
+            return compact(try await client.call(url, body))
+        } catch {
+            return "✗ \(error.description)"
+        }
+    }
+
     static func compact(_ node: XMLNode) -> String {
         let body = (node as? XMLDocument)?.first("Body")?.children?.first ?? node
         let text = body.xmlString

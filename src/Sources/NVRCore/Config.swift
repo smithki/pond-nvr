@@ -225,19 +225,28 @@ public struct Config: Codable, Equatable, Sendable {
         }
     }
 
-    /// A camera's controls, each with the provider that serves it (a camera's own make's, else ONVIF's).
+    /// A camera's controls, each with the provider that serves it (a camera's own make's, else ONVIF's): its
+    /// PTZ and talking back (drawn by controls of their own), and the rest as items, each a switch, a choice, a
+    /// slider or an action, in one of four groups, which the app draws as they're described.
     public struct Controls: Codable, Equatable, Sendable {
         public var ptz: PTZ?
         public var talk: Talk?
-        public var nightMode: NightMode?
+        public var items: [Item]
 
-        public init(ptz: PTZ? = nil, talk: Talk? = nil, nightMode: NightMode? = nil) {
+        public init(ptz: PTZ? = nil, talk: Talk? = nil, items: [Item] = []) {
             self.ptz = ptz
             self.talk = talk
-            self.nightMode = nightMode
+            self.items = items
         }
 
-        public var isEmpty: Bool { ptz == nil && talk == nil && nightMode == nil }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ptz = try c.decodeIfPresent(PTZ.self, forKey: .ptz)
+            talk = try c.decodeIfPresent(Talk.self, forKey: .talk)
+            items = try c.decodeIfPresent([Item].self, forKey: .items) ?? []
+        }
+
+        public var isEmpty: Bool { ptz == nil && talk == nil && items.isEmpty }
 
         /// Moving the picture: pan and tilt, zoom, and positions kept by the camera.
         public struct PTZ: Codable, Equatable, Sendable {
@@ -262,16 +271,72 @@ public struct Config: Codable, Equatable, Sendable {
             public init(provider: String) { self.provider = provider }
         }
 
-        /// Day and night: how the camera chooses between them, and what can be chosen.
-        public struct NightMode: Codable, Equatable, Sendable {
-            public var provider: String
-            /// Of "auto", "day", "night".
-            public var choices: [String]
+        /// One control, as the app draws it: what it is, where it goes, what kind it is.
+        public struct Item: Codable, Equatable, Sendable, Identifiable {
+            /// Where it goes: the same place for every camera ("dayNight" first under Picture), whichever
+            /// provider serves it.
+            public enum Group: String, Codable, Sendable, CaseIterable {
+                case move, picture, sound, device
 
-            public init(provider: String, choices: [String]) {
-                self.provider = provider
-                self.choices = choices
+                public var title: String {
+                    switch self {
+                    case .move: "Move"
+                    case .picture: "Picture"
+                    case .sound: "Sound"
+                    case .device: "Device"
+                    }
+                }
             }
+
+            public enum Kind: Codable, Equatable, Sendable {
+                /// On or off.
+                case toggle
+                /// One of a few.
+                case choice([Choice])
+                /// A number in a range.
+                case slider(min: Double, max: Double, step: Double)
+                /// Done when pressed; `confirm` asks first, in those words (a siren, a door).
+                case action(confirm: String?)
+            }
+
+            public struct Choice: Codable, Equatable, Sendable, Hashable {
+                public var value: String
+                public var title: String
+                public var symbol: String
+
+                public init(value: String, title: String, symbol: String) {
+                    self.value = value
+                    self.title = title
+                    self.symbol = symbol
+                }
+            }
+
+            /// Stable across providers: "dayNight", "brightness", "speakerVolume", "home.go", "relay.<token>".
+            public var id: String
+            public var title: String
+            public var symbol: String
+            public var group: Group
+            /// Its place in its group.
+            public var order: Int
+            public var kind: Kind
+            public var provider: String
+
+            public init(id: String, title: String, symbol: String, group: Group, order: Int, kind: Kind, provider: String) {
+                self.id = id
+                self.title = title
+                self.symbol = symbol
+                self.group = group
+                self.order = order
+                self.kind = kind
+                self.provider = provider
+            }
+        }
+
+        /// An item's value: a switch's, a choice's, a slider's.
+        public enum Value: Codable, Equatable, Sendable {
+            case on(Bool)
+            case choice(String)
+            case number(Double)
         }
     }
 

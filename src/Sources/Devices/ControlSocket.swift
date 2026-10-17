@@ -22,21 +22,23 @@ public enum ControlSocket {
     public struct Request: Codable, Sendable {
         public var camera: String
         /// "controls", "ptz.move", "ptz.stop", "ptz.presets", "ptz.goto", "ptz.save", "ptz.remove",
-        /// "night.get", "night.set", "talk".
+        /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk".
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
         public var name: String?
-        public var mode: NightMode?
+        public var item: String?
+        public var value: Config.Controls.Value?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
-                    name: String? = nil, mode: NightMode? = nil) {
+                    name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {
             self.camera = camera
             self.action = action
             self.velocity = velocity
             self.preset = preset
             self.name = name
-            self.mode = mode
+            self.item = item
+            self.value = value
         }
     }
 
@@ -45,16 +47,19 @@ public enum ControlSocket {
         public var controls: Config.Controls?
         public var presets: [PTZPreset]?
         public var preset: PTZPreset?
-        public var mode: NightMode?
+        public var value: Config.Controls.Value?
+        public var values: [String: Config.Controls.Value]?
         public var sampleRate: Double?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
-                    preset: PTZPreset? = nil, mode: NightMode? = nil, sampleRate: Double? = nil) {
+                    preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
+                    values: [String: Config.Controls.Value]? = nil, sampleRate: Double? = nil) {
             self.error = error
             self.controls = controls
             self.presets = presets
             self.preset = preset
-            self.mode = mode
+            self.value = value
+            self.values = values
             self.sampleRate = sampleRate
         }
     }
@@ -267,11 +272,22 @@ public final class ControlServer: @unchecked Sendable {
             case "ptz.remove":
                 guard let preset = request.preset else { throw .failed("which preset?") }
                 try await controls.withPTZ { c throws(ControlFailure) in try await c.removePreset(preset) }
-            case "night.get":
-                return ControlSocket.Reply(mode: try await controls.withNightMode { c throws(ControlFailure) in try await c.nightMode() })
-            case "night.set":
-                guard let mode = request.mode else { throw .failed("which mode?") }
-                try await controls.withNightMode { c throws(ControlFailure) in try await c.setNightMode(mode) }
+            case "items.values":
+                // Each that can be read; one that fails is left out (it shows as unknown).
+                var values: [String: Config.Controls.Value] = [:]
+                for control in await controls.items() {
+                    if let value = try? await control.value() { values[control.item.id] = value }
+                }
+                return ControlSocket.Reply(values: values)
+            case "item.get":
+                guard let id = request.item else { throw .failed("which item?") }
+                return ControlSocket.Reply(value: try await controls.withItem(id) { c throws(ControlFailure) in try await c.value() })
+            case "item.set":
+                guard let id = request.item, let value = request.value else { throw .failed("which item, and what value?") }
+                try await controls.withItem(id) { c throws(ControlFailure) in try await c.set(value) }
+            case "item.do":
+                guard let id = request.item else { throw .failed("which item?") }
+                try await controls.withItem(id) { c throws(ControlFailure) in try await c.perform() }
             default:
                 throw .failed("no such action: \(request.action)")
             }

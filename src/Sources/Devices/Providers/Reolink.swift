@@ -30,19 +30,38 @@ public final class ReolinkAPI: @unchecked Sendable {
     private let lock = NSLock()
     private var login: (base: String, token: String)?
     private var loggingIn: Task<Result<(base: String, token: String), Failure>, Never>?
-    private let session: URLSession
+    /// Its connections to the camera: made anew when one fails to connect (a session made while macOS was
+    /// still deciding whether the process may use the local network kept failing, "local network
+    /// prohibited", long after it had been allowed).
+    private var connections: URLSession
 
     public init(host: String, username: String, password: String, timeout: Double = 4) {
         self.host = host
         self.username = username
         self.password = password
         self.timeout = timeout
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = timeout
-        session = URLSession(configuration: configuration, delegate: CameraCertificate(host: host), delegateQueue: nil)
+        connections = Self.makeSession(host: host, timeout: timeout)
     }
 
-    deinit { session.invalidateAndCancel() }
+    deinit { connections.invalidateAndCancel() }
+
+    private static func makeSession(host: String, timeout: Double) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        return URLSession(configuration: configuration, delegate: CameraCertificate(host: host), delegateQueue: nil)
+    }
+
+    private var session: URLSession { lock.withLock { connections } }
+
+    /// Starts over with new connections, if `failed` is still the current ones.
+    private func reconnect(after failed: URLSession) {
+        let old: URLSession? = lock.withLock {
+            guard connections === failed else { return nil }
+            defer { connections = Self.makeSession(host: host, timeout: timeout) }
+            return connections
+        }
+        old?.finishTasksAndInvalidate()
+    }
 
     /// Logs in (once, however many ask at the same time).
     public func login() async throws(Failure) {
@@ -151,9 +170,11 @@ public final class ReolinkAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = data
         let reply: Data
+        let session = session
         do {
             (reply, _) = try await session.data(for: request)
         } catch {
+            reconnect(after: session)
             throw .unreachable
         }
         guard let list = try? JSONSerialization.jsonObject(with: reply) as? [[String: Any]], let first = list.first else {

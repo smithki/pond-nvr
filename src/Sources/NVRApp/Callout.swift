@@ -4,12 +4,16 @@
 import AppKit
 import SwiftUI
 
-/// A rounded rectangle with an arrow on its top edge, its tip `arrowX` from the left.
+/// A rounded rectangle with an arrow on its top edge (or its bottom, `pointsDown`), its tip `arrowX` from the
+/// left.
 struct Callout: Shape {
     var arrowX: CGFloat
     var arrowWidth: CGFloat = 24
     var arrowHeight: CGFloat = 10
     var cornerRadius: CGFloat = 22
+    var pointsDown = false
+    /// The arrow in the middle, whatever the width (rather than at `arrowX`).
+    var centred = false
 
     var animatableData: CGFloat {
         get { arrowX }
@@ -17,12 +21,18 @@ struct Callout: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
+        let up = pointingUp(in: rect)
+        // Pointing down: the same, upside down.
+        return pointsDown ? up.applying(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: rect.minY + rect.maxY)) : up
+    }
+
+    func pointingUp(in rect: CGRect) -> Path {
         var body = rect
         body.origin.y += arrowHeight
         body.size.height -= arrowHeight
         let card = Path(roundedRect: body, cornerRadius: cornerRadius, style: .continuous)
         // Kept clear of the corners.
-        let x = min(max(arrowX, body.minX + cornerRadius + arrowWidth / 2), body.maxX - cornerRadius - arrowWidth / 2)
+        let x = min(max(centred ? rect.midX : arrowX, body.minX + cornerRadius + arrowWidth / 2), body.maxX - cornerRadius - arrowWidth / 2)
         let half = arrowWidth / 2
         var arrow = Path()
         // Into the card a little, so the two join; the sides curve into the edge and round off at the tip.

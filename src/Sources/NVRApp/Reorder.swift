@@ -8,8 +8,9 @@ import SwiftUI
 @MainActor
 @Observable
 final class ReorderDrag {
-    /// Where a drag started.
-    enum Source { case rail, stage, settings }
+    /// Where a drag started. (A camera's positions in the live controls use one of these too: in the dock, or
+    /// from the panel of those that don't fit.)
+    enum Source { case rail, stage, settings, positions, morePositions }
 
     var camera: String?
     var source: Source?
@@ -91,15 +92,15 @@ extension View {
     /// Makes a camera draggable to reorder, and a place to drop others onto. Always applied (disabled rather
     /// than left off), so turning it on or off never makes the view a different one. Without `label`, nothing
     /// follows the pointer: the dimmed camera, and the others moving out of its way, show the drag.
-    func reorderable(_ id: String, name: String, drag: ReorderDrag, from source: ReorderDrag.Source, enabled: Bool = true,
-                     label: Bool = true, move: @escaping (String, String) -> Void) -> some View {
+    func reorderable(_ id: String, name: String, symbol: String = "video.fill", drag: ReorderDrag, from source: ReorderDrag.Source,
+                     enabled: Bool = true, label: Bool = true, move: @escaping (String, String) -> Void) -> some View {
         self
             .opacity(drag.camera == id ? 0.45 : 1)
             .animation(.easeOut(duration: 0.15), value: drag.camera == id)
             // A preview of its own: by default the system draws the view itself into an image to drag, and
             // drawing its glass (the tile's badges) that way crashed the app.
             .onDrag { enabled ? drag.begin(id, from: source) : NSItemProvider() } preview: {
-                if label { DragPreview(name: name) } else { Color.clear.frame(width: 1, height: 1) }
+                if label { DragPreview(name: name, symbol: symbol) } else { Color.clear.frame(width: 1, height: 1) }
             }
             .onDrop(of: [.text], delegate: ReorderDropDelegate(target: id, drag: drag, enabled: enabled, move: move))
     }
@@ -109,10 +110,14 @@ extension View {
 /// the drag image can't draw).
 struct DragPreview: View {
     let name: String
+    var symbol = "video.fill"
 
     var body: some View {
-        Label(name, systemImage: "video.fill")
+        Label(name, systemImage: symbol)
             .font(.headline)
+            // Its own width, on one line (offered too little, the name wrapped).
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

@@ -91,6 +91,22 @@ public protocol PTZControl: Sendable {
 
 // MARK: - Night mode
 
+extension NightMode {
+    /// Day and night as an item: first under Picture, whichever provider serves it.
+    static func item(_ choices: [NightMode], provider: String) -> Config.Controls.Item {
+        Config.Controls.Item(id: "dayNight", title: "Day & Night", symbol: "circle.lefthalf.filled", group: .picture, order: 10,
+                             kind: .choice(choices.map(\.choice)), provider: provider)
+    }
+
+    var choice: Config.Controls.Item.Choice {
+        switch self {
+        case .auto: .init(value: rawValue, title: "Auto", symbol: "circle.lefthalf.filled")
+        case .day: .init(value: rawValue, title: "Day", symbol: "sun.max.fill")
+        case .night: .init(value: rawValue, title: "Night", symbol: "moon.stars.fill")
+        }
+    }
+}
+
 public enum NightMode: String, Equatable, Sendable, Codable, CaseIterable {
     /// The camera chooses by the light.
     case auto
@@ -100,10 +116,19 @@ public enum NightMode: String, Equatable, Sendable, Codable, CaseIterable {
     case night
 }
 
-public protocol NightModeControl: Sendable {
-    var abilities: Config.Controls.NightMode { get }
-    func nightMode() async throws(ControlFailure) -> NightMode
-    func setNightMode(_ mode: NightMode) async throws(ControlFailure)
+/// One of a camera's controls, declared (what it is, where it goes, its kind) and worked: read, set, or done.
+public protocol ItemControl: Sendable {
+    var item: Config.Controls.Item { get }
+    /// Its value now; nil for an action.
+    func value() async throws(ControlFailure) -> Config.Controls.Value?
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure)
+    func perform() async throws(ControlFailure)
+}
+
+extension ItemControl {
+    public func value() async throws(ControlFailure) -> Config.Controls.Value? { nil }
+    public func set(_ value: Config.Controls.Value) async throws(ControlFailure) { throw .notSupported }
+    public func perform() async throws(ControlFailure) { throw .notSupported }
 }
 
 // MARK: - Talking back
@@ -146,8 +171,11 @@ public actor CameraControls {
     let providers: [CameraProvider]
 
     private var ptzChoice: Choice<any PTZControl> = .unknown
-    private var nightChoice: Choice<any NightModeControl> = .unknown
     private var talkChoice: Choice<any TalkControl> = .unknown
+    /// Each item, by id, from the first provider that declares it; nil until asked. `itemsRetry`: a provider
+    /// couldn't be asked, so they're asked again after then.
+    private var itemChoice: [String: (control: any ItemControl, index: Int)]?
+    private var itemsRetry: Date?
 
     enum Choice<T> {
         case unknown
@@ -178,11 +206,6 @@ public actor CameraControls {
         return nil
     }
 
-    public func nightMode() async -> (any NightModeControl)? {
-        nightChoice = await resolve(nightChoice) { await $0.nightMode(access) }
-        if case let .chosen(control, _, _) = nightChoice { return control }
-        return nil
-    }
 
     public func talk() async -> (any TalkControl)? {
         talkChoice = await resolve(talkChoice) { await $0.talk(access) }
@@ -192,7 +215,7 @@ public actor CameraControls {
 
     /// Everything it can be controlled with, worked out (for the settings).
     public func controls() async -> Config.Controls {
-        Config.Controls(ptz: await ptz()?.abilities, talk: await talk()?.abilities, nightMode: await nightMode()?.abilities)
+        Config.Controls(ptz: await ptz()?.abilities, talk: await talk()?.abilities, items: await items().map(\.item))
     }
 
     /// Does `work` with the PTZ control; if that provider says it can't, with the next one that can.
@@ -207,17 +230,6 @@ public actor CameraControls {
         }
     }
 
-    public func withNightMode<T: Sendable>(_ work: (any NightModeControl) async throws(ControlFailure) -> T) async throws(ControlFailure) -> T {
-        while true {
-            guard let control = await nightMode() else { throw .notSupported }
-            do {
-                return try await work(control)
-            } catch .notSupported {
-                nightChoice = await passOver(nightChoice) { await $0.nightMode(access) }
-            }
-        }
-    }
-
     public func withTalk<T: Sendable>(_ work: (any TalkControl) async throws(ControlFailure) -> T) async throws(ControlFailure) -> T {
         while true {
             guard let control = await talk() else { throw .notSupported }
@@ -227,6 +239,52 @@ public actor CameraControls {
                 talkChoice = await passOver(talkChoice) { await $0.talk(access) }
             }
         }
+    }
+
+    /// The camera's items, in their groups' order: each from the first provider (in order of preference) that
+    /// declares it, so one camera can mix its make's own with ONVIF's.
+    public func items() async -> [any ItemControl] {
+        if itemChoice == nil || (itemsRetry.map { $0 < Date() } ?? false) { await resolveItems(from: 0, keeping: [:]) }
+        return (itemChoice ?? [:]).values.map(\.control).sorted {
+            (Config.Controls.Item.Group.allCases.firstIndex(of: $0.item.group) ?? 0, $0.item.order, $0.item.id)
+                < (Config.Controls.Item.Group.allCases.firstIndex(of: $1.item.group) ?? 0, $1.item.order, $1.item.id)
+        }
+    }
+
+    /// Does `work` with the item; if its provider says it can't, with the next one that declares it.
+    public func withItem<T: Sendable>(_ id: String, _ work: (any ItemControl) async throws(ControlFailure) -> T) async throws(ControlFailure) -> T {
+        _ = await items()
+        while true {
+            guard let chosen = itemChoice?[id] else { throw .notSupported }
+            do {
+                return try await work(chosen.control)
+            } catch .notSupported {
+                itemChoice?[id] = nil
+                for index in providers.indices where index > chosen.index {
+                    if case let .yes(list) = await providers[index].items(access), let next = list.first(where: { $0.item.id == id }) {
+                        itemChoice?[id] = (next, index)
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private func resolveItems(from start: Int, keeping: [String: (control: any ItemControl, index: Int)]) async {
+        var chosen = keeping
+        var retry: Date?
+        for index in providers.indices where index >= start {
+            switch await providers[index].items(access) {
+            case let .yes(list):
+                for control in list where chosen[control.item.id] == nil { chosen[control.item.id] = (control, index) }
+            case .no:
+                continue
+            case .unknown:
+                retry = retry ?? Date().addingTimeInterval(Self.retry)
+            }
+        }
+        itemChoice = chosen
+        itemsRetry = retry
     }
 
     /// The first provider from `start` that offers the feature; if one before it couldn't be asked, only

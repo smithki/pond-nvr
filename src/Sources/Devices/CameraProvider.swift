@@ -1,6 +1,6 @@
 // Brand-specific know-how behind one interface, so other makes of camera can be added beside Reolink's:
 // each provider says what a camera is, and offers what it can (a doorbell's button, the stream addresses,
-// and controls: PTZ, night mode, talking back). A camera's `device.provider` says which one it was chosen to
+// and controls: PTZ, talking back, and the rest as declared items: night mode, image settings, volume…). A camera's `device.provider` says which one it was chosen to
 // be talked to through; each control is then served by the first provider in order (that one, the others
 // that fit the camera, ONVIF last) that answers for it (see Controls.swift), so a make's own API is used
 // where it does something and ONVIF fills in the rest.
@@ -33,7 +33,8 @@ public protocol CameraProvider: Sendable {
     /// camera, once; the connection is shared, see CameraSessions), not if it can't, or unknown if the camera
     /// couldn't be asked just now (it's asked again later, so a moment's trouble doesn't pass it over).
     func ptz(_ access: CameraAccess) async -> Offer<any PTZControl>
-    func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl>
+    /// Its other controls for this camera, as declared items (Controls.swift): the dock draws them by group.
+    func items(_ access: CameraAccess) async -> Offer<[any ItemControl]>
     func talk(_ access: CameraAccess) async -> Offer<any TalkControl>
 }
 
@@ -50,7 +51,7 @@ extension CameraProvider {
     public var subStreamName: String? { nil }
     public var maker: String? { nil }
     public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> { .no }
-    public func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl> { .no }
+    public func items(_ access: CameraAccess) async -> Offer<[any ItemControl]> { .no }
     public func talk(_ access: CameraAccess) async -> Offer<any TalkControl> { .no }
 }
 

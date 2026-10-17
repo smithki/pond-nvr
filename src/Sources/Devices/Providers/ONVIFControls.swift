@@ -112,17 +112,26 @@ final class ONVIFPTZ: PTZControl {
 
 /// Night mode through the imaging service's IR-cut filter: AUTO the camera's choice, ON (filter in) day,
 /// OFF (filter out, IR on) night.
-final class ONVIFNightMode: NightModeControl {
+final class ONVIFNightMode: ItemControl {
     let client: ONVIFClient
     let service: URL
     let source: String
-    let abilities: Config.Controls.NightMode
+    let item: Config.Controls.Item
+    let choices: [NightMode]
 
     init(client: ONVIFClient, service: URL, source: String, choices: [NightMode]) {
         self.client = client
         self.service = service
         self.source = source
-        abilities = Config.Controls.NightMode(provider: "onvif", choices: choices.map(\.rawValue))
+        self.choices = choices
+        item = NightMode.item(choices, provider: "onvif")
+    }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? { .choice(try await nightMode().rawValue) }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .choice(text) = value, let mode = NightMode(rawValue: text) else { throw .failed("auto, day or night") }
+        try await setNightMode(mode)
     }
 
     static func mode(_ filter: String) -> NightMode? {
@@ -172,7 +181,7 @@ final class ONVIFNightMode: NightModeControl {
     }
 
     func setNightMode(_ mode: NightMode) async throws(ControlFailure) {
-        guard abilities.choices.contains(mode.rawValue) else { throw .notSupported }
+        guard choices.contains(mode) else { throw .notSupported }
         do throws(ONVIFClient.Failure) {
             _ = try await client.call(service, """
             <SetImagingSettings xmlns="\(ONVIF.imaging)"><VideoSourceToken>\(ONVIF.escape(source))</VideoSourceToken>\
@@ -191,8 +200,17 @@ extension ONVIFProvider {
         return await ONVIFPTZ.make(device).map { .yes($0) } ?? .no
     }
 
-    public func nightMode(_ access: CameraAccess) async -> Offer<any NightModeControl> {
+    /// Its standard controls, as items: day and night, image settings, speaker volume, home position, preset
+    /// tours, relay outputs (ONVIFItems.swift); each only if the camera has it.
+    public func items(_ access: CameraAccess) async -> Offer<[any ItemControl]> {
         guard let device = await CameraSessions.shared.onvif(access) else { return .unknown }
-        return await ONVIFNightMode.make(device).map { .yes($0) } ?? .no
+        var items: [any ItemControl] = []
+        if let night = await ONVIFNightMode.make(device) { items.append(night) }
+        items += await ONVIFItems.imaging(device)
+        items += await ONVIFItems.speaker(device)
+        items += await ONVIFItems.home(device)
+        items += await ONVIFItems.tours(device)
+        items += await ONVIFItems.relays(device)
+        return .yes(items)
     }
 }
