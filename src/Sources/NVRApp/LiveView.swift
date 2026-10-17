@@ -1300,6 +1300,27 @@ struct CameraTile: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
+            // Always: the bottom-left corner darkened softly, under the name and badges there, so they read on any
+            // picture.
+            .overlay {
+                RadialGradient(colors: [.black.opacity(0.38), .black.opacity(0.12), .clear], center: .bottomLeading,
+                               startRadius: 0, endRadius: compact ? 170 : 280)
+                    .allowsHitTesting(false)
+            }
+            // Hovered: the top and bottom edges darkened a little, so the controls there stand out from the video.
+            // Under them, and always laid out (faded), so it moves with the tile.
+            .overlay {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.45), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: compact ? 44 : 72)
+                    Spacer(minLength: 0)
+                    LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: compact ? 52 : 84)
+                }
+                .opacity(hovering && frozen == nil ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: hovering)
+                .allowsHitTesting(false)
+            }
             // An overlay, centred on the tile itself: inside the stack it would be centred on the snapshot,
             // which is sized for the tile's final size at once and so pulls the message off centre while
             // the tile grows.
