@@ -754,7 +754,9 @@ struct RailThumbnail: View {
             Button("Watch Only This", action: solo)
             // Its controls, with it on its own.
             Button("Control This Camera", systemImage: "slider.horizontal.3", action: openControls)
-            if model.isPrivate(camera.id) {
+            if model.isPrivateOnCameraOnly(camera.id) {
+                Button("Private on the Camera", systemImage: "eye.slash") {}.disabled(true)
+            } else if model.isPrivate(camera.id) {
                 Button("Turn Off Privacy", systemImage: "eye") { Task { await model.setPrivacy(camera.id, false) } }
             } else {
                 Button("Make Private", systemImage: "eye.slash") { Task { await model.setPrivacy(camera.id, true) } }
@@ -1481,6 +1483,26 @@ struct CameraTile: View {
                 .glassEffect(.regular, in: .capsule)
                 .help("Recorded continuously")
             }
+            // The doctor's mark: something wrong with it, or something to change (not notices, not ignored).
+            // Opens the doctor at the camera.
+            if frozen == nil, let finding = model.doctor.mark(camera.id) {
+                Button {
+                    model.settingsTab = .doctor
+                    model.doctorCamera = camera.id
+                    openSettingsWindow()
+                } label: {
+                    Image(systemName: "stethoscope")
+                        .font(compact ? .caption.weight(.semibold) : .callout.weight(.semibold))
+                        .foregroundStyle(finding.severity == .problem ? .red : .orange)
+                        .padding(.horizontal, compact ? 7 : 10)
+                        .frame(minHeight: compact ? Self.compactPillHeight : Self.pillHeight,
+                               maxHeight: compact ? Self.compactPillHeight : Self.pillHeight)
+                        .glassEffect(.regular, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .help("\(finding.headline): \(finding.evidence). Click for the doctor.")
+                .transition(.opacity)
+            }
             // HomeKit: shown only for a camera that is to be in the Home app.
             if frozen == nil, let state = model.homeKitState(for: camera) {
                 HomeKitBadge(camera: camera, state: state, compact: compact,
@@ -1538,9 +1560,16 @@ struct CameraTile: View {
         case .playing:
             EmptyView()
         case .keptPrivate:
-            TileMessage(symbol: "eye.slash", title: "Private",
-                        detail: "Not recorded, shown or in the Home app until you turn privacy off.", compact: compact,
-                        action: ("Turn Off Privacy", { Task { await model.setPrivacy(camera.id, false) } }))
+            if model.isPrivateOnCameraOnly(camera.id) {
+                // Its own privacy mode: Pond can't turn it off.
+                TileMessage(symbol: "eye.slash", title: "Private on the camera",
+                            detail: "Its own privacy mode is on. Turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app") to watch and record it again.",
+                            compact: compact)
+            } else {
+                TileMessage(symbol: "eye.slash", title: "Private",
+                            detail: "Not recorded, shown or in the Home app until you turn privacy off.", compact: compact,
+                            action: ("Turn Off Privacy", { Task { await model.setPrivacy(camera.id, false) } }))
+            }
         case .noPicture:
             TileMessage(symbol: "eye.slash", title: "No picture",
                         detail: "The camera is connected but sends no video. Is privacy mode on?", compact: compact)

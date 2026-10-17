@@ -260,6 +260,10 @@ public final class ControlServer: @unchecked Sendable {
                 ? setPrivacy(request, on: controls)
                 : blocking { await Self.perform(request, on: controls) }
             if let error = reply.error, error != .notSupported { log("! controls: \(request.camera) \(request.action): \(error)") }
+            // For the doctor: what it asked worked or not (a camera that can't, isn't failing).
+            if request.action != "controls", request.action != "items.values", reply.error != .notSupported {
+                HealthLog.shared.control(request.camera, ok: reply.error == nil, action: request.action, detail: reply.error?.description)
+            }
             guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
         }
     }
@@ -268,7 +272,10 @@ public final class ControlServer: @unchecked Sendable {
     /// own privacy mode where its provider can switch it, without waiting for it.
     private func setPrivacy(_ request: ControlSocket.Request, on controls: CameraControls) -> ControlSocket.Reply {
         guard case let .on(on)? = request.value else { return ControlSocket.Reply(error: .failed("on or off?")) }
-        if privacy.set(request.camera, private: on) { log("· \(request.camera): \(on ? "private" : "no longer private")") }
+        if privacy.set(request.camera, private: on) {
+            log("· \(request.camera): \(on ? "private" : "no longer private")")
+            HealthLog.shared.record(request.camera, on ? .madePrivate : .madePublic)
+        }
         let camera = request.camera, log = self.log
         Task {
             do throws(ControlFailure) {

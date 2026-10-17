@@ -219,6 +219,13 @@ struct ContentView: View {
                 model.cameraToEdit = id
                 openSettings()
             }
+            // --doctor [ID]: the doctor, open (at that camera).
+            if let at = CommandLine.arguments.firstIndex(of: "--doctor") {
+                model.settingsTab = .doctor
+                let next = at + 1 < CommandLine.arguments.count ? CommandLine.arguments[at + 1] : ""
+                model.doctorCamera = next.hasPrefix("-") || next.isEmpty ? nil : next
+                openSettings()
+            }
             // --add-camera: Add Camera, open (likewise).
             if CommandLine.arguments.contains("--add-camera") { model.addingCamera = true }
             if let dir = ProcessInfo.processInfo.environment["POND_SNAPSHOTS"] { await Snapshots.take(into: dir, model: model) }
@@ -230,6 +237,8 @@ struct ContentView: View {
                 if tick % 2 == 0 { model.refreshService() }
                 model.refreshHomeKit()
                 model.refreshPrivacy()
+                // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
+                if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
                 tick += 1
                 try? await Task.sleep(for: .seconds(2))
             }

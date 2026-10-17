@@ -4,7 +4,7 @@ import NVRCore
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, cameras, storage, retention, recorder
+    case general, cameras, doctor, storage, retention, recorder
 
     var id: String { rawValue }
 }
@@ -17,6 +17,7 @@ struct SettingsView: View {
         TabView(selection: $model.settingsTab) {
             Tab("General", systemImage: "gearshape", value: SettingsTab.general) { GeneralSettings() }
             Tab("Cameras", systemImage: "video", value: SettingsTab.cameras) { needsSettings { CamerasView() } }
+            Tab("Doctor", systemImage: "stethoscope", value: SettingsTab.doctor) { needsSettings { DoctorView() } }
             Tab("Storage", systemImage: "externaldrive", value: SettingsTab.storage) { needsSettings { StorageView() } }
             Tab("Retention", systemImage: "clock.arrow.circlepath", value: SettingsTab.retention) {
                 needsSettings { RetentionView() }

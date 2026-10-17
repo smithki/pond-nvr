@@ -32,13 +32,16 @@ targets += [
                 exclude: ["Fixtures"]),
     .testTarget(name: "NVRMacTests", dependencies: ["NVRMac"]),
 ]
+// Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
+targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
+targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCore"]))
 // What cameras say they are and what they offer, brand by brand (Reolink, ONVIF).
 targets.append(.target(name: "Devices", dependencies: ["NVRCore", "Ingest"]))
 targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRCore"]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices"]
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
-                                                               "HAP", "HAPCamera", "Devices"]))
+                                                               "HAP", "HAPCamera", "Devices", "Health"]))
 targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control"],
                            resources: [.copy("Fixtures")]))
 #endif

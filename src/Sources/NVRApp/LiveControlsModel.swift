@@ -106,13 +106,23 @@ extension AppModel {
 
     var privacyPath: String { PrivacyState.path(nextTo: store.path) }
 
-    func isPrivate(_ camera: String) -> Bool { privateCameras.contains(camera) }
+    /// Private in Pond, or on the camera itself.
+    func isPrivate(_ camera: String) -> Bool { privateCameras.contains(camera) || privateOnCamera.contains(camera) }
+
+    /// Private on the camera itself only (Pond can't turn that off).
+    func isPrivateOnCameraOnly(_ camera: String) -> Bool { privateOnCamera.contains(camera) && !privateCameras.contains(camera) }
 
     /// Which cameras are private, as kept (made so here, from the CLI, or by the Home app turning one off).
     func refreshPrivacy() {
         guard Date().timeIntervalSince(privacyChanged) > 1.5 else { return }
-        let now = PrivacyState(path: privacyPath).privateCameras
-        if now != privateCameras { withAnimation(.snappy(duration: 0.3)) { privateCameras = now } }
+        let state = PrivacyState(path: privacyPath)
+        let now = state.privateCameras, onCamera = state.privateOnCamera
+        if now != privateCameras || onCamera != privateOnCamera {
+            withAnimation(.snappy(duration: 0.3)) {
+                privateCameras = now
+                privateOnCamera = onCamera
+            }
+        }
     }
 
     /// Makes a camera private or not: shown at once; through the service, which applies it (and has the camera

@@ -638,8 +638,11 @@ struct EditCameraSheet: View {
                     Toggle(isOn: Binding(get: { model.isPrivate(camera.id) },
                                          set: { on in Task { await model.setPrivacy(camera.id, on) } })) {
                         Text("Private")
-                        Text("Not recorded, shown live or in the Home app until you turn this off. The Home app shows it as off meanwhile.")
+                        Text(model.isPrivateOnCameraOnly(camera.id)
+                             ? "Its own privacy mode is on: turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app"). Pond shows it as private meanwhile."
+                             : "Not recorded, shown live or in the Home app until you turn this off. The Home app shows it as off meanwhile.")
                     }
+                    .disabled(model.isPrivateOnCameraOnly(camera.id))
                 }
 
                 homeKitSection

@@ -116,6 +116,17 @@ public final class CameraWorker: @unchecked Sendable {
         case noVideo(Double)
     }
 
+    /// What kind of incident an error is, for the doctor.
+    private static func healthKind(_ error: Error) -> HealthIncident.Kind {
+        switch error {
+        case Stall.privacy: return .privacyMode
+        case Stall.noVideo: return .stalled
+        case RTSPError.unauthorized: return .loginRefused
+        case RTSPError.timeout, RTSPError.transport: return .unreachable
+        default: return .failed
+        }
+    }
+
     private func run() {
         let recovered = SegmentFiles.recoverPartials(root: root, camera: camera.id)
         if recovered > 0 { log.log(camera.id, "recovered \(recovered) segment\(recovered == 1 ? "" : "s") left by an earlier stop") }
@@ -124,6 +135,9 @@ public final class CameraWorker: @unchecked Sendable {
         var lastProblem: String?
         var problemSince = Date()
         var lastReported = Date()
+        // Its health, for the doctor: how the video flows, and what happens to it.
+        var meter = VideoMeter(camera: camera.id, videoChannel: CameraSession.videoChannel)
+        let health = HealthLog.shared
 
         while !isStopping {
             if privacy.isPrivate(camera.id) {
@@ -150,6 +164,7 @@ public final class CameraWorker: @unchecked Sendable {
                     if privacy.isPrivate(camera.id) { throw Stall.keptPrivate }
                     let packet = try session.next(timeout: 1)
                     let now = Date()
+                    if let packet, let sample = meter.add(channel: packet.channel, data: packet.data, at: now) { health.add(sample) }
                     if let packet {
                         if packet.channel == CameraSession.videoChannel {
                             lastVideo = now
@@ -163,6 +178,9 @@ public final class CameraWorker: @unchecked Sendable {
                             backoff = 1
                             lastProblem = nil
                             log.log(camera.id, "recording" + (session.audio == nil ? " (no audio)" : ""))
+                            health.record(camera.id, .connected)
+                            // Sending video: its own privacy mode (if it was on) is off.
+                            privacy.cameraReports(camera.id, privacyMode: false)
                         }
                     }
                     let silent = now.timeIntervalSince(lastVideo)
@@ -178,8 +196,10 @@ public final class CameraWorker: @unchecked Sendable {
                     }
                 }
                 files.handle(r.finish())
+                if let sample = meter.finish() { health.add(sample) }
             } catch {
                 files.handle(recorder?.finish() ?? [])
+                if let sample = meter.finish() { health.add(sample) }
                 // Private: the segment is closed and the connection let go; not a problem.
                 if case Stall.keptPrivate = error { continue }
                 let problem: String
@@ -188,6 +208,8 @@ public final class CameraWorker: @unchecked Sendable {
                 case Stall.privacy:
                     problem = "privacy mode is on; checking again every 30 s"
                     setStatus(.privacyMode)
+                    // Shown as private everywhere (the app, HomeKit) while it lasts.
+                    privacy.cameraReports(camera.id, privacyMode: true)
                     wait = 30
                 case let Stall.noVideo(s):
                     problem = String(format: "no video for %.0f s", s)
@@ -203,6 +225,8 @@ public final class CameraWorker: @unchecked Sendable {
                 // long outage shows in the log instead of going quiet.
                 if problem != lastProblem {
                     log.log(camera.id, "\(problem); reconnecting")
+                    // For the doctor: each new problem once (as logged), not every retry.
+                    health.record(camera.id, Self.healthKind(error), problem)
                     problemSince = Date()
                     lastReported = Date()
                 } else if Date().timeIntervalSince(lastReported) >= 300 {

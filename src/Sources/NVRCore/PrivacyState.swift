@@ -13,6 +13,9 @@ public final class PrivacyState: @unchecked Sendable {
     private let lock = NSLock()
     private var path: String?
     private var cameras: Set<String> = []
+    /// Private on the camera itself (its own privacy mode, seen by the recorder: it answers but sends nothing).
+    /// Apart from Pond's: the recorder keeps checking it, and it ends when the camera sends video again.
+    private var onCamera: Set<String> = []
     private var observers: [UUID: Observer] = [:]
 
     public init(path: String? = nil) {
@@ -29,8 +32,28 @@ public final class PrivacyState: @unchecked Sendable {
         let kept = Self.read(path)
         lock.withLock {
             self.path = path
-            cameras = kept
+            cameras = kept.private
+            onCamera = kept.onCamera
         }
+    }
+
+    /// Private on the camera itself (see `onCamera`).
+    public func isPrivateOnCamera(_ camera: String) -> Bool { lock.withLock { onCamera.contains(camera) } }
+
+    public var privateOnCamera: Set<String> { lock.withLock { onCamera } }
+
+    /// The recorder saw the camera's own privacy mode on or off; kept, and told to the observers (as private or
+    /// not) if it changed. Returns whether it did.
+    @discardableResult
+    public func cameraReports(_ camera: String, privacyMode on: Bool) -> Bool {
+        let (changed, observers, path, all, mine) = lock.withLock { () -> (Bool, [Observer], String?, Set<String>, Set<String>) in
+            let changed = on ? onCamera.insert(camera).inserted : onCamera.remove(camera) != nil
+            return (changed, Array(self.observers.values), self.path, cameras, onCamera)
+        }
+        guard changed else { return false }
+        if let path { Self.write(all, onCamera: mine, to: path) }
+        for observer in observers { observer(camera, on || isPrivate(camera)) }
+        return true
     }
 
     public func isPrivate(_ camera: String) -> Bool { lock.withLock { cameras.contains(camera) } }
@@ -45,8 +68,9 @@ public final class PrivacyState: @unchecked Sendable {
             return (changed, Array(self.observers.values), self.path, cameras)
         }
         guard changed else { return false }
-        if let path { Self.write(all, to: path) }
-        for observer in observers { observer(camera, isPrivate) }
+        if let path { Self.write(all, onCamera: privateOnCamera, to: path) }
+        // (Still private if the camera's own privacy mode is on.)
+        for observer in observers { observer(camera, isPrivate || isPrivateOnCamera(camera)) }
         return true
     }
 
@@ -62,18 +86,19 @@ public final class PrivacyState: @unchecked Sendable {
 
     struct File: Codable {
         var `private`: [String]
+        var onCamera: [String]?
     }
 
-    static func read(_ path: String) -> Set<String> {
+    static func read(_ path: String) -> (private: Set<String>, onCamera: Set<String>) {
         guard let data = FileManager.default.contents(atPath: path), let file = try? JSONDecoder().decode(File.self, from: data)
-        else { return [] }
-        return Set(file.private)
+        else { return ([], []) }
+        return (Set(file.private), Set(file.onCamera ?? []))
     }
 
-    static func write(_ cameras: Set<String>, to path: String) {
+    static func write(_ cameras: Set<String>, onCamera: Set<String>, to path: String) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(File(private: cameras.sorted())) else { return }
+        guard let data = try? encoder.encode(File(private: cameras.sorted(), onCamera: onCamera.sorted())) else { return }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }

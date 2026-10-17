@@ -8,6 +8,7 @@ import Recorder
 #if canImport(NVRMac)
 import Devices
 import HAP
+import Health
 import HAPCamera
 import NVRMac
 #endif
@@ -79,6 +80,21 @@ struct RecordingAndHomeKit: ServiceRunning {
     let statusPath: String
 
     func run(config: Config, passwords: [String: String], for seconds: Double?, log: EventLog) {
+        // Camera health for the doctor, in Pond's database: a week kept.
+        let health = HealthStore(path: config.storage.databasePath)
+        if let health {
+            HealthLog.shared.sink = health
+            health.prune()
+            HealthLog.shared.record("", .serviceStarted)
+        } else {
+            log.log("pond", "! camera health isn\u{2019}t kept: \(config.storage.databasePath) can\u{2019}t be opened")
+        }
+        // Hourly (the main thread waits on the recorder, so not a run loop timer).
+        let pruning = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.health.prune"))
+        pruning.schedule(deadline: .now() + 3600, repeating: 3600)
+        pruning.setEventHandler { health?.prune() }
+        pruning.resume()
+        defer { pruning.cancel() }
         // Which cameras are private, kept beside the settings; applied by everything below as it changes.
         PrivacyState.shared.load(path: PrivacyState.path(nextTo: statusPath))
         for id in PrivacyState.shared.privateCameras.sorted() { log.log(id, "private: not recorded, shown live or served to HomeKit") }

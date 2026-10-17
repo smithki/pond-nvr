@@ -715,8 +715,15 @@ struct LiveControlsDock: View {
 
     /// The dock's width in an arrangement: as narrow as its controls allow.
     func width(_ arrangement: Arrangement, controls: Config.Controls, camera: String) -> CGFloat {
-        contentWidth(arrangement, controls: controls, camera: camera) + insets(controls, narrow: arrangement == .narrow)
+        let content = contentWidth(arrangement, controls: controls, camera: camera)
+        // Narrowest, room for its adjustments' own frame too (they may slide in there).
+        let adjustments = arrangement == .narrow && !DockContents.adjustments(controls).isEmpty ? Self.adjustmentsWidth : 0
+        return max(content, adjustments) + insets(controls, narrow: arrangement == .narrow)
     }
+
+    /// The adjustments' frame (a narrow window): its own width, two columns of sliders with their names, however
+    /// narrow the camera's controls are (the dock widens to it as it slides).
+    nonisolated static let adjustmentsWidth: CGFloat = 460
 
     /// The widest arrangement that fits.
     func fitting(controls: Config.Controls, camera: String) -> Arrangement {
@@ -879,13 +886,15 @@ struct LiveControlsDock: View {
         // its controls), never past its edges. Rare: the rail makes room first.
         // (Not while the rail is still there: it steps aside first, and the dock shrunk for that moment
         // was seen growing back.)
-        let scale = showRail && open ? 1 : min(1, max(0.1, available / (natural + insets)))
+        let framedWidth = max(natural, Self.adjustmentsWidth)
+        let scale = showRail && open ? 1 : min(1, max(0.1, available / ((filming && filmAdjusting ? framedWidth : natural) + insets)))
         // In a narrow window, the adjustments are the second frame of a film strip, the edge between the two
         // frames: shown, the whole strip moves along one frame, as one surface (the controls out to the left,
         // the edge with them to the dock's left side, the adjustments in from the right).
         let framed = filming && filmAdjusting
         let plain: CGFloat = narrow ? 16 : 24
-        let visible = natural + insets
+        // As wide as the frame in view: the controls', or the adjustments' own.
+        let visible = (framed ? framedWidth : natural) + insets
         return HStack(spacing: 0) {
             ZStack {
                 DockContents(camera: camera, controls: controls, arrangement: arrangement,
@@ -913,7 +922,7 @@ struct LiveControlsDock: View {
                     .zIndex(1)
             }
             if filming {
-                DockAdjustments(camera: camera, controls: controls, width: natural, trailing: plain)
+                DockAdjustments(camera: camera, controls: controls, width: framedWidth, trailing: plain)
                     .frame(height: Self.height())
             }
         }
@@ -1313,6 +1322,8 @@ struct DockContents: View {
     /// Pond's privacy for the camera: lit while it's private (not recorded, shown live or in the Home app).
     var privacy: some View {
         let on = model.isPrivate(camera.id)
+        // On the camera itself: lit, but Pond can't turn it off.
+        let onCameraOnly = model.isPrivateOnCameraOnly(camera.id)
         let label = Image(systemName: on ? "eye.slash.fill" : "eye")
             .font(.system(size: 16, weight: .semibold))
             .contentTransition(.symbolEffect(.replace))
@@ -1327,8 +1338,10 @@ struct DockContents: View {
                 }
             }
             .buttonBorderShape(.roundedRectangle(radius: 12))
-            .help(on ? "Turn privacy off: record and show \(camera.name) again"
-                     : "Make \(camera.name) private: not recorded, shown live or in the Home app")
+            .disabled(onCameraOnly)
+            .help(onCameraOnly ? "Its own privacy mode is on: turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app")"
+                  : on ? "Turn privacy off: record and show \(camera.name) again"
+                  : "Make \(camera.name) private: not recorded, shown live or in the Home app")
         }
     }
 

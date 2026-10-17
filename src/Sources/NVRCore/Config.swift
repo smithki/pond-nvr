@@ -44,7 +44,11 @@ public struct Config: Codable, Equatable, Sendable {
         /// Where event clips go, with `~` expanded.
         public var eventsPath: String { Config.expand(events ?? recordings) }
         public var recordingsPath: String { Config.expand(recordings) }
-        public var databasePath: String { Config.expand(database) }
+        public var databasePath: String {
+            // A setup carried over from nvr names its old default (in nvr's folder, which the migration moved): Pond's own.
+            if database == Brand.Legacy.supportFolder + "/nvr.sqlite" { return Config.expand(Brand.supportFolder + "/pond.sqlite") }
+            return Config.expand(database)
+        }
     }
 
     public struct Retention: Codable, Equatable, Sendable {

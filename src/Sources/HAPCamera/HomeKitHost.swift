@@ -224,7 +224,7 @@ public final class HomeKitHost: @unchecked Sendable {
         recording?.prebuffer?.paused = { privacy.isPrivate(id) }
         // Private: off in the Home app and its live views ended (the Home app's own on and off is HomeKit's,
         // and never changes Pond's privacy).
-        recording?.setPrivate(privacy.isPrivate(id))
+        recording?.setPrivate(privacy.isPrivate(id) || privacy.isPrivateOnCamera(id))
         let observer = privacy.observe { [weak recording] camera, isPrivate in
             guard camera == id else { return }
             recording?.setPrivate(isPrivate)

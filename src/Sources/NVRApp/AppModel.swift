@@ -65,6 +65,9 @@ final class AppModel {
     }
     /// The cameras made private in Pond (from privacy.json, which the service keeps).
     var privateCameras: Set<String> = []
+    /// Private on the camera itself (its own privacy mode, as the recorder sees it): shown as private, but Pond
+    /// can't turn it off.
+    var privateOnCamera: Set<String> = []
     /// Just changed here: not read back from the file until then (the service may not have written it yet).
     @ObservationIgnored var privacyChanged = Date.distantPast
     /// How wide the cameras' rail is (the last it was shown).
@@ -74,6 +77,9 @@ final class AppModel {
     var dockNarrowest: CGFloat = LiveView.narrowestDock
     /// No room for the adjustments beside the stage (a narrow window): they're the dock's second frame instead.
     var sidebarFloats = false
+    /// How each camera is doing (the doctor), and the camera it's showing (nil: all of them).
+    let doctor = CameraDoctor()
+    var doctorCamera: String?
     /// The rail would fit beside the open controls (else its button is off while it's hidden).
     var railFits = true
     /// The widest the rail may be dragged: what leaves the open controls dock room (nil: no limit).
