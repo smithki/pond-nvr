@@ -7,6 +7,7 @@ Work in progress. What works today:
 - **Continuous recording** of every camera's main stream, in 1-minute MP4 files, with retention by age, size and free space. It reconnects when a camera drops, and stops writing (and says so) when the drive is unplugged instead of filling the startup disk.
 - **Pond.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
 - **HomeKit**, implemented natively (the HomeKit Accessory Protocol in Swift): each camera you choose is a camera in the Home app, with snapshots, live video and sound, several viewers at once, and **HomeKit Secure Video** recording on the camera's own motion detection. Doorbells are supported as video doorbells.
+- **Camera controls**: under a camera watched on its own, a dock to move it, keep and go to positions, switch day and night, talk through its speaker and change its picture and volume, through its make's own API where Pond knows one (Reolink) and ONVIF otherwise.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
 
 Planned: on-device detection of people, vehicles, animals and packages (Core ML), descriptions of each event, and plain-language search of clips ("packages delivered to the front door this week"), with Apple's on-device models only. See [docs/roadmap.md](docs/roadmap.md).
@@ -84,6 +85,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 ## Documentation
 
 - [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
+- [docs/controls.md](docs/controls.md): camera controls, and how each goes through the best way Pond has for a camera.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.

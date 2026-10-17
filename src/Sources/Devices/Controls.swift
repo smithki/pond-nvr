@@ -270,6 +270,9 @@ public actor CameraControls {
         }
     }
 
+    /// A provider couldn't be asked about its items, so they'll be asked again (for tests).
+    var retryPending: Bool { itemsRetry != nil }
+
     private func resolveItems(from start: Int, keeping: [String: (control: any ItemControl, index: Int)]) async {
         var chosen = keeping
         var retry: Date?

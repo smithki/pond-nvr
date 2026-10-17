@@ -40,6 +40,13 @@ The first version: recording, the app and HomeKit.
 - **Stream addresses found for you**: adding a camera asks it where its streams are, through its make's API (Reolink) or ONVIF (its media profiles), and they can be typed or changed in Add Camera and the camera's settings; `pond camera add --main --sub` gives them by hand. `pond camera onvif ID` shows what a camera says over ONVIF, step by step.
 - Camera passwords are kept in the login Keychain (service `pond`), never in the settings file.
 
+### Camera controls
+- **The controls dock**: under a camera watched on its own (⌥⌘L, or Control This Camera in its menu), what the camera can do and only that: a move pad, its kept positions with a picture of what each shows (keep, remove, drag to reorder, More for the rest), home and preset tours, zoom, day and night, a still saved to Pictures › Pond, talking through its speaker and its volume. It's as wide as what's in it, from three layouts.
+- **Adjustments**: the camera's other settings in a sidebar from the dock's right edge: brightness, contrast, saturation, sharpness, setting home, relays, and whatever its make's API adds. The cameras' rail makes room for it when the window is narrow.
+- **Talking back** over ONVIF's RTSP backchannel (G.711), from a tile or the dock.
+- **The best way for each control**: every control goes through the camera's chosen way, then its make's own API, then ONVIF, passing over one that turns out not to work; one shared login per camera (cameras allow only a few). Reolink's API serves PTZ, positions, day and night and volume; ONVIF the rest.
+- `pond camera controls|ptz|item|night-mode|talk|abilities` try them from a terminal ([docs/controls.md](docs/controls.md)).
+
 ### The `pond` command
 - Settings (`init`, `check`), storage, retention, cameras (`list`, `add`, `set`, `password`, `test`, `record`, `rename`, `move`, `remove`, `identify`), the login service and HomeKit (`homekit code`, `reset`, `snapshot`). The app and the command save through the same code.
 
@@ -48,3 +55,4 @@ The first version: recording, the app and HomeKit.
 - Detection, event clips, descriptions and search are not built yet; the Events view shows made-up events with `POND_MOCK_EVENTS=1`.
 - Zones are edited by hand in the settings file.
 - `make test-docker` has not been run yet.
+- ONVIF home, preset tours and relays are built to the standard but not yet tried on a camera that has them.

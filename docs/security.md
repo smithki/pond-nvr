@@ -4,7 +4,7 @@
 
 The settings file holds only usernames, and `pond check` refuses addresses with a login in them. Each password is a generic password in the login Keychain, service `pond`, account the camera's ID, and is sent only to that camera (RTSP Digest authentication, so it never crosses the network in clear). The settings file is written readable only by its owner. The cameras speak plain RTSP, so the video itself is not encrypted: keep them on a trusted network or VLAN.
 
-**Only `pond` reads the passwords.** The app never does: it hands a password to `pond camera password ID --password-stdin` to save it (on standard input, never in arguments, where other programs could see it), has `pond` move or remove it, runs checks of a saved camera through `pond camera test ID --json`, and gets live video through the service's local socket (`streams.sock`, next to the settings file, readable only by you). To show whether a camera has a password, it asks the Keychain whether the item exists, which reads no secret and so never asks for access. One program reading the items is what keeps the Keychain from asking you to let another in, camera by camera; a password just typed into Add Camera is tried by the app directly, before it is saved.
+**Only `pond` reads the passwords.** The app never does: it hands a password to `pond camera password ID --password-stdin` to save it (on standard input, never in arguments, where other programs could see it), has `pond` move or remove it, runs checks of a saved camera through `pond camera test ID --json`, and gets live video and works the cameras' controls through the service's local sockets (`streams.sock` and `controls.sock`, next to the settings file, usable only by you). To show whether a camera has a password, it asks the Keychain whether the item exists, which reads no secret and so never asks for access. One program reading the items is what keeps the Keychain from asking you to let another in, camera by camera; a password just typed into Add Camera is tried by the app directly, before it is saved.
 
 To learn what a camera is (model, serial number, firmware, doorbell or not), pond also logs in to the camera's own API when it is added or checked (`pond camera identify`), and doorbells' to watch their button:
 
@@ -25,6 +25,7 @@ To learn what a camera is (model, serial number, firmware, doorbell or not), pon
 | UDP ports per live stream | SRTP to the viewing device | the device that set up the stream |
 | One TCP port per camera recording to HKSV | HomeKit Data Stream | the home hub, with keys from its HAP session |
 | A Unix socket, `streams.sock` | Live video for the app (`StreamRelay`) | this user only (next to the settings file) |
+| A Unix socket, `controls.sock` | Camera controls for the app and the CLI (`ControlServer`): moving, positions, settings, talking through a camera's speaker | this user only (next to the settings file) |
 
 The app's own UI is local only; there is no web server. macOS asks once for Local Network access: for `pond` the first time the login service connects to a camera (until it is allowed, connections fail with "No route to host" and are retried), and again when the HAP servers start.
 

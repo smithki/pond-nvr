@@ -4,15 +4,21 @@ Pond records what a camera sends over RTSP, without re-encoding it, so a camera 
 
 ## By brand
 
-| Brand | Stream addresses | Model, serial, firmware | Motion for HKSV | Doorbell presses | Page |
-|---|---|---|---|---|---|
-| Reolink | filled in | yes | yes | yes | [reolink.md](reolink.md) |
-| ONVIF cameras | asked of the camera | yes | ONVIF events | ONVIF events, if the doorbell sends one | [onvif.md](onvif.md) |
-| Other RTSP cameras | typed in | no | no | no | [onvif.md](onvif.md#cameras-without-onvif) |
+| Brand | Stream addresses | Model, serial, firmware | Motion for HKSV | Doorbell presses | Controls | Page |
+|---|---|---|---|---|---|---|
+| Reolink | filled in | yes | yes | yes | its own API, ONVIF for the rest | [reolink.md](reolink.md) |
+| ONVIF cameras | asked of the camera | yes | ONVIF events | ONVIF events, if the doorbell sends one | what the camera offers over ONVIF | [onvif.md](onvif.md) |
+| Other RTSP cameras | typed in | no | no | no | none | [onvif.md](onvif.md#cameras-without-onvif) |
 
 **Talks through.** Each camera's settings (Device) say how Pond talks to it, and switch it: its make's own way (Reolink), ONVIF, or **Video only**, where Pond logs in only for the video, never for details or events (for an account limited to video, a camera whose own motion detection is too noisy, or one whose events another system already watches). Video only pauses HomeKit Secure Video, keeping the setting for when you switch back.
 
 Without motion from the camera (no ONVIF events, video only, or no ONVIF at all), a camera still records continuously, shows live and works in the Home app's live view; HomeKit Secure Video needs motion to start a recording, so it waits for Pond's own detection. Reports of other models are welcome.
+
+## Controls
+
+Watching one camera on its own, **Controls** under it opens a dock of what the camera can do, and only that: a pad to move it, its kept positions (each with a picture of what it shows), day and night, a picture saved to Pictures › Pond, talking through its speaker and its volume. Its other settings (brightness, contrast, saturation, sharpness, setting home, relays, and any its make adds) are in the **Adjustments** sidebar, opened from the dock's right edge. ⌥⌘L shows and hides the dock; a camera's menu in the list has **Control This Camera**.
+
+Each control goes through the best way Pond has for that camera: its make's own API where Pond knows one, ONVIF for everything else. [controls.md](../controls.md) has how that's chosen; `pond camera controls ID` shows it for a camera.
 
 ## Finding cameras
 

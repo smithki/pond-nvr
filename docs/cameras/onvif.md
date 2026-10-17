@@ -6,6 +6,22 @@ Any camera that sends H.264 over RTSP can be recorded, watched live and added to
 
 Many cameras (Hikvision, Dahua, Amcrest, Axis, TP-Link Tapo and others) speak ONVIF. Pond uses it to find the camera's stream addresses (its media profiles: the largest H.264 one is the main stream, the smallest the sub-stream) and to read its maker, model, serial number and firmware. It logs in with a WS-Security password digest, so the password itself is not sent, allowing for a camera whose clock is off. Its **events** drive HomeKit: Pond subscribes to them (a pull-point subscription, renewed as it goes), and any motion detector the camera reports, plain motion or its person, vehicle and animal detection, turns HomeKit's motion sensor on, which starts HomeKit Secure Video recordings. A doorbell's button press, reported under a topic such as `Visitor` or `Doorbell`, rings in the Home app.
 
+Its **controls** come from ONVIF too, each only if the camera has it:
+
+| What | ONVIF | In the app |
+|---|---|---|
+| Pan, tilt, zoom | PTZ `ContinuousMove`, `Stop` | the move pad, zoom buttons |
+| Positions | PTZ `GetPresets`, `SetPreset`, `GotoPreset`, `RemovePreset` | the positions in the dock |
+| Home | PTZ `GotoHomePosition`, `SetHomePosition` (if the node says `HomeSupported`) | Home in the dock; Set Home in Adjustments |
+| Preset tours | PTZ `GetPresetTours`, `OperatePresetTour` | a switch per tour, in the dock |
+| Day and night | Imaging: the IR cut filter (`AUTO`, `ON` for day, `OFF` for night) | Day & Night |
+| Brightness, contrast, saturation, sharpness | Imaging `GetOptions` (their ranges), `SetImagingSettings` | Adjustments |
+| Speaker volume | Media: the audio output configuration's level | the speaker slider (not if its range is fixed) |
+| Relays | DeviceIO (or the device service) `GetRelayOutputs`, `SetRelayOutputState` | Adjustments: a switch if it stays as set, a button (asking first) if it springs back |
+| Talking back | The RTSP backchannel: `Require: www.onvif.org/ver20/backchannel`, then G.711 (µ-law or A-law, as the camera asks) | the microphone button on its tile and in the dock |
+
+An ONVIF user may need the **Operator** or **Administrator** role for PTZ and imaging; a **User** can usually only watch.
+
 `pond camera onvif ID --events [SECONDS]` prints the camera's events as they come, with what Pond makes of them (`→ motion`, `→ still`, `→ pressed`), to see what a camera reports.
 
 ## Adding one
