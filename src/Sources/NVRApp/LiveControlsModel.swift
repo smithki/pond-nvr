@@ -12,7 +12,8 @@ extension AppModel {
 
     /// What can be controlled on this camera (nil: nothing, or not known yet).
     func controls(for camera: Config.Camera) -> Config.Controls? {
-        guard let controls = camera.device?.controls, !controls.isEmpty else { return nil }
+        guard var controls = camera.device?.controls, !controls.isEmpty else { return nil }
+        controls.items += PrototypeItems.items(for: camera, controls: controls)
         return controls
     }
 
@@ -87,10 +88,13 @@ extension AppModel {
         if let values = await control(camera, .init(camera: camera, action: "items.values"))?.values {
             itemValues[camera, default: [:]].merge(values) { $1 }
         }
+        itemValues[camera, default: [:]].merge(PrototypeItems.initial) { kept, _ in kept }
     }
 
     /// Sets an item, shown at once and put back if the camera refuses.
     func setItem(_ camera: String, _ item: String, _ value: Config.Controls.Value) async {
+        // A prototype's: shown here only.
+        if PrototypeItems.ids.contains(item) { return itemValues[camera, default: [:]][item] = value }
         let before = itemValues[camera]?[item]
         itemValues[camera, default: [:]][item] = value
         if await control(camera, .init(camera: camera, action: "item.set", item: item, value: value)) == nil {
@@ -99,6 +103,7 @@ extension AppModel {
     }
 
     func doItem(_ camera: String, _ item: String) async {
+        if PrototypeItems.ids.contains(item) { return showControlError(camera, "Not built yet (a prototype)") }
         await control(camera, .init(camera: camera, action: "item.do", item: item))
     }
 

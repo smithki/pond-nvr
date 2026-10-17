@@ -45,6 +45,7 @@ struct LiveView: View {
     @State private var railNote = false
     /// The live view's width (the rail, the stage and the adjustments' column).
     @State private var contentWidth: CGFloat = 0
+    @AppStorage("liveRailWidth") private var railKeptWidth = CameraRail.defaultWidth
     @State private var railNoteTask: Task<Void, Never>?
 
     private var controlsOpen: Bool { controlsWanted && dockReady }
@@ -86,12 +87,7 @@ struct LiveView: View {
             } else {
                 HStack(spacing: 0) {
                     if showRail {
-                        CameraRail(cameras: railOrder.map { order in order.compactMap { id in cameras.first { $0.id == id } } } ?? cameras,
-                                   staged: staged(cameras), snapshots: snapshots,
-                                   health: { health($0, cameras: cameras) },
-                                   solo: solo, toggle: toggle, showAll: { showAll(cameras.map(\.id)) },
-                                   openControls: { openControls($0) },
-                                   drag: reorderDrag, reorder: reorder)
+                        railView(cameras)
                             // (How much room it takes, for the dock to know when there's room for it again.)
                             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if $0 > 0 { model.railWidth = $0 } }
                             .transition(.move(edge: .leading).combined(with: .opacity))
@@ -129,19 +125,6 @@ struct LiveView: View {
                                 // (Above it too while a camera's other positions are open, reaching up over the stage.)
                                 .zIndex(controlsOpen && model.morePositionsOpen == nil ? 0 : 2)
                                 .transition(.opacity)
-                        }
-                    }
-                    // In a window too narrow for the dock and the adjustments side by side: the adjustments over
-                    // the stage's right side, down to just above the dock (its edge stays clear).
-                    .overlay(alignment: .topTrailing) {
-                        if let docked, controlsOpen, model.adjustmentsInSidebar, model.sidebarFloats {
-                            AdjustmentsView(camera: docked.camera, controls: docked.controls)
-                                .frame(width: Self.sidebarRoom - 12)
-                                .frame(maxHeight: .infinity, alignment: .top)
-                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                                .padding([.top, .trailing], 12)
-                                .padding(.bottom, Self.dockToggleRoom + 12 + LiveControlsDock.height() + 12)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                     // The docked camera's adjustments, down the right as the rail is down the left: the picture
@@ -188,7 +171,12 @@ struct LiveView: View {
                 // Whether the adjustments fit beside the stage (the rail out of the way if need be) or float over it.
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
                 .onChange(of: contentWidth - Self.stageMargins - Self.sidebarRoom < model.dockNarrowest, initial: true) { _, floats in
-                    if model.sidebarFloats != floats { model.sidebarFloats = floats }
+                    // At once, not animated: the window is being resized (the adjustments moving between the sidebar
+                    // and the dock's second frame, animated, were seen twice, leaving and arriving).
+                    guard model.sidebarFloats != floats else { return }
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { model.sidebarFloats = floats }
                 }
                 // The rail stepped aside for the controls: said for a moment, where it was, then gone.
                 .overlay(alignment: .topLeading) {
@@ -213,6 +201,8 @@ struct LiveView: View {
                 }
                 // Shown again by hand: no longer hidden for the sidebar's sake.
                 .onChange(of: showRail) { _, shown in if shown { model.railMadeRoom = false } }
+                // Whether the rail would fit beside the open controls, for the toolbar's button.
+                .onChange(of: railFits(cameras), initial: true) { _, fits in if model.railFits != fits { model.railFits = fits } }
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
                 .onChange(of: reorderDrag.camera) { _, dragged in
                     if dragged != nil, reorderDrag.source == .stage {
@@ -261,7 +251,7 @@ struct LiveView: View {
     /// What the cameras' rail takes from the stage besides its own width: the gap between them.
     static let railGap: CGFloat = 18
     /// The window's narrowest: that dock with the stage's margins (the cameras' rail out of the way, the
-    /// adjustments floating over the stage), so the dock never has to shrink; narrow enough that Pond fits in
+    /// adjustments a frame of the dock), so the dock never has to shrink; narrow enough that Pond fits in
     /// half of any Mac's screen beside another app.
     static let minimumWindowWidth: CGFloat = 640
     /// The longest the dock waits for what it holds before opening.
@@ -287,6 +277,25 @@ struct LiveView: View {
         .buttonBorderShape(.capsule)
         .controlSize(.large)
         .help(controlsOpen ? "Hide the controls (\u{2325}\u{2318}L)" : "Show this camera\u{2019}s controls (\u{2325}\u{2318}L)")
+    }
+
+    /// The cameras' rail.
+    func railView(_ cameras: [Config.Camera]) -> some View {
+        CameraRail(cameras: railOrder.map { order in order.compactMap { id in cameras.first { $0.id == id } } } ?? cameras,
+                   staged: staged(cameras), snapshots: snapshots,
+                   health: { health($0, cameras: cameras) },
+                   solo: solo, toggle: toggle, showAll: { showAll(cameras.map(\.id)) },
+                   openControls: { openControls($0) },
+                   drag: reorderDrag, reorder: reorder)
+    }
+
+    /// The rail would fit beside the stage with the open controls at their narrowest (and the adjustments,
+    /// beside the stage): its width as kept, whether it's shown or not.
+    func railFits(_ cameras: [Config.Camera]) -> Bool {
+        guard docked(cameras) != nil, controlsOpen else { return true }
+        let sidebar = model.adjustmentsInSidebar && !model.sidebarFloats ? Self.sidebarRoom : 0
+        let rail = railKeptWidth.clamped(to: CameraRail.widths)
+        return contentWidth - rail - Self.railGap - Self.stageMargins - sidebar >= model.dockNarrowest
     }
 
     /// The camera whose controls go under the stage: the one watched on its own. Every camera has some (a

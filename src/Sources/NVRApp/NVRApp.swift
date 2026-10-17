@@ -155,10 +155,16 @@ struct ContentView: View {
             // hiding fades it out under the recorder's state.
             if model.mode == .live, model.config?.cameras.isEmpty == false {
                 ToolbarItem(placement: .navigation) {
+                    // Not while there's no room for it beside the open controls (shown, the dock hid it again at
+                    // once, and bounced), whoever hid it: a wider window, or the controls closed, and it's back on.
+                    let madeRoom = !showRail && (model.railMadeRoom || !model.railFits)
                     Toggle(isOn: $showRail.animation(.snappy(duration: 0.25))) {
                         Label(showRail ? "Hide Cameras" : "Show Cameras", systemImage: "sidebar.leading")
                     }
-                    .help(showRail ? "Hide the list of cameras" : "Show the list of cameras")
+                    .disabled(madeRoom)
+                    .help(!madeRoom ? (showRail ? "Hide the list of cameras" : "Show the list of cameras")
+                          : model.railMadeRoom ? "The cameras are hidden to make room for the controls; a wider window shows them again"
+                          : "No room for the cameras beside the controls; make the window wider, or hide the controls, to show them")
                 }
             }
             ToolbarItem(placement: .navigation) {

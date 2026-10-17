@@ -24,6 +24,20 @@ struct ControlSection<Content: View>: View {
     }
 }
 
+/// A group of adjustments' heading: its icon and name, a step above a control's name (which is small capitals).
+struct GroupHeading: View {
+    let group: Config.Controls.Item.Group
+
+    var body: some View {
+        Label {
+            Text(group.title).font(.subheadline.weight(.semibold))
+        } icon: {
+            Image(systemName: group.symbol).font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
+        }
+        .labelStyle(.titleAndIcon)
+    }
+}
+
 /// A round glass button that acts while held: `began` on press, `ended` on release.
 struct HoldButton: View {
     let systemImage: String
@@ -743,6 +757,21 @@ struct LiveControlsDock: View {
     @State private var measured = false
     /// The sidebar is coming or going: the dock's room changes with it.
     @State private var withSidebar = false
+    /// The adjustments open or not, as last seen: a change of it is the person's (animated); else the
+    /// window's size moved them (at once).
+    @State private var lastAdjusting: Bool?
+    /// The film strip on its adjustments frame: the dock's own, animated only when the edge is clicked (kept
+    /// in step with `adjusting` at once otherwise: the window resized, a launch). The stored preference's
+    /// change comes apart from the click's animation, and an animation keyed to it slid the frames as the
+    /// window was resized.
+    @State private var filmAdjusting = false
+
+    /// The edge clicked: the adjustments opened or closed, the film sliding along with it.
+    func toggleAdjustments() {
+        let next = !adjusting
+        withAnimation(LiveView.dockAnimation) { filmAdjusting = next }
+        adjusting = next
+    }
 
     var current: (camera: Config.Camera, controls: Config.Controls) { shown ?? (camera, controls) }
 
@@ -777,14 +806,14 @@ struct LiveControlsDock: View {
                 if abs(model.dockNarrowest - narrowest) > 1 { model.dockNarrowest = narrowest }
             }
             .onChange(of: open) { fitRail(available) }
-            .onDisappear { model.railLimit = nil }
-            // The rail shown by hand with no room for it beside the sidebar and the dock: the sidebar gives way
-            // (the latest asked for wins).
-            .onChange(of: showRail) { _, shown in
-                guard shown, model.adjustmentsInSidebar, !model.sidebarFloats,
-                      available - model.railWidth - LiveView.railGap < self.width(.narrow, controls: current.controls, camera: current.camera.id)
-                else { return }
-                adjusting = false
+            .onDisappear {
+                model.railLimit = nil
+                // Gone (several cameras on the stage): the rail it hid for room comes back (its button is off
+                // meanwhile).
+                if model.railMadeRoom {
+                    withAnimation(LiveView.dockAnimation) { showRail = true }
+                    model.railMadeRoom = false
+                }
             }
             .overlay { withAdjustments }
             .onAppear { shown = (camera, controls) }
@@ -802,8 +831,19 @@ struct LiveControlsDock: View {
     /// The dock; its adjustments, when open, are in the live view's sidebar.
     var withAdjustments: some View {
         dock
-            .onChange(of: adjusting && !DockContents.adjustments(current.controls).isEmpty, initial: true) { _, open in
+            .onChange(of: adjusting && !DockContents.adjustments(current.controls).isEmpty && !filming, initial: true) { _, open in
+                // Opened or closed by hand (animated), or moved by the window's size between the sidebar and the
+                // dock (at once, as the window is resized), or there from the start.
+                let asked = lastAdjusting != nil && adjusting != lastAdjusting
+                lastAdjusting = adjusting
                 guard model.adjustmentsInSidebar != open else { return }
+                guard asked else {
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { model.adjustmentsInSidebar = open }
+                    fitRail(available)
+                    return
+                }
                 withSidebar = true
                 // No room beside the sidebar for even the narrowest dock: the cameras' rail makes room. It comes
                 // back with the sidebar's going only if there's room for it then (checked once it has gone).
@@ -820,6 +860,12 @@ struct LiveControlsDock: View {
                 }
             }
             .onDisappear { model.adjustmentsInSidebar = false }
+            .onChange(of: adjusting, initial: true) { _, open in
+                guard filmAdjusting != open else { return }
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { filmAdjusting = open }
+            }
     }
 
     var dock: some View {
@@ -834,27 +880,45 @@ struct LiveControlsDock: View {
         // (Not while the rail is still there: it steps aside first, and the dock shrunk for that moment
         // was seen growing back.)
         let scale = showRail && open ? 1 : min(1, max(0.1, available / (natural + insets)))
-        return ZStack {
-            DockContents(camera: camera, controls: controls, arrangement: arrangement,
-                         left: side(for: controls, camera: camera.id), right: everydayWidth, mover: mover,
-                         measured: { kind, width in measured(kind, width) })
-                .id(camera.id)
-                .transition(.opacity)
-        }
-        .frame(width: natural)
-        .padding(.leading, narrow ? 16 : 24)
-        .padding(.trailing, adjustable ? 16 + Self.sidebarButton + 1 : narrow ? 16 : 24)
-        .padding(.vertical, 16)
-        // Its right edge opens the adjustments' sidebar: part of the dock, over its controls (frosted, so
-        // controls passing under it as the dock changes size are seen through it, not over it).
-        .overlay(alignment: .trailing) {
+        // In a narrow window, the adjustments are the second frame of a film strip, the edge between the two
+        // frames: shown, the whole strip moves along one frame, as one surface (the controls out to the left,
+        // the edge with them to the dock's left side, the adjustments in from the right).
+        let framed = filming && filmAdjusting
+        let plain: CGFloat = narrow ? 16 : 24
+        let visible = natural + insets
+        return HStack(spacing: 0) {
+            ZStack {
+                DockContents(camera: camera, controls: controls, arrangement: arrangement,
+                             left: side(for: controls, camera: camera.id), right: everydayWidth, mover: mover,
+                             measured: { kind, width in measured(kind, width) })
+                    .id(camera.id)
+                    .transition(.opacity)
+            }
+            // New when the film begins or ends (the window resized), at once: a crossfade between its own
+            // arrangements, still going, was left fading where the controls had been, over the adjustments.
+            .id(filming)
+            .frame(width: natural)
+            .padding(.leading, plain)
+            .padding(.trailing, adjustable ? 16 : plain)
+            .padding(.vertical, 16)
+            // Its edge opens the adjustments (beside the stage, or the strip's next frame): part of the dock,
+            // frosted, a hairline from each frame.
             if adjustable {
-                AdjustEdge(open: $adjusting, label: $edgeLabel)
+                AdjustEdge(open: adjusting, toggle: toggleAdjustments, label: $edgeLabel, mirrored: framed)
                     .frame(width: Self.sidebarButton + 1)
                     .background(.ultraThinMaterial)
                     .overlay(alignment: .leading) { Rectangle().fill(.white.opacity(0.1)).frame(width: 1) }
+                    .overlay(alignment: .trailing) { Rectangle().fill(.white.opacity(filming ? 0.1 : 0)).frame(width: 1) }
+                    // Always over the frames beside it: a layout fading out as the dock morphs was drawn above it.
+                    .zIndex(1)
+            }
+            if filming {
+                DockAdjustments(camera: camera, controls: controls, width: natural, trailing: plain)
+                    .frame(height: Self.height())
             }
         }
+        .offset(x: framed ? -(plain + natural + 16) : 0)
+        .frame(width: visible, alignment: .leading)
         .frame(height: Self.height())
         // Inside the glass: what fades out as something else comes in stays within the panel's edges.
         .clipShape(.rect(cornerRadius: 26))
@@ -866,18 +930,22 @@ struct LiveControlsDock: View {
         .scaleEffect(scale)
         // The right edge's name while the pointer rests there: just outside it, or, with no room beside the
         // dock (a narrow window), just above it.
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: framed ? .topLeading : .topTrailing) {
             let beside = (available - min(available, width(arrangement, controls: controls, camera: camera.id))) / 2 + 12 >= Self.edgeLabelWidth + 16
-            Text("Adjustments")
+            Text(framed ? "Controls" : "Adjustments")
                 .font(.callout.weight(.medium))
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 // (Glass shows through a zero opacity: none while it's hidden.)
                 .glassEffect(edgeLabel ? .regular : .identity, in: .capsule)
                 .fixedSize()
-                .alignmentGuide(.trailing) { beside ? $0[.leading] - 10 : $0[.trailing] }
+                // By its width, not its other edge (which the guide beside it redefines: the name mirrored for the
+                // edge on the left sat over the edge).
+                .alignmentGuide(.trailing) { beside ? -10 : $0.width }
+                // (The edge on the left: to its left, or above its left end.)
+                .alignmentGuide(.leading) { beside ? $0.width + 10 : 0 }
                 .alignmentGuide(.top) { beside ? $0[VerticalAlignment.center] - Self.height() / 2 : $0[.bottom] + 8 }
                 .opacity(edgeLabel ? 1 : 0)
-                .scaleEffect(edgeLabel ? 1 : 0.92, anchor: beside ? .leading : .bottomTrailing)
+                .scaleEffect(edgeLabel ? 1 : 0.92, anchor: beside ? (framed ? .trailing : .leading) : (framed ? .bottomLeading : .bottomTrailing))
                 .animation(.easeOut(duration: 0.15), value: edgeLabel)
                 .allowsHitTesting(false)
         }
@@ -975,6 +1043,11 @@ struct LiveControlsDock: View {
         guard open, showRail, !withSidebar, width < narrowest else { return }
         withAnimation(LiveView.dockAnimation) { showRail = false }
         model.railMadeRoom = true
+    }
+
+    /// The adjustments are a frame of the dock (a window too narrow for them beside the stage).
+    var filming: Bool {
+        model.sidebarFloats && !DockContents.adjustments(current.controls).isEmpty
     }
 
     /// Its controls' widths, as they lay themselves out.
@@ -1284,9 +1357,13 @@ struct AdjustmentsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 20) {
                 Text("Adjustments").font(.headline)
-                ForEach(groups, id: \.0) { group, items in section(group, items) }
+                // A hairline between groups, each under its own heading (not like a control's name).
+                ForEach(Array(groups.enumerated()), id: \.element.0) { index, entry in
+                    if index > 0 { Divider().opacity(0.6) }
+                    section(entry.0, entry.1)
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1298,7 +1375,8 @@ struct AdjustmentsView: View {
     func section(_ group: Config.Controls.Item.Group, _ items: [Config.Controls.Item]) -> some View {
         let sliders = items.filter { if case .slider = $0.kind { true } else { false } }
         let others = items.filter { if case .slider = $0.kind { false } else { true } }
-        return ControlSection(title: group.title) {
+        return VStack(alignment: .leading, spacing: 14) {
+            GroupHeading(group: group)
             VStack(alignment: .leading, spacing: 18) {
                 if !others.isEmpty {
                     HStack(alignment: .top, spacing: 16) {
@@ -1307,8 +1385,126 @@ struct AdjustmentsView: View {
                 }
                 ForEach(sliders) { item in SliderItem(camera: camera, item: item, stacked: true) }
             }
-            .padding(.top, 4)
         }
+    }
+}
+
+/// The adjustments as the dock's second frame (a narrow window), a page per group: a column of the groups
+/// against the dock's edge (one frosted surface with it), the chosen one's page beside it. Pages are stacked,
+/// and choosing a group slides to its page: across is controls or adjustments, down is which adjustments.
+struct DockAdjustments: View {
+    let camera: Config.Camera
+    let controls: Config.Controls
+    /// Its width without the group column (the dock's controls' width), and the dock's padding on its right.
+    let width: CGFloat
+    let trailing: CGFloat
+    @State private var page: Config.Controls.Item.Group?
+    /// Under the pointer, and named (after a moment's rest).
+    @State private var hovered: Config.Controls.Item.Group?
+    @State private var named: Config.Controls.Item.Group?
+    @State private var naming: Task<Void, Never>?
+
+    static let columnWidth: CGFloat = 40
+
+    func hover(_ group: Config.Controls.Item.Group, _ inside: Bool) {
+        naming?.cancel()
+        if inside {
+            hovered = group
+            naming = Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                if !Task.isCancelled { named = group }
+            }
+        } else if hovered == group {
+            hovered = nil
+            named = nil
+        }
+    }
+
+    var body: some View {
+        let groups = AdjustmentsView(camera: camera, controls: controls).groups
+        let current = page.flatMap { chosen in groups.firstIndex { $0.0 == chosen } } ?? 0
+        let paged = groups.count > 1
+        let pageHeight = LiveControlsDock.mainHeight
+        HStack(spacing: 0) {
+            if paged {
+                VStack(spacing: 4) {
+                    ForEach(Array(groups.enumerated()), id: \.element.0) { index, entry in
+                        let chosen = index == current, under = hovered == entry.0
+                        Image(systemName: entry.0.symbol)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(chosen ? AnyShapeStyle(.tint) : AnyShapeStyle(under ? .primary : .secondary))
+                            .frame(width: 30, height: 28)
+                            .background(chosen ? Color.accentColor.opacity(0.18) : under ? .white.opacity(0.08) : .clear,
+                                        in: .rect(cornerRadius: 8))
+                            .animation(.easeOut(duration: 0.15), value: under)
+                            .contentShape(.rect)
+                            .onTapGesture {
+                                naming?.cancel()
+                                named = nil
+                                withAnimation(LiveView.dockAnimation) { page = entry.0 }
+                            }
+                            .onHover { inside in hover(entry.0, inside) }
+                            // Its name beside it after a moment's rest (sooner than a tooltip), over the page.
+                            .overlay(alignment: .leading) {
+                                Text(entry.0.title)
+                                    .font(.callout.weight(.medium))
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .glassEffect(named == entry.0 ? .regular : .identity, in: .capsule)
+                                    .fixedSize()
+                                    .offset(x: 36)
+                                    .opacity(named == entry.0 ? 1 : 0)
+                                    .animation(.easeOut(duration: 0.15), value: named)
+                                    .allowsHitTesting(false)
+                            }
+                            .accessibilityElement()
+                            .accessibilityLabel(entry.0.title)
+                            .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+                    }
+                }
+                .frame(width: Self.columnWidth)
+                .frame(maxHeight: .infinity)
+                // (Over the pages, for its names.)
+                .zIndex(1)
+                // Darker than the pages beside it, so the column reads as the dock's chrome, not its content.
+                .background(.ultraThinMaterial)
+                .background(.black.opacity(0.28))
+                .overlay(alignment: .trailing) { Rectangle().fill(.white.opacity(0.1)).frame(width: 1) }
+            }
+            VStack(spacing: 0) {
+                ForEach(groups, id: \.0) { group, items in
+                    pageView(group, items)
+                        .frame(height: pageHeight, alignment: .top)
+                }
+            }
+            .offset(y: -CGFloat(current) * pageHeight)
+            .frame(width: width - (paged ? Self.columnWidth : 0), height: pageHeight, alignment: .top)
+            .clipped()
+            .padding(.leading, 16)
+            .padding(.trailing, trailing)
+            .padding(.vertical, 16)
+        }
+    }
+
+    /// One group: its switches, choices and actions in a row, its sliders two across.
+    func pageView(_ group: Config.Controls.Item.Group, _ items: [Config.Controls.Item]) -> some View {
+        let sliders = items.filter { if case .slider = $0.kind { true } else { false } }
+        let others = items.filter { if case .slider = $0.kind { false } else { true } }
+        return VStack(alignment: .leading, spacing: 10) {
+            GroupHeading(group: group)
+            VStack(alignment: .leading, spacing: 10) {
+                if !others.isEmpty {
+                    HStack(alignment: .top, spacing: 18) {
+                        ForEach(others) { item in ItemView(camera: camera, item: item) }
+                    }
+                }
+                if !sliders.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 24), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                        ForEach(sliders) { item in SliderItem(camera: camera, item: item, stacked: true) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1316,42 +1512,56 @@ struct AdjustmentsView: View {
 /// corners are the dock's), lit under the pointer and tinted while the sidebar is open. Resting on it names
 /// it, beside the dock, sooner than a tooltip would.
 struct AdjustEdge: View {
-    @Binding var open: Bool
+    let open: Bool
+    let toggle: () -> Void
     @Binding var label: Bool
+    /// On the dock's left (the adjustments its frame): the icon facing the other way. Mirrored, not another
+    /// symbol, so it travels with the edge (a new symbol was drawn where it would end up at once).
+    var mirrored = false
     @State private var hovering = false
     @State private var naming: Task<Void, Never>?
 
     var body: some View {
-        Button {
-            // Named until used.
-            naming?.cancel()
-            label = false
-            withAnimation(LiveView.dockAnimation) { open.toggle() }
-        } label: {
-            Image(systemName: "sidebar.right")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(open ? AnyShapeStyle(.tint) : AnyShapeStyle(hovering ? .primary : .secondary))
-                .frame(width: LiveControlsDock.sidebarButton)
-                .frame(maxHeight: .infinity)
-                .background(open ? Color.accentColor.opacity(0.18) : hovering ? .white.opacity(0.07) : .clear)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.15), value: hovering)
-        .animation(.easeOut(duration: 0.2), value: open)
-        .onHover { inside in
-            hovering = inside
-            naming?.cancel()
-            if inside {
-                naming = Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    if !Task.isCancelled { label = true }
-                }
-            } else {
-                label = false
+        // Not a Button: a pressed button's label was drawn at its new place at once, while the dock's frames
+        // slid (it teleported across); this moves with them.
+        Image(systemName: "sidebar.right")
+            .font(.system(size: 15, weight: .semibold))
+            .scaleEffect(x: mirrored ? -1 : 1)
+            .foregroundStyle(open ? AnyShapeStyle(.tint) : AnyShapeStyle(hovering ? .primary : .secondary))
+            .frame(width: LiveControlsDock.sidebarButton)
+            .frame(maxHeight: .infinity)
+            .background {
+                // Only the hover's tint eases on its own (the pointer leaves it as it slides away).
+                (open ? Color.accentColor.opacity(0.18) : hovering ? .white.opacity(0.07) : .clear)
+                    .animation(.easeOut(duration: 0.15), value: hovering)
             }
-        }
-        .accessibilityLabel(open ? "Hide Adjustments" : "Adjustments")
+            .contentShape(Rectangle())
+            .onTapGesture(perform: clicked)
+            // (Opening it has the dock's own animation: one of its own here re-timed the edge's slide with the
+            // dock's frames, and its tint arrived first.)
+            .onHover { inside in
+                hovering = inside
+                naming?.cancel()
+                if inside {
+                    naming = Task {
+                        try? await Task.sleep(for: .milliseconds(400))
+                        if !Task.isCancelled { label = true }
+                    }
+                } else {
+                    label = false
+                }
+            }
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, clicked)
+            .accessibilityLabel(open ? "Hide Adjustments" : "Adjustments")
+    }
+
+    func clicked() {
+        // Named until used.
+        naming?.cancel()
+        label = false
+        toggle()
     }
 }
 

@@ -276,14 +276,25 @@ public struct Config: Codable, Equatable, Sendable {
             /// Where it goes: the same place for every camera ("dayNight" first under Picture), whichever
             /// provider serves it.
             public enum Group: String, Codable, Sendable, CaseIterable {
-                case move, picture, sound, device
+                case move, picture, light, sound, device
 
                 public var title: String {
                     switch self {
                     case .move: "Move"
                     case .picture: "Picture"
+                    case .light: "Light"
                     case .sound: "Sound"
                     case .device: "Device"
+                    }
+                }
+
+                public var symbol: String {
+                    switch self {
+                    case .move: "move.3d"
+                    case .picture: "camera.aperture"
+                    case .light: "lightbulb"
+                    case .sound: "speaker.wave.2"
+                    case .device: "gearshape"
                     }
                 }
             }

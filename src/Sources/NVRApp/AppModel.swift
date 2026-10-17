@@ -58,7 +58,11 @@ final class AppModel {
     /// The docked camera's adjustments are open in the live view's sidebar.
     var adjustmentsInSidebar = false
     /// The cameras' rail was hidden to make room for the adjustments' sidebar (shown again when it goes).
-    var railMadeRoom = false
+    /// (Kept between launches with the rail's own showing, so a rail hidden for room comes back when there's
+    /// room, after a relaunch too.)
+    var railMadeRoom = UserDefaults.standard.bool(forKey: "liveRailMadeRoom") {
+        didSet { UserDefaults.standard.set(railMadeRoom, forKey: "liveRailMadeRoom") }
+    }
     /// The cameras made private in Pond (from privacy.json, which the service keeps).
     var privateCameras: Set<String> = []
     /// Just changed here: not read back from the file until then (the service may not have written it yet).
@@ -68,8 +72,10 @@ final class AppModel {
     /// The open dock's narrowest width (its narrowest arrangement, measured), for the window to decide whether
     /// the adjustments' sidebar fits beside it or floats over the stage.
     var dockNarrowest: CGFloat = LiveView.narrowestDock
-    /// The adjustments float over the stage (a narrow window), rather than taking a column of their own.
+    /// No room for the adjustments beside the stage (a narrow window): they're the dock's second frame instead.
     var sidebarFloats = false
+    /// The rail would fit beside the open controls (else its button is off while it's hidden).
+    var railFits = true
     /// The widest the rail may be dragged: what leaves the open controls dock room (nil: no limit).
     var railLimit: CGFloat?
     /// A control that failed, for a moment, by camera.
