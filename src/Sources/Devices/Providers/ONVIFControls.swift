@@ -211,6 +211,7 @@ extension ONVIFProvider {
         items += await ONVIFItems.home(device)
         items += await ONVIFItems.tours(device)
         items += await ONVIFItems.relays(device)
+        items.append(ONVIFItems.restart(device))
         return .yes(items)
     }
 }

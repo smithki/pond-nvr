@@ -54,7 +54,7 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Privacy | done | Per camera, for every camera: not recorded, shown live or served to HomeKit (shown as off in the Home app), applied at once by the service; in the dock, the list's menu, its settings and `pond camera privacy`. |
 | Privacy on the camera itself | later | Through a provider: the camera's own privacy mode following Pond's, starting with Reolink's (in Baichuan). |
 | Reolink's own protocol (Baichuan) | later | For what Reolink's HTTP API and ONVIF don't offer, such as two-way audio on cameras without an ONVIF backchannel; a provider like the others. |
-| More of a make's own controls | later | Reolink's IR lights, status light, privacy mode, siren and chime volume, as items in the Adjustments sidebar. |
+| More of a make's own controls | in progress | Reolink's IR lights, status light, mirror and flip are done (and restarting any ONVIF camera); its siren, chime volume and spotlight are next. |
 
 Not every camera speaks ONVIF, and some do two-way audio only through their own protocol; the camera check says what a camera supports, so the app shows only the controls that work.
 

@@ -188,7 +188,7 @@ enum ONVIFItems {
         ]
     }
 
-    /// A PTZ request with nothing to read back: done when pressed.
+    /// A request with nothing to read back (PTZ's home, a restart): done when pressed.
     final class PTZAction: ItemControl {
         let client: ONVIFClient
         let service: URL
@@ -209,6 +209,16 @@ enum ONVIFItems {
                 throw error.control
             }
         }
+    }
+
+    // MARK: Restart
+
+    /// Restarting the camera (the device service's SystemReboot, which every ONVIF camera has), asked first.
+    static func restart(_ device: CameraSessions.ONVIFDevice) -> any ItemControl {
+        PTZAction(client: device.client, service: device.client.deviceService, body: "<SystemReboot xmlns=\"\(Self.device)\"/>",
+                  item: Config.Controls.Item(id: "restart", title: "Restart", symbol: "arrow.clockwise", group: .device, order: 90,
+                                             kind: .action(confirm: "Restart the camera? It goes offline for about a minute."),
+                                             provider: "onvif"))
     }
 
     // MARK: Preset tours

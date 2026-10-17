@@ -19,11 +19,11 @@ Each answer is an `Offer`: **yes** (here it is), **no** (this camera hasn't it, 
 Most controls are items (`Config.Controls.Item`), declared rather than drawn, so the app shows any make's controls without knowing them:
 
 - **id**: the same for a control whatever serves it (`dayNight`, `brightness`, `speakerVolume`, `home.go`, `tour.TOKEN`, `relay.TOKEN`), so it's always in the same place.
-- **group**: Move, Picture, Sound or Device; and an **order** within it.
+- **group**: Move, Picture, Light, Sound or Device; and an **order** within it.
 - **kind**: a toggle, a choice of a few (with a symbol each), a slider (a range and step), or an action (with words to confirm it first, for a siren or a door).
 - **provider**: which one serves it, for the CLI and the log.
 
-The dock shows the everyday items in fixed places for every camera (day and night, speaker volume, home, tours); every other item goes in the Adjustments sidebar, by group. A new item from a provider appears there without changes to the app.
+The dock shows the everyday items in fixed places for every camera (day and night, speaker volume, home, tours); every other item is an adjustment, by group: in a sidebar beside the stage in a wide window, or in a narrow one as the dock's second frame, a page per group. A new item from a provider appears there without changes to the app. The dock is for what's changed while watching; setting a camera up (its streams, schedules, zones) belongs in its settings.
 
 ## Which provider serves what
 

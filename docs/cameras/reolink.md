@@ -43,6 +43,9 @@ In the Reolink app:
 | Positions | `GetPtzPreset`, `SetPtzPreset` | The kept positions (the enabled ones), keeping and removing them, and going to one. |
 | Day and night | `GetIsp`, `SetIsp` | Auto, Color or Black&White. |
 | Speaker volume | `GetAudioCfg`, `SetAudioCfg` | The volume slider. |
+| IR lights | `GetIrLights`, `SetIrLights` (ability `ledControl`) | Auto or Off, under Light. |
+| Status light | `GetPowerLed`, `SetPowerLed` (ability `powerLed`) | On or off, under Light. |
+| Mirror and flip | `mirroring` and `rotation` in `GetIsp`, `SetIsp` (`ispMirror`, `ispFlip`) | For a camera on a ceiling or a wall, under Device. |
 
 Talking back, brightness, contrast, saturation and sharpness go over ONVIF, which Reolink cameras speak too (turn it on in the Reolink app: Settings › Network › Advanced › Server settings).
 

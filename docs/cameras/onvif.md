@@ -17,6 +17,7 @@ Its **controls** come from ONVIF too, each only if the camera has it:
 | Day and night | Imaging: the IR cut filter (`AUTO`, `ON` for day, `OFF` for night) | Day & Night |
 | Brightness, contrast, saturation, sharpness | Imaging `GetOptions` (their ranges), `SetImagingSettings` | Adjustments |
 | Speaker volume | Media: the audio output configuration's level | the speaker slider (not if its range is fixed) |
+| Restart | Device `SystemReboot` | Adjustments › Device, asking first |
 | Relays | DeviceIO (or the device service) `GetRelayOutputs`, `SetRelayOutputState` | Adjustments: a switch if it stays as set, a button (asking first) if it springs back |
 | Talking back | The RTSP backchannel: `Require: www.onvif.org/ver20/backchannel`, then G.711 (µ-law or A-law, as the camera asks) | the microphone button on its tile and in the dock |
 

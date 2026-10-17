@@ -162,6 +162,19 @@ import Testing
         for mode in NightMode.allCases { #expect(ReolinkNightMode.mode(ReolinkNightMode.value(mode)) == mode) }
     }
 
+    @Test func irLightsAreAutoOrOff() {
+        #expect(ReolinkIRLights.choice("Auto") == "auto" && ReolinkIRLights.choice("Off") == "off")
+        #expect(ReolinkIRLights.choice("Sometimes") == nil)
+        #expect(ReolinkIRLights(api: ReolinkAPI(host: "h", username: "u", password: "p")).item.group == .light)
+    }
+
+    @Test func mirrorAndFlipAreTheISPsSwitches() {
+        let api = ReolinkAPI(host: "h", username: "u", password: "p")
+        #expect(ReolinkISPSwitch.mirror(api).field == "mirroring" && ReolinkISPSwitch.mirror(api).item.id == "mirror")
+        #expect(ReolinkISPSwitch.flip(api).field == "rotation" && ReolinkISPSwitch.flip(api).item.id == "flip")
+        #expect(ReolinkISPSwitch.flip(api).item.group == .device)
+    }
+
     @Test func tooManyLoginsIsBusyNotBroken() {
         #expect(ReolinkAPI.Failure.tooManyLogins.control == .busy)
         #expect(ReolinkAPI.Failure.unreachable.control == .unreachable)

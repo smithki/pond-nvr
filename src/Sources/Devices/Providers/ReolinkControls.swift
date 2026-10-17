@@ -214,6 +214,93 @@ final class ReolinkVolume: ItemControl {
     }
 }
 
+/// The infrared lights for the dark: on their own by the light (Auto), or off (GetIrLights, SetIrLights).
+final class ReolinkIRLights: ItemControl {
+    let api: ReolinkAPI
+    let item = Config.Controls.Item(id: "irLights", title: "IR Lights", symbol: "rays", group: .light, order: 10,
+                                    kind: .choice([.init(value: "auto", title: "Auto", symbol: "circle.lefthalf.filled"),
+                                                   .init(value: "off", title: "Off", symbol: "lightbulb.slash")]),
+                                    provider: "reolink")
+
+    init(api: ReolinkAPI) { self.api = api }
+
+    static func choice(_ state: String) -> String? {
+        switch state.lowercased() {
+        case "auto": "auto"
+        case "off": "off"
+        default: nil
+        }
+    }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? {
+        guard let state = (try await api.control("GetIrLights", ["channel": 0])["IrLights"] as? [String: Any])?["state"] as? String,
+              let choice = Self.choice(state) else { throw .notSupported }
+        return .choice(choice)
+    }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .choice(choice) = value, Self.choice(choice) != nil else { throw .failed("auto or off") }
+        _ = try await api.control("SetIrLights", ["IrLights": ["channel": 0, "state": choice == "auto" ? "Auto" : "Off"]])
+    }
+}
+
+/// A switch kept as "On" or "Off" in one of the API's settings: the status light (PowerLed).
+final class ReolinkStatusLight: ItemControl {
+    let api: ReolinkAPI
+    let item = Config.Controls.Item(id: "statusLight", title: "Status Light", symbol: "lightbulb.led", group: .light, order: 20,
+                                    kind: .toggle, provider: "reolink")
+
+    init(api: ReolinkAPI) { self.api = api }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? {
+        guard let state = (try await api.control("GetPowerLed", ["channel": 0])["PowerLed"] as? [String: Any])?["state"] as? String
+        else { throw .notSupported }
+        return .on(state.lowercased() == "on")
+    }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .on(on) = value else { throw .failed("on or off") }
+        _ = try await api.control("SetPowerLed", ["PowerLed": ["channel": 0, "state": on ? "On" : "Off"]])
+    }
+}
+
+/// One of the ISP's switches kept as 0 or 1: the picture mirrored (mirroring), or turned over (rotation), for a
+/// camera mounted on a ceiling or a wall.
+final class ReolinkISPSwitch: ItemControl {
+    let api: ReolinkAPI
+    let field: String
+    let item: Config.Controls.Item
+
+    init(api: ReolinkAPI, field: String, item: Config.Controls.Item) {
+        self.api = api
+        self.field = field
+        self.item = item
+    }
+
+    static func mirror(_ api: ReolinkAPI) -> ReolinkISPSwitch {
+        ReolinkISPSwitch(api: api, field: "mirroring", item: Config.Controls.Item(
+            id: "mirror", title: "Mirror", symbol: "arrow.left.and.right.righttriangle.left.righttriangle.right",
+            group: .device, order: 10, kind: .toggle, provider: "reolink"))
+    }
+
+    static func flip(_ api: ReolinkAPI) -> ReolinkISPSwitch {
+        ReolinkISPSwitch(api: api, field: "rotation", item: Config.Controls.Item(
+            id: "flip", title: "Flip", symbol: "arrow.up.and.down.righttriangle.up.righttriangle.down",
+            group: .device, order: 11, kind: .toggle, provider: "reolink"))
+    }
+
+    func value() async throws(ControlFailure) -> Config.Controls.Value? {
+        guard let on = (try await api.control("GetIsp", ["channel": 0])["Isp"] as? [String: Any])?[field] as? Int
+        else { throw .notSupported }
+        return .on(on != 0)
+    }
+
+    func set(_ value: Config.Controls.Value) async throws(ControlFailure) {
+        guard case let .on(on) = value else { throw .failed("on or off") }
+        _ = try await api.control("SetIsp", ["Isp": ["channel": 0, field: on ? 1 : 0]])
+    }
+}
+
 extension ReolinkProvider {
     public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> {
         switch await CameraSessions.shared.reolinkAbility(access) {
@@ -224,8 +311,8 @@ extension ReolinkProvider {
         }
     }
 
-    /// Its own controls, as items, where its API has them: day and night (more to come: IR lights, the status
-    /// light, privacy mode, the siren).
+    /// Its own controls, as items, where its API has them: day and night, the speaker's volume, the IR lights,
+    /// the status light, mirroring and flipping the picture (more to come: privacy mode, the siren).
     public func items(_ access: CameraAccess) async -> Offer<[any ItemControl]> {
         switch await CameraSessions.shared.reolinkAbility(access) {
         case let .yes(ability):
@@ -234,6 +321,11 @@ extension ReolinkProvider {
             if ability.has("ispDayNight") { items.append(ReolinkNightMode(api: api)) }
             // Its speaker's volume (talking back, its alarm); the doorbell's chime is its own.
             if (try? await api.control("GetAudioCfg", ["channel": 0]))?["AudioCfg"] != nil { items.append(ReolinkVolume(api: api)) }
+            // ("ledControl" is the IR lights; "powerLed" the status light.)
+            if ability.has("ledControl") { items.append(ReolinkIRLights(api: api)) }
+            if ability.has("powerLed") { items.append(ReolinkStatusLight(api: api)) }
+            if ability.has("ispMirror") { items.append(ReolinkISPSwitch.mirror(api)) }
+            if ability.has("ispFlip") { items.append(ReolinkISPSwitch.flip(api)) }
             return .yes(items)
         case .unknown: return .unknown
         case .no: return .no
