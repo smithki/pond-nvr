@@ -158,11 +158,20 @@ public final class BaichuanSession: @unchecked Sendable {
             let client = BaichuanClient(host: host, username: username, password: password)
             do throws(BaichuanClient.Failure) {
                 try client.login()
-                lock.withLock { self.client = client }
+                // Its privacy mode as it says now, told even if the same as before (connected again, it's news).
+                lock.withLock {
+                    self.client = client
+                    _privacy = nil
+                }
                 pause = 2
                 setState(.connected)
-                // Asleep or not, as it said on logging in.
-                if let sleep = BaichuanClient.value("sleep", in: client.loginReply ?? "") { notePrivacy(sleep == "1") }
+                // Asleep or not, as it said on logging in; or asked (the reply is read below, with the rest).
+                if let sleep = BaichuanClient.value("sleep", in: client.loginReply ?? "") {
+                    notePrivacy(sleep == "1")
+                } else {
+                    try client.send(command: Command.getPrivacy, channel: 1, legacy: false, body: nil,
+                                    extension: BaichuanClient.channelExtension(0), aes: true)
+                }
                 try client.send(command: Command.subscribe, channel: Command.eventsChannel, legacy: false, body: nil)
                 var kept = Date()
                 while !isStopped {

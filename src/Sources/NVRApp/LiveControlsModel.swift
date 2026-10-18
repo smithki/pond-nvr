@@ -20,6 +20,13 @@ extension AppModel {
     @discardableResult
     func control(_ camera: String, _ request: ControlSocket.Request) async -> ControlSocket.Reply? {
         let reply = await controlClient.ask(request)
+        // Private or waking (the service knew before the app did): not a failure to show; the dock catches up.
+        if reply.asleep == true {
+            if !isPrivate(camera), !wakingCameras.contains(camera) {
+                withAnimation(.snappy(duration: 0.3)) { _ = wakingCameras.insert(camera) }
+            }
+            return nil
+        }
         if let error = reply.error {
             var serviceDown = true
             if case .running = serviceState { serviceDown = false }

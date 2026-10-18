@@ -68,6 +68,8 @@ final class AppModel {
     /// Private on the camera itself (its own privacy mode, as the recorder sees it): shown as private, but Pond
     /// can't turn it off.
     var privateOnCamera: Set<String> = []
+    /// The show and hide button's width over the dock (measured), so what the dock says beside it stays clear of it.
+    var controlsButtonWidth: CGFloat = 150
     /// Starting their video again after their own privacy mode turned off (from privacy.json).
     var wakingCameras: Set<String> = []
     /// Settings waiting for a camera to be back from its privacy mode, each item's (from privacy.json).

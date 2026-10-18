@@ -23,7 +23,10 @@ struct ControlSection<Content: View>: View {
                 .textCase(.uppercase)
                 // Beside it, taking no room: the dock's widths (measured) stay as they are.
                 .overlay(alignment: .trailing) {
-                    if waiting { WaitingMark().fixedSize().alignmentGuide(.trailing) { $0[.leading] - 4 } }
+                    // From a point at its end, out to the right.
+                    Color.clear.frame(width: 0).overlay(alignment: .leading) {
+                        if waiting { WaitingMark().fixedSize().padding(.leading, 4) }
+                    }
                 }
             content
         }
@@ -696,12 +699,23 @@ struct LiveControlsDock: View {
     /// Shown (not slid away): only then does it ask the cameras' rail for room.
     var open = true
     @State private var mover = PTZMover()
+    /// Its surface's width, for the room its notes have beside the show and hide button.
+    @State private var surfaceWidth: CGFloat = 0
     /// The camera shown, which follows `camera` a moment later, in an update of its own (the stage switches
     /// cameras without animation, which would otherwise swap the controls at once): so they crossfade.
     @State private var shown: (camera: Config.Camera, controls: Config.Controls)?
 
     /// The most positions' cards across (Keep or More included); more positions go to More.
     nonisolated static let positionColumns = 4
+    /// A note's distance from the dock's left edge, and from the show and hide button.
+    static let noteInset: CGFloat = 12
+    static let noteGap: CGFloat = 10
+
+    /// A note's widest: from its place to just short of the show and hide button.
+    var noteRoom: CGFloat {
+        guard surfaceWidth > 0 else { return .infinity }
+        return max(120, surfaceWidth / 2 - model.controlsButtonWidth / 2 - Self.noteInset - Self.noteGap)
+    }
     /// Each side's widest: the positions' cards at their most.
     nonisolated static let sideWidth: CGFloat = CGFloat(positionColumns) * (88 + 10) - 10 + 8
     nonisolated static let spacing: CGFloat = 24
@@ -1075,22 +1089,26 @@ struct LiveControlsDock: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { surfaceWidth = $0 }
         // What went wrong, just above its left corner (clear of its controls and the window's edge); frosted
-        // rather than glass, which doesn't fade.
+        // rather than glass, which doesn't fade. No wider than the room beside the show and hide button (centred
+        // over the dock): in a narrow window it takes more lines instead of running under the button.
         .overlay(alignment: .topLeading) {
             ZStack {
                 if let error = model.controlError[camera.id] {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(.regularMaterial, in: .capsule)
-                        .fixedSize()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .frame(maxWidth: noteRoom, alignment: .leading)
                         .transition(.opacity)
                 }
             }
             .alignmentGuide(.top) { $0[.bottom] + 10 }
-            .padding(.leading, 12)
+            .padding(.leading, Self.noteInset)
         }
         .animation(.easeOut(duration: 0.2), value: model.controlError[camera.id])
         .animation(.easeOut(duration: 0.2), value: model.savedPicture?.file)

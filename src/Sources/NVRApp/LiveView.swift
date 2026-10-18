@@ -267,6 +267,7 @@ struct LiveView: View {
         .buttonBorderShape(.capsule)
         .controlSize(.large)
         .help(controlsOpen ? "Hide the controls (\u{2325}\u{2318}L)" : "Show this camera\u{2019}s controls (\u{2325}\u{2318}L)")
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { model.controlsButtonWidth = $0 }
     }
 
     /// The cameras' rail.

@@ -48,6 +48,7 @@ The first version: recording, the app and HomeKit.
 - **Privacy**: any camera can be made private (in the dock, the list's menu or its settings): not recorded, shown live or served to HomeKit, where it shows as off, until turned off; applied at once, and kept across restarts. The Home app's own camera off stays HomeKit's and never turns privacy off. `pond camera privacy ID [on|off]`.
 - **Reolink's own protocol (Baichuan)**: one lasting connection per Reolink camera (TCP 9000). Privacy mode in step with Pond's both ways, and motion, detections and doorbell presses pushed as they happen instead of asked each second (over HTTP still for a camera that doesn't answer there). `pond camera baichuan ID [watch | privacy-on | privacy-off]`.
 - **Back from privacy**: a camera whose own privacy mode turned off is *waking* until its video returns (shown as Waking up, not as can't connect, and not a problem for the doctor). While a camera is private or waking, moving it, talking through it and its actions are off; its settings wait and are set, one at a time, once it's back.
+- **Privacy changed in the Reolink app while Pond wasn't connected stands**: on connecting again, Pond puts the camera right only if its own change never reached it.
 - `pond camera controls|ptz|item|night-mode|talk|abilities` try them from a terminal ([docs/controls.md](docs/controls.md)).
 
 ### The `pond` command

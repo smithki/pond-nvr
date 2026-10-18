@@ -28,6 +28,21 @@ import Testing
         #expect(server.whileAsleep(Self.ask("ptz.stop"))?.error == nil)
     }
 
+    @Test func aSettingAlreadySoDoesntWait() {
+        let privacy = PrivacyState()
+        let server = Self.server(privacy)
+        // Known from before it went dark.
+        server.remember(Self.ask("items.values"), ControlSocket.Reply(values: ["statusLight": .on(true)]))
+        privacy.set("porch", private: true)
+        privacy.set("porch", private: false, wakingFor: 45)
+        #expect(server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(true)))?.queued == nil)
+        #expect(privacy.pendingSettings("porch").isEmpty)
+        // Changed, then set back: no longer waits.
+        #expect(server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(false)))?.queued == true)
+        _ = server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(true)))
+        #expect(privacy.pendingSettings("porch").isEmpty)
+    }
+
     @Test func privateButReachableItsSettingsAreSetAtOnce() {
         // Pond's own privacy (no camera privacy mode): the camera still answers.
         let privacy = PrivacyState()

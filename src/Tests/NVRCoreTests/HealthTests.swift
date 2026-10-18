@@ -70,6 +70,9 @@ import Testing
         // Not the camera's: a notice, not on its tile.
         #expect(found.map(\.kind) == [.macNetwork])
         #expect(!found[0].marksTile)
+        // Connected again since: over, so nothing to say.
+        #expect(HealthDiagnosis.findings(camera: "porch", incidents: incidents + [Self.at(9, "porch", .connected)],
+                                         samples: [], now: Self.now).isEmpty)
         // The same, the porch alone: it drops off.
         let alone = incidents.filter { $0.camera == "porch" } + [Self.at(5, "garden", .connected)]
         #expect(HealthDiagnosis.findings(camera: "porch", incidents: alone, samples: [], now: Self.now).map(\.kind) == [.dropsOff])

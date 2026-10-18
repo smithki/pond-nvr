@@ -77,6 +77,24 @@ import Testing
         #expect(PrivacyState(path: path).allPending.isEmpty)
     }
 
+    @Test func pondsChangesAreUntoldUntilTheCameraHasThem() throws {
+        let path = Self.path()
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: (path as NSString).deletingLastPathComponent) }
+        let state = PrivacyState(path: path)
+        state.set("porch", private: true)
+        // Kept across a restart: the camera may never have heard.
+        #expect(PrivacyState(path: path).isUntold("porch"))
+        state.told("porch")
+        #expect(!PrivacyState(path: path).isUntold("porch"))
+        // The camera's own change has nothing to tell it.
+        state.set("porch", private: false, byCamera: true)
+        #expect(!state.isUntold("porch"))
+        // Nor does a change to what it already is.
+        state.set("porch", private: false)
+        #expect(!state.isUntold("porch"))
+    }
+
     @Test func nothingKeptIsNothingPrivate() {
         #expect(PrivacyState(path: Self.path()).privateCameras.isEmpty)
     }

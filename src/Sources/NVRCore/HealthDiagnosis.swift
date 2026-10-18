@@ -91,7 +91,10 @@ public enum HealthDiagnosis {
                 fix: "Check its power and its network connection (its Wi-Fi signal, or its cable), and that its address hasn\u{2019}t changed.",
                 since: streakStart(unreachable)))
         }
-        if let lastMacWide = macWide.filter({ $0 >= hourAgo }).max(), mine.contains(where: { $0.kind == .unreachable && abs($0.time.timeIntervalSince(lastMacWide)) < 60 }) {
+        // While it lasts: once this camera has connected since, it's over (and was this Mac's, not the camera's).
+        if let lastMacWide = macWide.filter({ $0 >= hourAgo }).max(),
+           mine.contains(where: { $0.kind == .unreachable && abs($0.time.timeIntervalSince(lastMacWide)) < 60 }),
+           !mine.contains(where: { $0.kind == .connected && $0.time > lastMacWide }) {
             found.append(HealthFinding(
                 kind: .macNetwork, severity: .notice, headline: "This Mac lost the network",
                 evidence: "Every camera was unreachable at once at \(clock(lastMacWide))",
