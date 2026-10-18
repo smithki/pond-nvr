@@ -73,11 +73,15 @@ struct DoctorView: View {
                 .pickerStyle(.inline)
                 .labelsHidden()
             } label: {
-                HStack(spacing: 5) {
+                // As a menu in a settings row draws itself (the log's sources, say): its choice, then its chevrons in a
+                // small round button; here the choice in the heading's type.
+                HStack(spacing: 8) {
                     Text(camera?.name ?? "All Cameras")
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(.fill.tertiary, in: .circle)
                 }
                 .contentShape(.rect)
             }
@@ -106,6 +110,10 @@ struct DoctorView: View {
                         NSPasteboard.general.setString(doctor.report(camera), forType: .string)
                     }
                     .help("Copy what the doctor sees of \(camera.name) as text, for a bug report (without its address or password)")
+                } else {
+                    // Held but unseen: the row is as tall with or without its buttons, so the heading lands in the same
+                    // place on every page (switching between them, it stays put).
+                    Button("Copy Report") {}.hidden().accessibilityHidden(true)
                 }
             }
             .font(.body)
@@ -175,6 +183,9 @@ struct DoctorView: View {
         }
         Section {
             IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
+                // A list of its own for each camera and each filter: each opens at its newest, as the first did
+                // (the same scroll view, given other lines, kept where it was).
+                .id("\(camera.id) \(everything)")
                 .frame(height: listHeight)
                 .listRowInsets(EdgeInsets())
                 .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
@@ -347,7 +358,10 @@ struct IncidentList: View {
                     }
                     .padding(10)
                 }
-                // At the newest, as the log opens.
+                // At the newest, as the log opens, and kept there as the list grows to fill the page (it's measured
+                // after it first appears: grown, it kept its top, and the newest went out of sight).
+                .defaultScrollAnchor(.bottom)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .onAppear { scroller.scrollTo(rows.count - 1, anchor: .bottom) }
                 .onChange(of: rows.count) { scroller.scrollTo(rows.count - 1, anchor: .bottom) }
             }
@@ -382,41 +396,39 @@ struct IncidentList: View {
 /// then, the defaults). Folded away; the figures a finding shows say what it saw against them.
 struct ThresholdsSection: View {
     @Environment(AppModel.self) private var model
-    /// Open or not: held here, so its change and its animation come together (a stored preference's change
-    /// arrives apart from the animation meant for it, and the rows just appeared); kept between launches.
-    @AppStorage("doctorThresholdsShown") private var kept = false
-    @State private var shown: Bool?
+    /// Open or not: closed each time the page is shown (an advanced setting, looked at now and then).
+    @State private var shown = false
 
     var body: some View {
         @Bindable var doctor = model.doctor
         Section {
             // The settings' own fold: the whole row opens it.
             FoldRow(title: "Thresholds", summary: doctor.thresholds == .standard ? "Defaults" : "Changed",
-                    expanded: Binding(get: { shown ?? kept }, set: { shown = $0; kept = $0 }))
-            if shown ?? kept {
+                    expanded: $shown)
+            if shown {
                 Group {
-                    Stepper(value: $doctor.thresholds.stallsPerHour, in: 1 ... 30) {
-                        LabeledContent("Video keeps stopping", value: "\(doctor.thresholds.stallsPerHour) times an hour")
-                    }
-                    Stepper(value: $doctor.thresholds.unreachablePerHour, in: 1 ... 30) {
-                        LabeledContent("Drops off the network", value: "\(doctor.thresholds.unreachablePerHour) times an hour")
-                    }
-                    Stepper(value: $doctor.thresholds.lossRate, in: 0.005 ... 0.1, step: 0.005) {
-                        LabeledContent("Losing packets", value: "over " + doctor.thresholds.lossRate.formatted(.percent.precision(.fractionLength(0 ... 1))))
-                    }
-                    Stepper(value: $doctor.thresholds.keyframeSeconds, in: 1 ... 20, step: 0.5) {
-                        LabeledContent("Keyframes far apart", value: "over \(Self.number(doctor.thresholds.keyframeSeconds)) s")
-                    }
-                    Stepper(value: $doctor.thresholds.clockSeconds, in: 5 ... 600, step: 5) {
-                        LabeledContent("Its clock is off", value: "by over \(Self.number(doctor.thresholds.clockSeconds)) s")
-                    }
-                    Stepper(value: $doctor.thresholds.controlFailureRate, in: 0.05 ... 1, step: 0.05) {
-                        LabeledContent("Controls failing", value: doctor.thresholds.controlFailureRate.formatted(.percent.precision(.fractionLength(0)))
-                                       + " of at least \(doctor.thresholds.controlsAtLeast)")
-                    }
-                    Stepper(value: $doctor.thresholds.privateHours, in: 1 ... 168) {
-                        LabeledContent("Private for long", value: "over \(Self.number(doctor.thresholds.privateHours)) h")
-                    }
+                    let t = doctor.thresholds
+                    ThresholdPicker(title: "Video keeps stopping", detail: "Its video stops while connected, this often.",
+                                    value: Double(t.stallsPerHour), presets: [2, 3, 5, 10], range: 1 ... 60, step: 1,
+                                    unit: "times an hour", label: Self.timesAnHour) { doctor.thresholds.stallsPerHour = Int($0) }
+                    ThresholdPicker(title: "Drops off the network", detail: "Unreachable this often while the other cameras aren\u{2019}t.",
+                                    value: Double(t.unreachablePerHour), presets: [2, 3, 5, 10], range: 1 ... 60, step: 1,
+                                    unit: "times an hour", label: Self.timesAnHour) { doctor.thresholds.unreachablePerHour = Int($0) }
+                    ThresholdPicker(title: "Video is losing packets", detail: "More than this much of its video lost in an hour.",
+                                    value: t.lossRate * 100, presets: [0.5, 1, 2, 5], range: 0.1 ... 50, step: 0.1,
+                                    unit: "%", label: { Self.number($0) + "%" }) { doctor.thresholds.lossRate = $0 / 100 }
+                    ThresholdPicker(title: "Keyframes are far apart", detail: "Further apart than this on average: slow to start live, in the Home app too.",
+                                    value: t.keyframeSeconds, presets: [2, 4, 6, 10], range: 1 ... 60, step: 0.5,
+                                    unit: "s", label: Self.duration) { doctor.thresholds.keyframeSeconds = $0 }
+                    ThresholdPicker(title: "Its clock is off", detail: "Further than this from the Mac\u{2019}s clock.",
+                                    value: t.clockSeconds, presets: [10, 30, 60, 300], range: 1 ... 3600, step: 1,
+                                    unit: "s", label: Self.duration) { doctor.thresholds.clockSeconds = $0 }
+                    ThresholdPicker(title: "Its controls often fail", detail: "More than this share of at least \(t.controlsAtLeast) asked of it in an hour.",
+                                    value: t.controlFailureRate * 100, presets: [10, 20, 50], range: 1 ... 100, step: 1,
+                                    unit: "%", label: { Self.number($0) + "%" }) { doctor.thresholds.controlFailureRate = $0 / 100 }
+                    ThresholdPicker(title: "Private for long", detail: "Said (as a notice) once it has been private this long.",
+                                    value: t.privateHours, presets: [12, 24, 72, 168], range: 1 ... 720, step: 1,
+                                    unit: "h", label: Self.hours) { doctor.thresholds.privateHours = $0 }
                     HStack {
                         Spacer()
                         Button("Restore Defaults") { doctor.thresholds = .standard }
@@ -432,4 +444,77 @@ struct ThresholdsSection: View {
     }
 
     static func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0 ... 1))) }
+
+    static func timesAnHour(_ value: Double) -> String { Int(value) == 1 ? "once an hour" : "\(Int(value)) times an hour" }
+
+    /// Seconds in words: "4 s", "1 minute", "5 minutes".
+    static func duration(_ seconds: Double) -> String {
+        if seconds >= 60, seconds.truncatingRemainder(dividingBy: 60) == 0 {
+            let minutes = Int(seconds / 60)
+            return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        }
+        return number(seconds) + " s"
+    }
+
+    /// Hours in words: "12 hours", "1 day", "3 days", "1 week".
+    static func hours(_ hours: Double) -> String {
+        if hours == 168 { return "1 week" }
+        if hours >= 24, hours.truncatingRemainder(dividingBy: 24) == 0 {
+            let days = Int(hours / 24)
+            return days == 1 ? "1 day" : "\(days) days"
+        }
+        return Int(hours) == 1 ? "1 hour" : "\(number(hours)) hours"
+    }
+}
+
+/// A threshold from a menu of sensible choices, or any figure (Custom…), on one row, as the retention settings'
+/// days are: the menu, and in custom mode the figure with its arrows and unit beside it. `value` is in the units
+/// shown (a percentage as 1 for 1%).
+struct ThresholdPicker: View {
+    let title: String
+    let detail: String
+    let value: Double
+    let presets: [Double]
+    let range: ClosedRange<Double>
+    let step: Double
+    let unit: String
+    let label: (Double) -> String
+    let set: (Double) -> Void
+    @State private var custom = false
+
+    var body: some View {
+        // (Within a hair: a percentage comes back from a fraction.)
+        let showingCustom = custom || !presets.contains { abs($0 - value) < 0.0001 }
+        LabeledContent {
+            HStack(spacing: 6) {
+                if showingCustom {
+                    TextField(unit, value: Binding(get: { value }, set: { if range.contains($0) { set($0) } }),
+                              format: .number.precision(.fractionLength(0 ... 1)))
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 56)
+                    Stepper("", value: Binding(get: { value }, set: { set(min(range.upperBound, max(range.lowerBound, $0))) }),
+                            in: range, step: step)
+                        .labelsHidden()
+                    Text(unit).foregroundStyle(.secondary)
+                }
+                Menu {
+                    ForEach(presets, id: \.self) { preset in
+                        Button(label(preset)) {
+                            custom = false
+                            set(preset)
+                        }
+                    }
+                    Divider()
+                    Button("Custom\u{2026}") { custom = true }
+                } label: {
+                    Text(showingCustom ? "Custom" : label(value))
+                }
+                .fixedSize()
+            }
+        } label: {
+            Text(title)
+            Text(detail)
+        }
+    }
 }

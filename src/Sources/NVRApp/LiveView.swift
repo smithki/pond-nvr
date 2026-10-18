@@ -35,10 +35,12 @@ struct LiveView: View {
     /// The rail as drawn: the stored preference, followed (it changes apart from the animation meant for it), or
     /// set here with the stage, so the rail coming back or stepping aside as one camera becomes several (or one)
     /// moves in the same animation as the tiles and the sidebar, not on its own a moment later.
-    @State private var railShown: Bool?
+    /// (Started from the preference, not left to fall back on it: falling back, a change of it was drawn at
+    /// once, with nothing left for the animated following below to do.)
+    @State private var railShown = UserDefaults.standard.object(forKey: LiveView.railKey) as? Bool ?? true
     /// The dock's adjustments shown (its stored preference), to bring their sidebar with the stage's change.
     @AppStorage(LiveControlsDock.adjustingKey) private var dockAdjusting = false
-    private var railDrawn: Bool { railShown ?? showRail }
+    private var railDrawn: Bool { railShown }
     /// The live controls dock is open under a camera watched on its own: kept between launches, and in view
     /// state for this session (a stored preference's change can arrive apart from the animation meant for it,
     /// and the dock and stage would then jump).
@@ -137,7 +139,7 @@ struct LiveView: View {
                     if let docked, controlsOpen, model.adjustmentsInSidebar, !model.sidebarFloats {
                         AdjustmentsView(camera: docked.camera, controls: docked.controls)
                             .frame(width: LiveLayout.sidebarWidth)
-                            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomTrailing))
                             .padding(.trailing, LiveLayout.sidebarInset)
                             .padding(.vertical, 12)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -191,7 +193,7 @@ struct LiveView: View {
                         instant.disablesAnimations = true
                         withTransaction(instant) { railShown = shown }
                     } else {
-                        withAnimation(.snappy(duration: 0.25)) { railShown = shown }
+                        withAnimation(Self.panelAnimation) { railShown = shown }
                     }
                 }
                 // Whether the adjustments fit beside the stage (the rail out of the way if need be) or float over it.
@@ -269,6 +271,9 @@ struct LiveView: View {
     }
 
     static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)
+    /// The side panels (the cameras' rail, the adjustments' sidebar) coming and going: one timing for both, the
+    /// dock's, since they often move with it.
+    static let panelAnimation = dockAnimation
     /// Above the dock: room for the button that shows and hides it.
     static let dockToggleRoom: CGFloat = 52
     /// The longest the dock waits for what it holds before opening.
@@ -604,7 +609,7 @@ struct CameraRail: View {
             .padding(.vertical, 8)
         }
         .frame(width: width.clamped(to: Self.widths))
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomLeading))
         .overlay(alignment: .trailing) {
             ResizeHandle { dx in
                 let start = dragStart ?? width

@@ -158,7 +158,7 @@ struct ContentView: View {
                     // Not while there's no room for it beside the open controls (shown, the dock hid it again at
                     // once, and bounced), whoever hid it: a wider window, or the controls closed, and it's back on.
                     let madeRoom = !showRail && (model.railMadeRoom || !model.railFits)
-                    Toggle(isOn: $showRail.animation(.snappy(duration: 0.25))) {
+                    Toggle(isOn: $showRail.animation(LiveView.panelAnimation)) {
                         Label(showRail ? "Hide Cameras" : "Show Cameras", systemImage: "sidebar.leading")
                     }
                     .disabled(madeRoom)

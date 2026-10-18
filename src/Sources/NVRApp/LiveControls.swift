@@ -907,7 +907,7 @@ struct LiveControlsDock: View {
                 // Gone (several cameras on the stage): the rail it hid for room comes back (its button is off
                 // meanwhile).
                 if model.railMadeRoom {
-                    withAnimation(LiveView.dockAnimation) { showRail = true }
+                    withAnimation(LiveView.panelAnimation) { showRail = true }
                     model.railMadeRoom = false
                 }
             }
@@ -964,10 +964,10 @@ struct LiveControlsDock: View {
                 // back with the sidebar's going only if there's room for it then (checked once it has gone).
                 if open, showRail, !model.sidebarFloats,
                    available - LiveLayout.sidebarRoom < width(.narrow, controls: current.controls, camera: current.camera.id) {
-                    withAnimation(LiveView.dockAnimation) { showRail = false }
+                    withAnimation(LiveView.panelAnimation) { showRail = false }
                     model.railMadeRoom = true
                 }
-                withAnimation(LiveView.dockAnimation) { model.adjustmentsInSidebar = open }
+                withAnimation(LiveView.panelAnimation) { model.adjustmentsInSidebar = open }
                 Task {
                     try? await Task.sleep(for: .seconds(0.6))
                     withSidebar = false
@@ -1175,7 +1175,7 @@ struct LiveControlsDock: View {
         // animated and not the other, the dock jumped, then slid); opened or closed by hand, it slides.
         func change(_ show: Bool) {
             if animated {
-                withAnimation(LiveView.dockAnimation) { showRail = show }
+                withAnimation(LiveView.panelAnimation) { showRail = show }
             } else {
                 model.railMovesAtOnce = true
                 var instant = Transaction()
