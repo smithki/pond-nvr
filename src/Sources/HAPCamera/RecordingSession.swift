@@ -10,7 +10,7 @@ import Media
 import NVRCore
 
 final class RecordingSession: @unchecked Sendable {
-    let camera: String
+    let camera: String?
     let streamID: Int64
     let connection: DataStreamConnection
     let selected: SelectedRecording
@@ -51,6 +51,8 @@ final class RecordingSession: @unchecked Sendable {
         (NSString(string: Brand.supportFolder).expandingTildeInPath as NSString).appendingPathComponent("hksv-dump")
     }
     private lazy var dumpFile: FileHandle? = {
+        // Only a real camera's (a test's recordings are made up).
+        guard let camera else { return nil }
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: Self.dumpFolder, isDirectory: &isFolder), isFolder.boolValue else { return nil }
         let path = (Self.dumpFolder as NSString).appendingPathComponent("\(camera)-\(Int(began.timeIntervalSince1970))-\(streamID).mp4")
@@ -58,7 +60,7 @@ final class RecordingSession: @unchecked Sendable {
         return FileHandle(forWritingAtPath: path)
     }()
 
-    init(camera: String = "camera", streamID: Int64, connection: DataStreamConnection, selected: SelectedRecording, audio: AudioTrack?,
+    init(camera: String? = nil, streamID: Int64, connection: DataStreamConnection, selected: SelectedRecording, audio: AudioTrack?,
          prebuffer: Prebuffer, log: @escaping @Sendable (String) -> Void) {
         self.camera = camera
         self.streamID = streamID

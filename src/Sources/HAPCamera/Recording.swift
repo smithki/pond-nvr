@@ -181,7 +181,8 @@ public final class RecordingController: @unchecked Sendable {
     let log: @Sendable (String) -> Void
 
     /// The camera's id (for the copies of its recordings kept while looking into them; see RecordingSession).
-    var camera = "camera"
+    /// Nil (a test's): none kept.
+    var camera: String?
 
     init(options: RecordingOptions, state: RecordingState?, source: (url: String, username: String, password: String)? = nil,
          prebuffer given: Prebuffer? = nil, log: @escaping @Sendable (String) -> Void) {
