@@ -110,6 +110,7 @@ final class AppModel {
     /// The start, restart or removal going on, if any, whether it starts the recorder, and when the last
     /// start or restart was asked for.
     private var serviceChange: Task<Void, Never>?
+    @ObservationIgnored private var pendingReload: Task<Void, Never>?
     private var serviceChangeStarts = false
     private var restartedAt: Date?
 
@@ -225,6 +226,7 @@ final class AppModel {
         guard var next = config else { return false }
         change(&next)
         guard next != config else { return true }
+        let previous = config
         do {
             try store.save(next)
         } catch let ConfigStore.Error.invalidSettings(problems) {
@@ -235,10 +237,25 @@ final class AppModel {
             return false
         }
         config = next
+        // The running service takes up changes to the cameras or retention at once, only the cameras that changed
+        // starting again (a reload); a change of storage still waits for Restart Recorder.
+        if let previous, previous.cameras != next.cameras || previous.retention != next.retention { reloadService() }
         return true
     }
 
-    // MARK: - Storage
+    /// Asks the running service to take up the saved settings (`pond service reload`): it starts, stops or starts
+    /// again only the cameras that changed. Several changes together are one reload. A service that can't (an
+    /// older one), or a change that needs a restart, leaves the Restart Recorder prompt.
+    func reloadService() {
+        guard case .running = serviceState else { return }
+        pendingReload?.cancel()
+        pendingReload = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            let reply = await controlClient.ask(.init(camera: "", action: "reload"), timeout: 60)
+            if reply.error == nil, reply.restartNeeded != true { recorderStarted() }
+        }
+    }
 
     /// Marks a folder for pond and makes it the recordings (or events) folder.
     func chooseFolder(_ url: URL, forEvents: Bool) {
@@ -349,10 +366,12 @@ final class AppModel {
             alert = "The password couldn\u{2019}t be saved: \(error)"
             return false
         }
-        // Recorded from now: the running recorder starts again to take it on (the others pause for a few
-        // seconds), and the live view says it is starting rather than that it isn't recording.
-        if case .running = serviceState { restartService() }
+        // Recorded from now (the running service takes it on with the settings' reload, the others going on), and
+        // the live view says it is starting rather than that it isn't recording.
         recordingStarted[camera.id] = Date()
+        // What it can be controlled with, worked out now (Add Camera asked only what it is): without it, its dock
+        // was empty until it was identified again.
+        Task { await identify(camera.id) }
         return true
     }
 
@@ -362,7 +381,10 @@ final class AppModel {
     func setPassword(_ password: String, for id: String) -> Bool {
         do {
             try passwords.save(password, for: id)
-            if case .running = serviceState { passwordChangedSinceStart = true }
+            if case .running = serviceState {
+                passwordChangedSinceStart = true
+                reloadService()
+            }
             return true
         } catch {
             alert = "\(error)"
@@ -428,6 +450,7 @@ final class AppModel {
     func remove(_ id: String, deleteRecordings: Bool = false) {
         guard let before = config, update({ $0.cameras.removeAll { $0.id == id } }) else { return }
         try? passwords.remove(for: id)
+        reloadService()
         guard deleteRecordings else { return }
         Task {
             let failed = await Task.detached { CameraRecordings.delete(of: id, config: before) }.value

@@ -76,7 +76,8 @@ Each camera's HomeKit identity and pairings are kept in the login Keychain (`pon
 
 ```sh
 pond service status       # running or not, and the last lines of the log
-pond service restart      # after changing settings by hand
+pond service reload       # after changing settings by hand: only the cameras that changed start again
+pond service restart      # after installing a new pond, or changing the storage
 pond service uninstall    # stop and remove it; recordings and settings stay
 ```
 

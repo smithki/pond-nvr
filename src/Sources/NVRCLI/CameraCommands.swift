@@ -221,7 +221,7 @@ extension CLI {
         if viewers != nil { console.out("Up to \(c.homeKitViewerSlots) at once in the Home app.") }
         if instant != nil { console.out(c.keepsLiveReady ? "Live views start at once (the sub-stream is kept open)." : "Live views connect when opened.") }
         if kind != nil || homekit != nil || viewers != nil || instant != nil || video != nil || recording != nil {
-            console.out("The service picks this up when it restarts: pond service restart")
+            console.out("The running service takes this up with: pond service reload")
         }
         if host != nil || username != nil || main != nil {
             console.out("Check the new settings with: pond camera test \(c.id)")

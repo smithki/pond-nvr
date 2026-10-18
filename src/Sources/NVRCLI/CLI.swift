@@ -83,7 +83,8 @@ public struct CLI {
     Login service
       service install                              record whenever you are logged in, restarting if it stops
       service status                               whether it is running, and the end of its log
-      service restart                              after changing settings or installing a new pond
+      service reload                               apply changed settings: only the cameras that changed start again
+      service restart                              after installing a new pond (or a change of storage)
       service uninstall                            stop it and remove it
 
     Storage

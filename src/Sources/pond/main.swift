@@ -78,6 +78,8 @@ let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
 struct RecordingAndHomeKit: ServiceRunning {
     /// Where the status for the app goes: next to the settings file.
     let statusPath: String
+    /// The settings, read again on a reload.
+    let configPath: String
 
     func run(config: Config, passwords: [String: String], for seconds: Double?, log: EventLog) {
         // Camera health for the doctor, in Pond's database: a week kept.
@@ -104,42 +106,42 @@ struct RecordingAndHomeKit: ServiceRunning {
         // For the app: what HomeKit is doing, camera by camera.
         let statusPath = self.statusPath
         host.statusChanged = { $0.write(statusPath) }
-        host.start(cameras: config.cameras) { passwords[$0] }
+        // Reolink cameras' own privacy mode, in step with Pond's both ways (over their Baichuan connections).
+        let privacySync = CameraPrivacySync { line in log.log("pond", line) }
+        // Each camera's parts (recording, HomeKit, instant live view, Baichuan), started together, and started,
+        // stopped or started again one camera at a time when the settings change (a reload).
+        let recording = RecordingService(config: config, passwords: passwords, log: log)
+        let cameras = CameraSupervisor(config: config, passwords: passwords, configPath: configPath, log: log,
+                                       recording: recording, host: host, privacySync: privacySync)
+        cameras.startAll()
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")
         }
-        // Reolink cameras' own privacy mode, in step with Pond's both ways (over their Baichuan connections).
-        let privacySync = CameraPrivacySync { line in log.log("pond", line) }
-        for camera in config.cameras where !camera.isVideoOnly
-            && CameraProviders.choices(for: camera.device).contains(where: { $0.id == "reolink" }) {
-            guard let password = passwords[camera.id] else { continue }
-            let access = CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main)
-            Task { privacySync.watch(camera.id, await CameraSessions.shared.baichuan(access)) }
-        }
-        // The app's live views read the same camera connections, through a local socket.
-        let cameras = config.cameras
+        // The app's live views read the same camera connections, through a local socket (the cameras as they
+        // are now).
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
-            guard let camera = cameras.first(where: { $0.main == url || $0.sub == url }),
-                  !PrivacyState.shared.isPrivate(camera.id), let password = passwords[camera.id] else { return nil }
+            guard let camera = cameras.cameras.first(where: { $0.main == url || $0.sub == url }),
+                  !PrivacyState.shared.isPrivate(camera.id), let password = cameras.password(camera.id) else { return nil }
             return (camera.username, password)
         }) { line in log.log("pond", line) }
         relay.start()
-        // Their controls (PTZ, night mode, talking back) too, through the connections the service keeps.
+        // Their controls (PTZ, night mode, talking back) too, through the connections the service keeps; and the
+        // app's "reload" when the settings change.
         let controls = ControlServer(path: ControlSocket.path(nextTo: statusPath), sync: privacySync, lookup: { id in
-            guard let camera = cameras.first(where: { $0.id == id }), let password = passwords[camera.id] else { return nil }
+            guard let camera = cameras.cameras.first(where: { $0.id == id }), let password = cameras.password(camera.id) else { return nil }
             return (CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main), camera.device)
         }) { line in log.log("pond", line) }
-        controls.start()
-        // Cameras set to start live view at once: their sub-stream held open, so a viewer joins it mid-way.
-        let keepers = cameras.filter(\.keepsLiveReady).compactMap { camera in
-            passwords[camera.id].map { password in
-                StreamKeeper(url: camera.sub, username: camera.username, password: password,
-                             paused: { PrivacyState.shared.isPrivate(camera.id) })
+        cameras.controls = controls
+        controls.reload = {
+            switch cameras.reload() {
+            case let .applied(summary): (summary, false, false)
+            case let .needsRestart(why): (why, true, false)
+            case let .failed(why): (why, false, true)
             }
         }
-        for keeper in keepers { keeper.start() }
-        RealService().run(config: config, passwords: passwords, for: seconds, log: log)
-        for keeper in keepers { keeper.stop() }
+        controls.start()
+        recording.run(for: seconds)
+        cameras.stopAll()
         relay.stop()
         controls.stop()
         host.stop()
@@ -319,6 +321,37 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// `pond camera privacy ID [on|off]`: whether Pond keeps the camera private (not recorded, shown live or served to
 /// HomeKit), or makes it so. Through the service, which applies it at once (and has the camera itself follow,
 /// where its provider can); without the service running, kept for when it starts.
+/// `pond service reload`: the running service reads the settings and passwords again, and starts, stops or starts
+/// again only the cameras that changed (the others go on recording, and stay in HomeKit). A change of storage
+/// restarts it instead.
+if args == ["service", "reload"] {
+    let service = ControlClient(path: ControlSocket.path(nextTo: configPath))
+    guard service.isAvailable else {
+        print("· The service isn\u{2019}t running; it reads the settings when it starts.")
+        exit(0)
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var reply = ControlSocket.Reply()
+    Task.detached {
+        reply = await service.ask(.init(camera: "", action: "reload"), timeout: 60)
+        semaphore.signal()
+    }
+    semaphore.wait()
+    if let error = reply.error {
+        FileHandle.standardError.write(Data("✗ \(error == .notSupported ? "this service can\u{2019}t reload; restart it: pond service restart" : error.description)\n".utf8))
+        exit(1)
+    }
+    if reply.restartNeeded == true {
+        print("· \(reply.reloaded ?? "A change needs a restart"); restarting the service")
+        #if canImport(NVRMac)
+        if let launchd { _ = try? launchd.kickstart(label: LaunchAgent.label) }
+        #endif
+        exit(0)
+    }
+    print("✓ Reloaded: \(reply.reloaded ?? "nothing changed")")
+    exit(0)
+}
+
 if args.count >= 3, args[0] == "camera", args[1] == "privacy" {
     guard let config = try? ConfigStore(path: configPath).load(), let camera = config.cameras.first(where: { $0.id == args[2] }) else {
         FileHandle.standardError.write(Data("✗ There is no camera \(args[2]). See: pond camera list\n".utf8))
@@ -753,7 +786,7 @@ if args.count >= 3, args[0] == "camera", args[1] == "identify" {
             FileHandle.standardError.write(Data("✗ \(error)\n".utf8))
             exit(1)
         }
-        print("✓ \(config.cameras[index].name): video only; its motion and button aren't watched. The service picks this up when it restarts: pond service restart")
+        print("✓ \(config.cameras[index].name): video only; its motion and button aren't watched. The running service takes this up with: pond service reload")
         exit(0)
     }
     if let i = args.firstIndex(of: "--provider") {
@@ -786,8 +819,10 @@ if args.count >= 3, args[0] == "camera", args[1] == "identify" {
         // And what it can be controlled with, through which provider each (for the app's controls); through
         // the service when it runs (it keeps the logins), else asked here and logged out after.
         if var found = device {
-            if service.isAvailable, camera.device?.provider == found.provider {
-                found.controls = await service.ask(.init(camera: camera.id, action: "controls")).controls
+            // (A service that doesn't know the camera yet, just added, answers nothing: asked here then.)
+            if service.isAvailable, camera.device?.provider == found.provider,
+               let controls = await service.ask(.init(camera: camera.id, action: "controls")).controls {
+                found.controls = controls.isEmpty ? nil : controls
             } else {
                 let access = CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main)
                 let controls = await CameraControls(access: access, device: found).controls()
@@ -889,7 +924,7 @@ if args.first == "homekit" {
 #endif
 
 #if canImport(NVRMac)
-let service: ServiceRunning = RecordingAndHomeKit(statusPath: HomeKitStatus.path(nextTo: configPath))
+let service: ServiceRunning = RecordingAndHomeKit(statusPath: HomeKitStatus.path(nextTo: configPath), configPath: configPath)
 #else
 let service: ServiceRunning = RealService()
 #endif

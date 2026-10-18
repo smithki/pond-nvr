@@ -326,108 +326,35 @@ struct AddCameraSheet: View {
         return nil
     }
 
+    /// The sheet's pages, one after another: the camera's details; the check (and, passed, the camera added, with
+    /// what it does to the storage); then the Home app's offer, a page of its own, so Skip plainly leaves the
+    /// camera added, only not in HomeKit.
+    enum Page: Int { case details, check, homeKit }
+    @State private var page = Page.details
+    /// Which way the pages slide: on (forward) or back.
+    @State private var forward = true
+
+    func go(_ next: Page) {
+        forward = next.rawValue > page.rawValue
+        withAnimation(.smooth(duration: 0.35)) { page = next }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Add Camera").font(.title2.bold()).padding([.top, .horizontal], 20)
-            ScrollViewReader { proxy in
-            Form {
-                foundSection
-                // Headed, as each section is, so it's set apart from the cameras on the network above it.
-                Section("Camera") {
-                    TextField("Name", text: $name, prompt: Text("Front porch"))
-                        .focused($nameFocused)
-                        .onChange(of: name) { if !idEdited { id = slug(name) } }
-                    // Each note under its own row's label.
-                    LabeledContent {
-                        TextField("ID", text: Binding(get: { id }, set: { id = $0; idEdited = true }), prompt: Text("front-porch"))
-                            .labelsHidden()
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 160)
-                    } label: {
-                        Text("ID")
-                        Text("Names the camera\u{2019}s folders and its HomeKit accessory; best not changed later.")
-                    }
-                    TextField("Address", text: $host, prompt: Text("192.168.1.30"))
-                    LabeledContent {
-                        KindPicker(kind: $kind)
-                    } label: {
-                        Text("Type")
-                        Text("A doorbell is recognised when it says so, and can be marked here.")
-                    }
-                }
-                .disabled(checking || added)
-                Section("Login") {
-                    TextField("Username", text: $username)
-                    SecureField("Password", text: $password)
-                }
-                .disabled(checking || added)
-                Section {
-                    FoldRow(title: "Stream addresses", summary: streamSummary, expanded: $showStreams)
-                    if showStreams {
-                        Group {
-                            StreamAddressField(title: "Main stream", note: StreamAddressField.mainNote, address: $mainURL,
-                                               prompt: "Asked of the camera")
-                            StreamAddressField(title: "Sub-stream", note: StreamAddressField.subNote, address: $subURL,
-                                               prompt: "Asked of the camera")
-                        }
-                        .padding(.leading, FoldRow.indent)
-                    }
-                }
-                .disabled(checking || added)
-                if checking || result != nil {
-                    Section(added ? "Added" : "Check") {
-                        if let device {
-                            LabeledContent("Device", value: [device.manufacturer, device.model].filter { !$0.isEmpty }.joined(separator: " "))
-                        }
-                        if let result {
-                            CheckLinesView(lines: result.lines)
-                        } else {
-                            HStack(spacing: 10) {
-                                ProgressView().controlSize(.small)
-                                Text(model.waitingForLocalNetwork ? LocalNetworkNote.waiting
-                                     : "Logging in, then watching the video for 6 seconds…").foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                if let impact { StorageImpactSection(impact: impact, name: camera.name) }
-                // The last step, in the form with the rest (it scrolls with them, rather than squeezing them), and
-                // scrolled to when it comes.
-                if added {
-                    Section("HomeKit") { homeKitStep }
-                        .id(Self.homeKitStepID)
+            Text(page == .homeKit ? "Add to the Home App" : "Add Camera").font(.title2.bold()).padding([.top, .horizontal], 20)
+                .contentTransition(.opacity)
+            ZStack {
+                switch page {
+                case .details: detailsPage.transition(slide)
+                case .check: checkPage.transition(slide)
+                case .homeKit: homeKitPage.transition(slide)
                 }
             }
-            .formStyle(.grouped)
-            .onChange(of: added) { _, now in if now { reveal(proxy) } }
-            .onChange(of: homeKitChosen) { reveal(proxy) }
-            }
-
-            HStack {
-                if let problem, result == nil, !name.isEmpty || !host.isEmpty {
-                    Text(problem).font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if added, homeKitChosen == nil {
-                    Button("Not Now") { dismiss() }.keyboardShortcut(.cancelAction)
-                    Button("Add to the Home App") { addToHome() }.keyboardShortcut(.defaultAction)
-                } else if added {
-                    Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-                } else {
-                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                    // The check failed, or the camera doesn't fit in the days kept: the choice is yours.
-                    if let result, !result.passed || impact?.fits == false {
-                        Button("Add Anyway") { save() }
-                    }
-                    Button("Check and Add") { Task { await checkAndAdd() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(problem != nil || checking)
-                }
-            }
-            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            bar.padding(16)
         }
-        .frame(width: 520)
-        .frame(maxHeight: height)
+        .frame(width: 520, height: min(height, 560))
         .onAppear {
             if let from = model.addingFrom {
                 use(from)
@@ -437,6 +364,181 @@ struct AddCameraSheet: View {
         .defaultFocus($nameFocused, true)
         .onAppear { nameFocused = true }
         .task { await model.findCameras() }
+    }
+
+    /// In from the side it's going towards, out the other.
+    var slide: AnyTransition {
+        .asymmetric(insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+                    removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
+    }
+
+    // MARK: Pages
+
+    var detailsPage: some View {
+        Form {
+            foundSection
+            // Headed, as each section is, so it's set apart from the cameras on the network above it.
+            Section("Camera") {
+                TextField("Name", text: $name, prompt: Text("Front porch"))
+                    .focused($nameFocused)
+                    .onChange(of: name) { if !idEdited { id = slug(name) } }
+                // Each note under its own row's label.
+                LabeledContent {
+                    TextField("ID", text: Binding(get: { id }, set: { id = $0; idEdited = true }), prompt: Text("front-porch"))
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 160)
+                } label: {
+                    Text("ID")
+                    Text("Names the camera\u{2019}s folders and its HomeKit accessory; best not changed later.")
+                }
+                TextField("Address", text: $host, prompt: Text("192.168.1.30"))
+                LabeledContent {
+                    KindPicker(kind: $kind)
+                } label: {
+                    Text("Type")
+                    Text("A doorbell is recognised when it says so, and can be marked here.")
+                }
+            }
+            Section("Login") {
+                TextField("Username", text: $username)
+                SecureField("Password", text: $password)
+            }
+            Section {
+                FoldRow(title: "Stream addresses", summary: streamSummary, expanded: $showStreams)
+                if showStreams {
+                    Group {
+                        StreamAddressField(title: "Main stream", note: StreamAddressField.mainNote, address: $mainURL,
+                                           prompt: "Asked of the camera")
+                        StreamAddressField(title: "Sub-stream", note: StreamAddressField.subNote, address: $subURL,
+                                           prompt: "Asked of the camera")
+                    }
+                    .padding(.leading, FoldRow.indent)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// The check as it goes (in view from the start), then what it found: added, or why not yet.
+    var checkPage: some View {
+        Form {
+            Section {
+                HStack(spacing: 12) {
+                    Group {
+                        if checking {
+                            ProgressView().controlSize(.regular)
+                        } else {
+                            Image(systemName: added ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(added ? .green : .orange)
+                        }
+                    }
+                    .font(.largeTitle)
+                    .frame(width: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(checkHeadline).font(.headline)
+                        Text(checkDetail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 6)
+                .animation(.smooth(duration: 0.25), value: checking)
+                if let device {
+                    LabeledContent("Device", value: [device.manufacturer, device.model].filter { !$0.isEmpty }.joined(separator: " "))
+                        .transition(.opacity)
+                }
+            }
+            if let result {
+                Section("What the check found") { CheckLinesView(lines: result.lines) }
+                    .transition(.opacity)
+            }
+            if let impact { StorageImpactSection(impact: impact, name: camera.name) }
+        }
+        .formStyle(.grouped)
+        .animation(.smooth(duration: 0.3), value: result?.lines.count)
+        .animation(.smooth(duration: 0.3), value: device)
+    }
+
+    var checkHeadline: String {
+        if checking { return "Checking \(camera.name)\u{2026}" }
+        if added { return "\(camera.name) added" }
+        if result?.passed == true, impact?.fits == false { return "\(camera.name) won\u{2019}t fit in the days kept" }
+        return "\(camera.name) didn\u{2019}t pass the check"
+    }
+
+    var checkDetail: String {
+        if checking {
+            if model.waitingForLocalNetwork { return LocalNetworkNote.waiting }
+            return checkingStep
+        }
+        if added { return "Recording now. Its controls and details are filled in as it\u{2019}s set up." }
+        if result?.passed == true { return "Add it anyway, or make room in Settings \u{203A} Storage first." }
+        return "Go back to change its details, or add it anyway."
+    }
+
+    /// The offer to put it in the Home app, a page of its own (it's added already), then its pairing.
+    var homeKitPage: some View {
+        VStack(spacing: 16) {
+            Spacer(minLength: 0)
+            if homeKitChosen == nil {
+                Image(systemName: "homekit")
+                    .font(.system(size: 54))
+                    .foregroundStyle(.tint)
+                Text("Put \(camera.name) in the Home app?").font(.title3.bold())
+                Text("It then shows in the Home app on your iPhone, iPad and Mac\(kind == .doorbell ? ", and rings there when its button is pressed" : ""), and can record to HomeKit Secure Video. Pond\u{2019}s background service serves it. \(camera.name) is added either way; you can do this later in its settings.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400)
+            } else {
+                HomeKitPairing(cameraID: camera.id)
+                    .frame(maxWidth: 440)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Each page's buttons.
+    @ViewBuilder
+    var bar: some View {
+        HStack {
+            switch page {
+            case .details:
+                if let problem, !name.isEmpty || !host.isEmpty {
+                    Text(problem).font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Check and Add") {
+                    go(.check)
+                    Task { await checkAndAdd() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(problem != nil)
+            case .check:
+                if !added {
+                    Button("Back") { go(.details) }.disabled(checking)
+                }
+                Spacer()
+                if added {
+                    Button("Continue") { go(.homeKit) }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    if let result, !checking, !result.passed || impact?.fits == false {
+                        Button("Add Anyway") { save() }.keyboardShortcut(.defaultAction)
+                    }
+                }
+            case .homeKit:
+                Spacer()
+                if homeKitChosen == nil {
+                    Button("Skip") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Add to the Home App") { addToHome() }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                }
+            }
+        }
     }
 
     /// Cameras on the network that aren't set up: picking one fills in its address and a name. Looked for
@@ -498,9 +600,15 @@ struct AddCameraSheet: View {
         return mainURL.isEmpty && subURL.isEmpty ? "Asked of the camera" : "Typed in"
     }
 
+    /// What the check is doing now, in words.
+    @State private var checkingStep = "Looking for its streams\u{2026}"
+
     func checkAndAdd() async {
         checking = true
         result = nil
+        device = nil
+        impact = nil
+        checkingStep = "Looking for its streams\u{2026}"
         // The stream addresses, unless typed in: asked of the camera (its make's, or ONVIF's); else Reolink's.
         if mainURL.isEmpty, subURL.isEmpty,
            let found = await model.findStreams(host: camera.host, username: username, password: password) {
@@ -508,8 +616,10 @@ struct AddCameraSheet: View {
             subURL = found.sub
             streamsFrom = found.from
         }
+        checkingStep = "Logging in, then watching the video for 6 seconds\u{2026}"
         let r = await model.check(camera, password: password, seconds: 6)
         if r.passed {
+            checkingStep = "Asking what it is\u{2026}"
             // Reached: ask what it is (model, serial, doorbell), for HomeKit and the settings.
             device = await model.identify(host: camera.host, username: username, password: password)
             if device?.isDoorbell == true { kind = .doorbell }
@@ -517,8 +627,10 @@ struct AddCameraSheet: View {
         // What it does to the storage, at the rate just measured; a camera that pushes the recordings past
         // the days kept waits for Add Anyway.
         impact = r.passed ? await model.storageImpact(ofAdding: camera.id, megabitsPerSecond: checkedRate) : nil
-        checking = false
-        result = r
+        withAnimation(.smooth(duration: 0.3)) {
+            checking = false
+            result = r
+        }
         if r.passed, impact?.fits != false { save() }
     }
 
@@ -533,34 +645,10 @@ struct AddCameraSheet: View {
         model.setHomeKit(camera.id, true)
     }
 
-    /// After adding: the optional HomeKit step, then its progress until the Home app has the camera.
-    var homeKitStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if homeKitChosen == nil {
-                Label("Add \(camera.name) to the Home app?", systemImage: "homekit").font(.headline)
-                Text("It then shows in the Home app on your iPhone, iPad and Mac\(kind == .doorbell ? ", and rings there when its button is pressed" : ""). Pond\u{2019}s background service serves it, and starts if it isn\u{2019}t running. You can also do this later in the camera\u{2019}s settings.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                HomeKitPairing(cameraID: camera.id)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
-    }
-
-    static let homeKitStepID = "homekit-step"
-
-    /// Scrolls the HomeKit step into view, after the layout has it.
-    func reveal(_ proxy: ScrollViewProxy) {
-        Task {
-            try? await Task.sleep(for: .milliseconds(50))
-            withAnimation(.snappy) { proxy.scrollTo(Self.homeKitStepID, anchor: .bottom) }
-        }
-    }
-
     func save() {
-        if model.add(camera, password: password) { added = true }
+        if model.add(camera, password: password) {
+            withAnimation(.smooth(duration: 0.3)) { added = true }
+        }
     }
 }
 

@@ -59,6 +59,9 @@ public enum ControlSocket {
         public var queued: Bool?
         /// Turned down because the camera is private or waking (`error` says which): its state, not a failure.
         public var asleep: Bool?
+        /// "reload": what changed, in words; and whether the service must be restarted for it instead.
+        public var reloaded: String?
+        public var restartNeeded: Bool?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -265,6 +268,13 @@ public final class ControlServer: @unchecked Sendable {
         }
     }
 
+    /// The settings read again (set by the service): what changed, whether it needs a restart instead, or why
+    /// it failed.
+    public var reload: (@Sendable () -> (summary: String, restart: Bool, failed: Bool))?
+
+    /// A camera's controls worked out again when next asked (it changed, or was removed).
+    public func forget(_ id: String) { _ = lock.withLock { controls.removeValue(forKey: id) } }
+
     func cameraControls(_ id: String) -> CameraControls? {
         lock.withLock {
             if let known = controls[id] { return known }
@@ -281,6 +291,16 @@ public final class ControlServer: @unchecked Sendable {
         // Requests until the app hangs up (or it's quiet for a long while).
         while let text = try? reader.line(timeout: 300) {
             guard let request = try? JSONDecoder().decode(ControlSocket.Request.self, from: Data(text.utf8)) else { return }
+            if request.action == "reload" {
+                var reply = ControlSocket.Reply()
+                if let (summary, restart, failed) = reload?() {
+                    if failed { reply.error = .failed(summary) } else { reply.reloaded = summary; reply.restartNeeded = restart }
+                } else {
+                    reply.error = .notSupported
+                }
+                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
+                continue
+            }
             if request.action == "privacy.list" {
                 let reply = ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
                 guard (try? client.send(ControlSocket.line(reply))) != nil else { return }

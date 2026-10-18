@@ -1,5 +1,6 @@
 // Everything `pond run` runs: a worker per camera and the retention sweep every few minutes, until a
-// signal (Ctrl-C, or launchd stopping the service) or an optional time limit.
+// signal (Ctrl-C, or launchd stopping the service) or an optional time limit. Cameras can be added, taken
+// away or changed while it runs (`add`, `remove`), and retention changed (`setConfig`), the others going on.
 import Foundation
 import NVRCore
 #if canImport(Darwin)
@@ -12,12 +13,14 @@ import IOKit.pwr_mgt
 #endif
 
 public final class RecordingService: @unchecked Sendable {
-    let config: Config
+    private var config: Config
     let passwords: [String: String]
     let log: EventLog
     let segmentSeconds: Double
     let sweepInterval: Double
-    public private(set) var workers: [CameraWorker] = []
+    private let lock = NSLock()
+    private var running: [String: CameraWorker] = [:]
+    public var workers: [CameraWorker] { lock.withLock { Array(running.values) } }
 
     public init(config: Config, passwords: [String: String], log: EventLog, segmentSeconds: Double = 60,
                 sweepInterval: Double = 300) {
@@ -45,21 +48,16 @@ public final class RecordingService: @unchecked Sendable {
         let awake = preventIdleSleep()
         defer { allowIdleSleep(awake) }
         log.log("pond", "starting: \(config.cameras.count) camera\(config.cameras.count == 1 ? "" : "s"), recording to \(config.storage.recordingsPath)")
-        for camera in config.cameras {
-            guard let password = passwords[camera.id] else {
-                log.log(camera.id, "not started: no password in the Keychain")
-                continue
-            }
-            let worker = CameraWorker(camera: camera, password: password, recordingsRoot: config.storage.recordingsPath,
-                                      log: log, segmentSeconds: segmentSeconds)
-            workers.append(worker)
-            worker.start()
-        }
+        for camera in config.cameras { add(camera, password: passwords[camera.id]) }
 
-        let sweeper = RetentionSweeper(config: config, log: log)
+        // With the settings as they are at each sweep (they can change while it runs).
+        let log = self.log
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.retention"))
         timer.schedule(deadline: .now(), repeating: sweepInterval)
-        timer.setEventHandler { _ = sweeper.sweep() }
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            _ = RetentionSweeper(config: lock.withLock { config }, log: log).sweep()
+        }
         timer.resume()
 
         if let seconds {
@@ -70,9 +68,36 @@ public final class RecordingService: @unchecked Sendable {
         log.log("pond", "stopping")
         timer.cancel()
         for worker in workers { worker.stop() }
+        lock.withLock { running = [:] }
         sources.forEach { $0.cancel() }
         log.log("pond", "stopped")
     }
+
+    /// A camera recorded from now, alongside the others (changed: `remove` it first).
+    public func add(_ camera: Config.Camera, password: String?) {
+        guard let password else {
+            log.log(camera.id, "not started: no password in the Keychain")
+            return
+        }
+        let worker = CameraWorker(camera: camera, password: password, recordingsRoot: lock.withLock { config.storage.recordingsPath },
+                                  log: log, segmentSeconds: segmentSeconds)
+        let previous = lock.withLock { () -> CameraWorker? in
+            defer { running[camera.id] = worker }
+            return running[camera.id]
+        }
+        previous?.stop()
+        worker.start()
+    }
+
+    /// A camera no longer recorded: its segment finished and its connection let go.
+    public func remove(_ id: String) {
+        let worker = lock.withLock { running.removeValue(forKey: id) }
+        worker?.stop()
+    }
+
+    /// The settings as they are now (for retention: its days, size and free space; the cameras' own changes
+    /// are `add` and `remove`).
+    public func setConfig(_ next: Config) { lock.withLock { config = next } }
 
     /// A sleeping Mac records nothing, so idle sleep is held off while recording (the display may still
     /// sleep). Returns the assertion to release, or 0.

@@ -16,6 +16,10 @@ struct DoctorView: View {
     /// the page scrolled on and on); with too many findings for even a short list, the page scrolls instead.
     @State private var tabHeight = 560.0
     @State private var listTop: Double?
+    /// The page as last measured overflowing (what makes its height: camera, tab, findings, a check): while it
+    /// is the same, where the list starts isn't measured again, as scrolling moves it (the list then grew with
+    /// the scroll, and the page scrolled on).
+    @State private var overflowing: String?
     /// The form's inset at its sides (the list spans its card, so its left edge is the card's): the same is kept
     /// below the last card, at the window's bottom edge.
     @State private var sideInset = 20.0
@@ -59,6 +63,11 @@ struct DoctorView: View {
     }
 
     nonisolated static let space = "doctor"
+
+    /// What the page's height comes from, above the list.
+    func pageKey(_ camera: Config.Camera) -> String {
+        "\(camera.id) \(Int(tabHeight)) \(doctor.findings[camera.id]?.count ?? 0) \(doctor.checks[camera.id]?.lines.count ?? -1) \(model.homeKitRecording(for: camera) != nil)"
+    }
 
     /// The page's first row, its title: which camera (or all) as a heading like the page's others, in line with
     /// them, opening a menu of the cameras (a chevron after it says so); then what can be done with it.
@@ -122,35 +131,24 @@ struct DoctorView: View {
         .textCase(nil)
     }
 
-    /// For a camera recording to HomeKit Secure Video: when Pond last sent the home hub a clip, and what to do if
-    /// they're sent but never show in the Home app (which Pond can't see: the hub keeps them or not). Seen with a
-    /// doorbell whose clips the hub took, analysed (its notifications came) and threw away, until it was removed
-    /// from HomeKit and added again: its recording setup in the hub had gone wrong.
+    /// For a camera recording to HomeKit Secure Video, a row among its findings: when Pond last sent the home hub
+    /// a clip, with what to do if they're sent but never show in the Home app behind its ⓘ (Pond can't see
+    /// whether the hub keeps them). Seen with a doorbell whose clips the hub took, analysed (its notifications
+    /// came) and threw away, until it was removed from HomeKit and added again: its recording setup had gone wrong.
     @ViewBuilder
-    func homeKitRecordingSection(_ camera: Config.Camera) -> some View {
+    func homeKitRecordingRow(_ camera: Config.Camera) -> some View {
         if let recording = model.homeKitRecording(for: camera) {
-            Section {
-                LabeledContent("Last clip sent to the home hub") {
-                    if let clip = recording.lastClip {
-                        Text(clip.at.formatted(date: Calendar.current.isDateInToday(clip.at) ? .omitted : .abbreviated, time: .shortened)
-                             + " (\(Int(clip.seconds.rounded())) s)")
-                    } else {
-                        Text("None yet").foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                Text("HomeKit Secure Video")
-            } footer: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Clips sent but never in the Home app? The home hub\u{2019}s recording setup for \(camera.name) may be stuck. Remove it from HomeKit in its settings, remove it in the Home app too, then add it again with its new setup code (its Home app settings and automations are set up again).")
+            HStack(spacing: 8) {
+                Label("HomeKit Secure Video", systemImage: "video.badge.checkmark")
+                Spacer()
+                if let clip = recording.lastClip {
+                    Text("last clip sent " + clip.at.formatted(date: Calendar.current.isDateInToday(clip.at) ? .omitted : .abbreviated,
+                                                                 time: .shortened) + " (\(Int(clip.seconds.rounded())) s)")
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Camera Settings\u{2026}") {
-                        model.settingsTab = .cameras
-                        model.cameraToEdit = camera.id
-                    }
-                    .controlSize(.small)
+                } else {
+                    Text("no clip sent yet").foregroundStyle(.secondary)
                 }
+                HomeKitClipsTip(camera: camera)
             }
         }
     }
@@ -198,6 +196,7 @@ struct DoctorView: View {
                     .foregroundStyle(.green)
             }
             ForEach(found) { finding in FindingRow(camera: camera, finding: finding) }
+            homeKitRecordingRow(camera)
             if let check = doctor.checks[camera.id] {
                 // The last check, under the findings it may explain.
                 VStack(alignment: .leading, spacing: 6) {
@@ -210,7 +209,6 @@ struct DoctorView: View {
         } header: {
             header(camera)
         }
-        homeKitRecordingSection(camera)
         Section("Last 24 hours") {
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
                 .frame(height: 90)
@@ -223,8 +221,11 @@ struct DoctorView: View {
                 .frame(height: listHeight)
                 .listRowInsets(EdgeInsets())
                 .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
+                    let page = pageKey(camera)
+                    guard overflowing != page else { return }
                     listTop = origin.y
                     if origin.x > 0 { sideInset = origin.x }
+                    if !fits { overflowing = page }
                 }
         } header: {
             HStack {
@@ -550,5 +551,36 @@ struct ThresholdPicker: View {
             Text(title)
             Text(detail)
         }
+    }
+}
+
+/// What to do when a camera's clips are sent to the home hub but never appear in the Home app: a fresh HomeKit
+/// identity (see docs/doctor.md), from the camera's settings.
+struct HomeKitClipsTip: View {
+    @Environment(AppModel.self) private var model
+    let camera: Config.Camera
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: { Image(systemName: "info.circle") }
+            .buttonStyle(.borderless)
+            .help("Clips sent but not in the Home app?")
+            .popover(isPresented: $shown, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Clips sent but never in the Home app?").font(.headline)
+                    Text("The home hub\u{2019}s recording setup for \(camera.name) may be stuck. Remove it from HomeKit in its settings, remove it in the Home app too, then add it again with its new setup code. Its Home app settings and automations are set up again.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("Camera Settings\u{2026}") {
+                            shown = false
+                            model.settingsTab = .cameras
+                            model.cameraToEdit = camera.id
+                        }
+                    }
+                }
+                .padding(16)
+                .frame(width: 320)
+            }
     }
 }

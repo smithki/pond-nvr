@@ -103,12 +103,13 @@ public final class HomeKitHost: @unchecked Sendable {
     /// Called with the whole status whenever any of it changes (the service writes it to a file).
     public var statusChanged: (@Sendable (HomeKitStatus) -> Void)?
     private var status = HomeKitStatus()
-    private var watchers: [CameraEvents] = []
+    /// Each camera's event watcher and privacy observer, by camera (so one can be stopped alone).
+    private var watchers: [String: CameraEvents] = [:]
     private let lock = NSLock()
     /// Pond's privacy: a private camera has no live view, snapshots or motion in HomeKit, and shows as off in
     /// the Home app; turning it off or on there makes it private or not.
     let privacy: PrivacyState
-    private var privacyObservers: [UUID] = []
+    private var privacyObservers: [String: UUID] = [:]
 
     public init(records: HomeKitRecords, privacy: PrivacyState = .shared, log: @escaping @Sendable (String) -> Void) {
         self.records = records
@@ -143,19 +144,44 @@ public final class HomeKitHost: @unchecked Sendable {
     public func start(cameras: [Config.Camera], password: (String) -> String?) {
         lock.withLock { status = HomeKitStatus() }
         statusChanged?(lock.withLock { status })
-        for camera in cameras where camera.homekit {
-            guard let password = password(camera.id) else {
-                log("! HomeKit: \(camera.name) has no password in the Keychain; left out.")
-                update(camera.id) { $0.problem = .init(.noPassword, during: .starting) }
-                continue
-            }
-            do {
-                try start(camera, password: password)
-            } catch {
-                log("! HomeKit: \(camera.name) could not start: \(error)")
-                update(camera.id) { $0.running = false; $0.problem = .init(.couldNotStart, during: .starting) }
-            }
+        for camera in cameras { add(camera, password: password(camera.id)) }
+    }
+
+    /// One camera's accessory started (if it's to be in HomeKit), while the others go on: added, or changed and
+    /// started again after `remove`.
+    public func add(_ camera: Config.Camera, password: String?) {
+        guard camera.homekit else { return }
+        guard let password else {
+            log("! HomeKit: \(camera.name) has no password in the Keychain; left out.")
+            update(camera.id) { $0.problem = .init(.noPassword, during: .starting) }
+            return
         }
+        do {
+            try start(camera, password: password)
+        } catch {
+            log("! HomeKit: \(camera.name) could not start: \(error)")
+            update(camera.id) { $0.running = false; $0.problem = .init(.couldNotStart, during: .starting) }
+        }
+    }
+
+    /// One camera's accessory stopped (its live views and any recording ended, its events no longer watched),
+    /// while the others go on; its pairing is kept.
+    public func remove(_ id: String) {
+        let (gone, events, observer) = lock.withLock { () -> (Running?, CameraEvents?, UUID?) in
+            let gone = running.first { $0.camera.id == id }
+            running.removeAll { $0.camera.id == id }
+            defer { status.cameras[id] = nil; status.updated = Date() }
+            return (gone, watchers.removeValue(forKey: id), privacyObservers.removeValue(forKey: id))
+        }
+        events?.stop()
+        if let observer { privacy.forget(observer) }
+        if let gone {
+            for stream in gone.accessory.streams { stream.stop() }
+            gone.accessory.recording?.stop()
+            gone.listener.stop()
+            log("HomeKit: \(gone.camera.name) stopped")
+        }
+        statusChanged?(lock.withLock { status })
     }
 
     /// The configuration number for a database of this shape: as before if the shape is the same, else one
@@ -249,7 +275,7 @@ public final class HomeKitHost: @unchecked Sendable {
             recording?.setPrivate(isPrivate)
             if isPrivate { for stream in streams { stream.stop() } }
         }
-        lock.withLock { privacyObservers.append(observer) }
+        lock.withLock { privacyObservers[id] = observer }
         server.snapshot = { [weak self] width, height in
             // None while private (the Home app shows the camera as off).
             if privacy.isPrivate(id) { return nil }
@@ -355,19 +381,19 @@ public final class HomeKitHost: @unchecked Sendable {
             guard doorbell else { return }
             self?.update(id) { $0.doorbell = HomeKitStatus.DoorbellState(state) }
         })
-        lock.withLock { watchers.append(events) }
+        lock.withLock { watchers[id] = events }
         return true
     }
 
     public func stop() {
         let (all, events) = lock.withLock { () -> ([Running], [CameraEvents]) in
-            defer { running = []; watchers = [] }
-            return (running, watchers)
+            defer { running = []; watchers = [:] }
+            return (running, Array(watchers.values))
         }
         for e in events { e.stop() }
         for r in all { r.listener.stop() }
-        for observer in lock.withLock({ privacyObservers }) { privacy.forget(observer) }
-        lock.withLock { privacyObservers = [] }
+        for observer in lock.withLock({ privacyObservers.values }) { privacy.forget(observer) }
+        lock.withLock { privacyObservers = [:] }
         lock.withLock {
             for id in status.cameras.keys { status.cameras[id]?.running = false; status.cameras[id]?.viewers = 0 }
         }

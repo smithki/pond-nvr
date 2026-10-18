@@ -29,6 +29,14 @@ public final class CameraPrivacySync: @unchecked Sendable {
             state: { [self] state in if state == .connected { connected(camera) } }))
     }
 
+    /// No longer followed (the camera removed, or its connection to be made again).
+    public func unwatch(_ camera: String) {
+        _ = lock.withLock {
+            fresh.remove(camera)
+            return sessions.removeValue(forKey: camera)
+        }
+    }
+
     /// Connected (or again): its next privacy report is its first.
     func connected(_ camera: String) { _ = lock.withLock { fresh.insert(camera) } }
 

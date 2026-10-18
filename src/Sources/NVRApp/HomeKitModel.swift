@@ -136,7 +136,7 @@ extension AppModel {
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
             config.cameras[i].instantLive = on == config.cameras[i].homekit ? nil : on
         }) else { return }
-        if case .running = serviceState { restartService() }
+        // (The running service takes it up with the settings' reload.)
     }
 
     func refreshHomeKit() {
@@ -144,9 +144,14 @@ extension AppModel {
         if status != homeKitStatus { homeKitStatus = status }
     }
 
-    /// Starts the service if it is not installed or running; restarts it if it is.
+    /// A camera's HomeKit changed: a running service takes it up with the settings' reload (only that camera's
+    /// accessory starts again); otherwise the service is started (installed the first time) to serve it.
     func applyHomeKitChange() {
-        startService()
+        if case .running = serviceState {
+            reloadService()
+        } else {
+            startService()
+        }
         homeKitStatus = readHomeKitStatus()
     }
 

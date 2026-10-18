@@ -143,27 +143,39 @@ public final class VideoTranscoder: @unchecked Sendable {
         compress(picture, time: time)
     }
 
-    /// For recordings: frames at the asked rate on an exact clock (each slot shows the picture current then,
-    /// repeated where the camera is slower), a keyframe on every `interval`; so each fragment is exactly its
-    /// length, as the home hub takes it (a maximum: a frame over, and the hub keeps nothing).
+    /// For recordings: each picture at its own time (no faster than the asked rate), and a keyframe exactly on
+    /// every `interval` (the picture current then, again, if none falls on it); so each fragment is exactly its
+    /// length, as the home hub takes it (a maximum: a frame over, and the hub keeps nothing), and moves as the
+    /// camera does. (On a clock at the asked rate instead, a 20 fps doorbell's every third picture was repeated
+    /// to make 30, and its recordings juddered.)
     private var held: (picture: CVImageBuffer, from: Int64)?
-    private var nextSlot: Int64 = 0
-    private var firstSlot: Int64?
+    private var nextKeyframe: Int64?
+    private var lastPlaced: Int64?
 
     private func onClock(_ picture: CVImageBuffer, time: Int64, spacing: Int64, interval: Int64) {
-        if firstSlot == nil {
-            firstSlot = time
-            nextSlot = time
-        }
-        // The slots before this picture show the one before it.
-        if let held {
-            while nextSlot < time {
-                if (nextSlot - firstSlot!) % interval == 0 { forceKeyframe = true }
-                compress(held.picture, time: nextSlot)
-                nextSlot += spacing
+        if nextKeyframe == nil { nextKeyframe = time }
+        // A picture is placed once the next is known (it lasts until then).
+        if let held, var boundary = nextKeyframe {
+            if held.from == boundary {
+                place(held.picture, at: held.from, keyframe: true)
+                boundary += interval
+            } else if lastPlaced.map({ held.from - $0 >= spacing * 9 / 10 }) ?? true {
+                place(held.picture, at: held.from, keyframe: false)
             }
+            // Each fragment's start before this picture: the picture until then, again there, as a keyframe.
+            while boundary < time {
+                place(held.picture, at: boundary, keyframe: true)
+                boundary += interval
+            }
+            nextKeyframe = boundary
         }
         held = (picture, time)
+    }
+
+    private func place(_ picture: CVImageBuffer, at time: Int64, keyframe: Bool) {
+        if keyframe { forceKeyframe = true }
+        compress(picture, time: time)
+        lastPlaced = time
     }
 
     // MARK: - Decoding
