@@ -1,6 +1,7 @@
 // The doctor's view of every camera, from the service's health records (the Health module's database, read
 // off the main thread): each camera's findings, its day in samples, and its incidents. Findings can be ignored
 // per camera (kept in the app's preferences): they stay in the doctor, dimmed, but leave the camera's tile.
+import Control
 import Devices
 import Foundation
 import Health
@@ -19,6 +20,26 @@ final class CameraDoctor {
     private(set) var refreshed: Date?
     @ObservationIgnored private var store: HealthStore?
     @ObservationIgnored private var storePath: String?
+
+    /// When a rule speaks up: the defaults, or as changed in the doctor's advanced settings (kept in the app's
+    /// preferences; the findings are worked out here, from what the service records).
+    var thresholds: HealthThresholds = CameraDoctor.keptThresholds() {
+        didSet {
+            guard thresholds != oldValue else { return }
+            UserDefaults.standard.set(try? JSONEncoder().encode(thresholds), forKey: "doctorThresholds")
+            diagnose()
+        }
+    }
+    @ObservationIgnored private var config: Config?
+
+    static func keptThresholds() -> HealthThresholds {
+        UserDefaults.standard.data(forKey: "doctorThresholds").flatMap { try? JSONDecoder().decode(HealthThresholds.self, from: $0) } ?? .standard
+    }
+
+    /// Each camera's last check (Run Check Now): what it found, and when.
+    private(set) var checks: [String: (lines: [CheckLine], time: Date)] = [:]
+    /// Being checked now.
+    private(set) var checking: Set<String> = []
 
     /// "camera|finding", ignored.
     private(set) var ignored: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "doctorIgnored") ?? [])
@@ -41,16 +62,53 @@ final class CameraDoctor {
         let (incidents, samples) = await Task.detached(priority: .utility) {
             (store.incidents(since: incidentsSince), store.samples(since: samplesSince))
         }.value
+        self.incidents = incidents
+        self.samples = samples
+        self.config = config
+        diagnose(now: now)
+        hasRecords = !incidents.isEmpty || !samples.isEmpty
+        refreshed = now
+    }
+
+    /// The findings worked out again from what was read (on reading, or when the thresholds change).
+    private func diagnose(now: Date = Date()) {
+        guard let config else { return }
         var findings: [String: [HealthFinding]] = [:]
         for camera in config.cameras {
             findings[camera.id] = HealthDiagnosis.findings(camera: camera.id, incidents: incidents, samples: samples, now: now,
+                                                           thresholds: thresholds,
                                                            app: camera.device?.appName ?? "the camera\u{2019}s own app")
         }
-        self.incidents = incidents
-        self.samples = samples
         self.findings = findings
-        hasRecords = !incidents.isEmpty || !samples.isEmpty
-        refreshed = now
+    }
+
+    /// Checks a camera now, only when asked: its streams and 6 s of its video (as Settings › Cameras' check, through
+    /// pond), then a read of its controls through the service, timed. Not a private or waking camera: there's
+    /// nothing to see, and it can't be asked.
+    func check(_ camera: Config.Camera, model: AppModel) async {
+        guard !checking.contains(camera.id) else { return }
+        if model.isAsleep(camera.id) {
+            checks[camera.id] = ([CheckLine(.warning, model.isWaking(camera.id)
+                ? "It\u{2019}s waking up from privacy mode: check again once its video is back."
+                : "It\u{2019}s private: turn privacy off to check it.")], Date())
+            return
+        }
+        checking.insert(camera.id)
+        defer { checking.remove(camera.id) }
+        var lines = await model.check(camera, seconds: 6).lines
+        if model.controls(for: camera) != nil {
+            let started = Date()
+            let reply = await model.controlClient.ask(.init(camera: camera.id, action: "items.values"))
+            let took = Date().timeIntervalSince(started)
+            if let error = reply.error {
+                lines.append(CheckLine(.error, "Its controls didn\u{2019}t answer: \(error.description)."))
+            } else {
+                let seconds = took.formatted(.number.precision(.fractionLength(1)))
+                lines.append(took > 3 ? CheckLine(.warning, "Its controls answered, slowly: \(seconds) s.")
+                                      : CheckLine(.ok, "Its controls answered in \(seconds) s."))
+            }
+        }
+        checks[camera.id] = (lines, Date())
     }
 
     func isIgnored(_ camera: String, _ finding: HealthFinding) -> Bool { ignored.contains("\(camera)|\(finding.id)") }

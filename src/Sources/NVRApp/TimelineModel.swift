@@ -391,9 +391,12 @@ final class TimelineModel {
             return
         }
         let all = (spans[camera] ?? []).filter { $0.seconds > 0 }
-        // Into what is being recorded (not playable yet): the last frame there is, straight away.
+        // Into what is being recorded (not playable yet): the last frame there is, straight away, paused there
+        // (live is only ever chosen), as at the end of the recording.
         if let now = recordingNow(of: camera), now.contains(time), let last = all.last {
             await seek(to: last.end.addingTimeInterval(-0.1))
+            pause()
+            atEnd = true
             return
         }
         guard let first = all.firstIndex(where: { $0.end > time }) else {

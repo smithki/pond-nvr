@@ -86,6 +86,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 
 - [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
 - [docs/controls.md](docs/controls.md): camera controls, and how each goes through the best way Pond has for a camera.
+- [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.

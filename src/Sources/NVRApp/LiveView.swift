@@ -665,6 +665,13 @@ struct RailThumbnail: View {
         openSettingsWindow()
     }
 
+    /// Settings → Doctor, at this camera.
+    func openDoctor() {
+        model.settingsTab = .doctor
+        model.doctorCamera = camera.id
+        openSettingsWindow()
+    }
+
     /// The camera as the snapshot shows it: on the stage, or about to be.
     var shownOnStage: Bool { provisional ?? onStage }
 
@@ -694,6 +701,22 @@ struct RailThumbnail: View {
             .overlay(alignment: .bottomLeading) {
                 if health.showsBadge {
                     HealthBadge(health: health, compact: true).padding(6)
+                }
+            }
+            // The doctor's mark, as on its tile (a problem, or a warning with a fix; not ignored): opens the doctor.
+            .overlay(alignment: .bottomTrailing) {
+                if let finding = model.doctor.mark(camera.id) {
+                    Button(action: openDoctor) {
+                        Image(systemName: "stethoscope")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(finding.severity == .problem ? .red : .orange)
+                            .frame(width: 22, height: 22)
+                            .glassEffect(.regular, in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(finding.headline): \(finding.evidence). Click for the doctor.")
+                    .padding(6)
+                    .transition(.opacity)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -756,6 +779,7 @@ struct RailThumbnail: View {
                 .disabled(onStage && !canRemove)
             Divider()
             Button("Camera Settings…", systemImage: "gearshape", action: openCameraSettings)
+            Button("Doctor…", systemImage: "stethoscope", action: openDoctor)
         }
         .help(onStage ? (canRemove ? "\(camera.name): click to take off the screen" : "\(camera.name): at least one camera stays on the screen")
                       : "\(camera.name): click to add to the screen")

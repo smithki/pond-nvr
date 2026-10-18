@@ -24,8 +24,11 @@ struct DoctorView: View {
                     ForEach(cameras) { Text($0.name).tag(String?.some($0.id)) }
                 }
             } footer: {
-                Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras.")
-                    .foregroundStyle(.secondary)
+                // Said once, on the overview: a camera's page keeps its room for the camera.
+                if model.doctorCamera == nil {
+                    Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras unless you run a check.")
+                        .foregroundStyle(.secondary)
+                }
             }
             if !doctor.hasRecords {
                 Section {
@@ -49,6 +52,13 @@ struct DoctorView: View {
     // MARK: All cameras
 
     var overview: some View {
+        Group {
+            camerasSection
+            ThresholdsSection()
+        }
+    }
+
+    var camerasSection: some View {
         Section("Cameras") {
             ForEach(cameras) { camera in
                 Button { model.doctorCamera = camera.id } label: {
@@ -75,16 +85,38 @@ struct DoctorView: View {
     @ViewBuilder
     func cameraSections(_ camera: Config.Camera) -> some View {
         let found = doctor.findings[camera.id] ?? []
-        Section("Findings") {
+        Section {
             if found.isEmpty {
                 Label("No problems in the last hour", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
             }
             ForEach(found) { finding in FindingRow(camera: camera, finding: finding) }
+        } header: {
+            HStack {
+                Text("Findings")
+                Spacer()
+                // Only when asked: the doctor otherwise asks nothing of the camera.
+                Button {
+                    Task { await doctor.check(camera, model: model) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if doctor.checking.contains(camera.id) { ProgressView().controlSize(.mini) }
+                        Text(doctor.checking.contains(camera.id) ? "Checking\u{2026}" : "Run Check Now")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(doctor.checking.contains(camera.id))
+                .help("Watch \(camera.name)\u{2019}s video for a few seconds and read its controls, now")
+            }
+        }
+        if let check = doctor.checks[camera.id] {
+            Section("Checked at " + check.time.formatted(date: .omitted, time: .shortened)) {
+                CheckLinesView(lines: check.lines)
+            }
         }
         Section("Last 24 hours") {
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
-                .frame(height: 110)
+                .frame(height: 90)
         }
         Section {
             IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
@@ -294,4 +326,51 @@ struct IncidentList: View {
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(date: .complete, time: .omitted)
     }
+}
+
+/// When the doctor speaks up, as an advanced setting: each rule's figure, changed here for every camera (until
+/// then, the defaults). Folded away; the figures a finding shows say what it saw against them.
+struct ThresholdsSection: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("doctorThresholdsShown") private var shown = false
+
+    var body: some View {
+        @Bindable var doctor = model.doctor
+        Section {
+            DisclosureGroup("Thresholds", isExpanded: $shown) {
+                Stepper(value: $doctor.thresholds.stallsPerHour, in: 1 ... 30) {
+                    LabeledContent("Video keeps stopping", value: "\(doctor.thresholds.stallsPerHour) times an hour")
+                }
+                Stepper(value: $doctor.thresholds.unreachablePerHour, in: 1 ... 30) {
+                    LabeledContent("Drops off the network", value: "\(doctor.thresholds.unreachablePerHour) times an hour")
+                }
+                Stepper(value: $doctor.thresholds.lossRate, in: 0.005 ... 0.1, step: 0.005) {
+                    LabeledContent("Losing packets", value: "over " + doctor.thresholds.lossRate.formatted(.percent.precision(.fractionLength(0 ... 1))))
+                }
+                Stepper(value: $doctor.thresholds.keyframeSeconds, in: 1 ... 20, step: 0.5) {
+                    LabeledContent("Keyframes far apart", value: "over \(Self.number(doctor.thresholds.keyframeSeconds)) s")
+                }
+                Stepper(value: $doctor.thresholds.clockSeconds, in: 5 ... 600, step: 5) {
+                    LabeledContent("Its clock is off", value: "by over \(Self.number(doctor.thresholds.clockSeconds)) s")
+                }
+                Stepper(value: $doctor.thresholds.controlFailureRate, in: 0.05 ... 1, step: 0.05) {
+                    LabeledContent("Controls failing", value: doctor.thresholds.controlFailureRate.formatted(.percent.precision(.fractionLength(0)))
+                                   + " of at least \(doctor.thresholds.controlsAtLeast)")
+                }
+                Stepper(value: $doctor.thresholds.privateHours, in: 1 ... 168) {
+                    LabeledContent("Private for long", value: "over \(Self.number(doctor.thresholds.privateHours)) h")
+                }
+                HStack {
+                    Spacer()
+                    Button("Restore Defaults") { doctor.thresholds = .standard }
+                        .disabled(doctor.thresholds == .standard)
+                }
+            }
+        } footer: {
+            Text("When a finding is made, for every camera. The defaults suit most cameras; to keep one camera\u{2019}s finding off its tile, Ignore it instead.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    static func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0 ... 1))) }
 }
