@@ -8,9 +8,11 @@ import SwiftUI
 
 // MARK: - General pieces
 
-/// A group in the dock: a small heading over its controls.
+/// A group in the dock: a small heading over its controls. `waiting`: what it's set to waits for the camera to be
+/// back from its privacy mode (a clock beside the heading says so).
 struct ControlSection<Content: View>: View {
     let title: String
+    var waiting = false
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -19,9 +21,44 @@ struct ControlSection<Content: View>: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+                // Beside it, taking no room: the dock's widths (measured) stay as they are.
+                .overlay(alignment: .trailing) {
+                    if waiting { WaitingMark().fixedSize().alignmentGuide(.trailing) { $0[.leading] - 4 } }
+                }
             content
         }
     }
+}
+
+/// A setting that waits for the camera to be back from its privacy mode.
+struct WaitingMark: View {
+    var body: some View {
+        Image(systemName: "clock")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tint)
+            .help("Set once the camera is back from privacy mode")
+            .transition(.scale.combined(with: .opacity))
+    }
+}
+
+/// Off while the camera is private or waking (it can't be moved, talked through or seen), saying why on hover
+/// (over it, since a disabled control shows no tooltip of its own).
+struct OffWhileAsleep: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let camera: String
+
+    func body(content: Content) -> some View {
+        let asleep = model.isAsleep(camera)
+        content
+            .disabled(asleep)
+            .overlay {
+                if asleep { Color.clear.contentShape(.rect).help(model.asleepReason(camera)) }
+            }
+    }
+}
+
+extension View {
+    func offWhileAsleep(_ camera: String) -> some View { modifier(OffWhileAsleep(camera: camera)) }
 }
 
 /// A group of adjustments' heading: its icon and name, a step above a control's name (which is small capitals).
@@ -1057,12 +1094,18 @@ struct LiveControlsDock: View {
         }
         .animation(.easeOut(duration: 0.2), value: model.controlError[camera.id])
         .animation(.easeOut(duration: 0.2), value: model.savedPicture?.file)
-        .task(id: camera.id) {
+        // Again once it's back from privacy (while it's away, the camera may not answer).
+        .task(id: "\(camera.id) \(model.isAsleep(camera.id))") {
             if (controls.ptz?.presets ?? 0) > 0 {
-                // Their pictures from disk at once, then the camera's list.
+                // Their pictures from disk at once, then the camera's list (as kept, while it's asleep).
                 model.loadPresetPictures(camera.id, AppModel.keptPresets(camera.id))
-                await model.loadPresets(camera.id)
+                if model.isAsleep(camera.id) {
+                    if model.presets[camera.id] == nil { model.presets[camera.id] = AppModel.keptPresets(camera.id) }
+                } else {
+                    await model.loadPresets(camera.id)
+                }
             }
+            // (While it's dark, the service answers with what waits to be set.)
             if !controls.items.isEmpty { await model.loadItemValues(camera.id) }
         }
         // Arrow keys move it while the dock has the keyboard.
@@ -1257,7 +1300,7 @@ struct DockContents: View {
                     ControlSection(title: "Positions") { positionsMenu(iconOnly: narrow, measuring: measuring) }
                     talk
                     if let volume = item("speakerVolume") {
-                        ControlSection(title: volume.title) { SliderItem(camera: camera, item: volume, compact: true, sliderWidth: narrow ? 104 : 120) }
+                        ControlSection(title: volume.title, waiting: model.isPending(camera.id, volume.id)) { SliderItem(camera: camera, item: volume, compact: true, sliderWidth: narrow ? 104 : 120) }
                     }
                     moveActions
                 }
@@ -1294,7 +1337,7 @@ struct DockContents: View {
             HStack(alignment: .top, spacing: 18) {
                 talk
                 if let volume = item("speakerVolume") {
-                    ControlSection(title: volume.title) { SliderItem(camera: camera, item: volume, compact: true) }
+                    ControlSection(title: volume.title, waiting: model.isPending(camera.id, volume.id)) { SliderItem(camera: camera, item: volume, compact: true) }
                 }
             }
         }
@@ -1305,7 +1348,7 @@ struct DockContents: View {
         if controls.talk != nil {
             ControlSection(title: "Talk") {
                 // (The dock shows what went wrong itself.)
-                TalkButton(camera: camera, showsErrors: false).frame(height: 38)
+                TalkButton(camera: camera, showsErrors: false).frame(height: 38).offWhileAsleep(camera.id)
             }
         }
     }
@@ -1314,6 +1357,7 @@ struct DockContents: View {
     @ViewBuilder var pad: some View {
         if let ptz = controls.ptz, ptz.panTilt {
             DirectionPad(size: 124) { v in mover.set(PTZVelocity(pan: v.dx, tilt: v.dy), camera: camera.id, model: model) }
+                .offWhileAsleep(camera.id)
         } else {
             Color.clear.frame(width: 1, height: 124)
         }
@@ -1330,6 +1374,7 @@ struct DockContents: View {
                                began: { mover.set(PTZVelocity(zoom: 0.6), camera: camera.id, model: model) },
                                ended: { mover.set(PTZVelocity(), camera: camera.id, model: model) })
                 }
+                .offWhileAsleep(camera.id)
             }
         }
     }
@@ -1345,6 +1390,7 @@ struct DockContents: View {
                             add: { newName = ""; naming = true },
                             naming: $naming, namer: AnyView(namer))
                     .frame(maxWidth: width, alignment: .leading)
+                    .offWhileAsleep(camera.id)
             }
         }
     }
@@ -1373,7 +1419,7 @@ struct DockContents: View {
             .fixedSize()
             .help("Positions")
             // (Its unseen copies, measured, without the namer.)
-            if measuring { menu } else { menu.popover(isPresented: $naming, arrowEdge: .top) { namer } }
+            if measuring { menu } else { menu.popover(isPresented: $naming, arrowEdge: .top) { namer }.offWhileAsleep(camera.id) }
         }
     }
 
@@ -1407,8 +1453,8 @@ struct DockContents: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.roundedRectangle(radius: 12))
             .help("Save a picture of what \(camera.name) shows now (to Pictures › Pond)")
-            // Private: there's no picture to save.
-            .disabled(model.isPrivate(camera.id))
+            // Private (or not back yet): there's no picture to save.
+            .offWhileAsleep(camera.id)
         }
     }
 
@@ -1717,7 +1763,7 @@ struct ItemView: View {
     var value: Config.Controls.Value? { model.itemValues[camera.id]?[item.id] }
 
     var body: some View {
-        ControlSection(title: item.title) {
+        ControlSection(title: item.title, waiting: model.isPending(camera.id, item.id)) {
             switch item.kind {
             case let .choice(choices):
                 IconChoice(options: choices.map { .init(value: $0.value, title: $0.title, systemImage: $0.symbol) },
@@ -1739,6 +1785,8 @@ struct ItemView: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.roundedRectangle(radius: 12))
                 .help(item.title)
+                // Done now or not at all: not while it's private or waking.
+                .offWhileAsleep(camera.id)
                 .confirmationDialog(confirm ?? "", isPresented: $confirming) {
                     Button(item.title) { Task { await model.doItem(camera.id, item.id) } }
                     Button("Cancel", role: .cancel) {}
@@ -1763,6 +1811,9 @@ struct SliderItem: View {
     var stacked = false
     @State private var dragging: Double?
 
+    /// Its setting waits for the camera to be back from privacy mode (compact, its section's heading says so).
+    var waiting: Bool { model.isPending(camera.id, item.id) }
+
     var body: some View {
         if case let .slider(min, max, step) = item.kind {
             let stored: Double = { if case let .number(n)? = model.itemValues[camera.id]?[item.id] { n } else { (min + max) / 2 } }()
@@ -1782,6 +1833,7 @@ struct SliderItem: View {
                     HStack(spacing: 8) {
                         Image(systemName: item.symbol).font(.callout).foregroundStyle(.secondary).frame(width: 18)
                         Text(item.title).font(.callout)
+                        if waiting { WaitingMark() }
                         Spacer(minLength: 8)
                         Text("\(Int(shown.rounded()))").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                     }
@@ -1793,6 +1845,7 @@ struct SliderItem: View {
                 if !compact {
                     Image(systemName: item.symbol).font(.callout).foregroundStyle(.secondary).frame(width: 18)
                     Text(item.title).font(.callout).frame(width: 74, alignment: .leading)
+                        .overlay(alignment: .topTrailing) { if waiting { WaitingMark() } }
                 } else {
                     Image(systemName: item.symbol).font(.callout).foregroundStyle(.secondary)
                 }

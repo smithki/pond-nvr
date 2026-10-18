@@ -53,11 +53,18 @@ public enum ControlSocket {
         public var sampleRate: Double?
         /// The cameras made private in Pond.
         public var privateCameras: [String]?
+        /// Those starting their video again after their own privacy mode (with "privacy.set").
+        public var wakingCameras: [String]?
+        /// The setting ("item.set") waits until the camera can be told: it's dark (its own privacy mode) or waking.
+        public var queued: Bool?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
-                    values: [String: Config.Controls.Value]? = nil, sampleRate: Double? = nil, privateCameras: [String]? = nil) {
+                    values: [String: Config.Controls.Value]? = nil, sampleRate: Double? = nil, privateCameras: [String]? = nil,
+                    wakingCameras: [String]? = nil, queued: Bool? = nil) {
             self.privateCameras = privateCameras
+            self.wakingCameras = wakingCameras
+            self.queued = queued
             self.error = error
             self.controls = controls
             self.presets = presets
@@ -169,10 +176,26 @@ public final class ControlServer: @unchecked Sendable {
 
     /// Which cameras are private (Pond's own privacy, which "privacy.set" changes).
     let privacy: PrivacyState
+    /// Whose own privacy mode is on (they're dark), and how long they take to wake.
+    let sync: CameraPrivacySync?
+    /// Settings that waited, being set now (one taken off as it's set, or as it's set anew directly).
+    private var setting: [String: [String: Config.Controls.Value]] = [:]
+    /// Tries at setting what waited, for each camera, since it last all went.
+    private var settingTries: [String: Int] = [:]
+    private var awakeObserver: UUID?
 
-    public init(path: String, privacy: PrivacyState = .shared, lookup: @escaping Lookup, log: @escaping @Sendable (String) -> Void) {
+    /// After its video is back, how long a camera is left to settle before what waited is set; and between each.
+    static let settleTime: Duration = .seconds(3)
+    static let spacing: Duration = .milliseconds(600)
+    /// What it couldn't take yet is tried again this much later, this many times, until its video next returns.
+    static let retryTime: Duration = .seconds(30)
+    static let tries = 3
+
+    public init(path: String, privacy: PrivacyState = .shared, sync: CameraPrivacySync? = nil, lookup: @escaping Lookup,
+                log: @escaping @Sendable (String) -> Void) {
         self.path = path
         self.privacy = privacy
+        self.sync = sync
         self.lookup = lookup
         self.log = log
     }
@@ -195,6 +218,8 @@ public final class ControlServer: @unchecked Sendable {
             return false
         }
         lock.withLock { listener = fd }
+        // A camera's video back (the recorder has it): what waited for it is set.
+        awakeObserver = privacy.observeAwake { [weak self] camera in self?.setWhatWaited(camera, fresh: true) }
         let thread = Thread { [self] in accept(on: fd) }
         thread.name = "controls"
         thread.start()
@@ -202,6 +227,7 @@ public final class ControlServer: @unchecked Sendable {
     }
 
     public func stop() {
+        if let awakeObserver { privacy.forget(awakeObserver) }
         let fd = lock.withLock { () -> Int32 in
             defer { listener = -1 }
             return listener
@@ -252,6 +278,15 @@ public final class ControlServer: @unchecked Sendable {
                 _ = try? client.send(ControlSocket.line(ControlSocket.Reply(error: .failed("no camera \(request.camera)"))))
                 continue
             }
+            // Private, dark or waking: what it can't do now is turned down, and its settings wait.
+            if let reply = whileAsleep(request) {
+                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
+                continue
+            }
+            if request.action == "item.set", let item = request.item {
+                // Set anew: not to what it waited to be set to.
+                _ = lock.withLock { setting[request.camera]?.removeValue(forKey: item) }
+            }
             if request.action == "talk" {
                 talk(controls, camera: request.camera, client: client, reader: &reader)
                 return
@@ -268,11 +303,102 @@ public final class ControlServer: @unchecked Sendable {
         }
     }
 
+    /// What can't be done to a camera now: while private, using it (moving it, talking through it, its actions;
+    /// what it shows can't be seen); while dark (its own privacy mode on) or waking, reaching it at all, so its
+    /// settings wait to be set (PrivacyState's pending) and are read as they'll be. Nil: ask it.
+    func whileAsleep(_ request: ControlSocket.Request) -> ControlSocket.Reply? {
+        let camera = request.camera
+        let waking = privacy.isWaking(camera)
+        let unreachable = waking || (privacy.isPrivate(camera) && sync?.isDark(camera) == true)
+        let why = ControlFailure.failed(waking ? "it\u{2019}s still waking up from privacy mode" : "it\u{2019}s private")
+        switch request.action {
+        case "ptz.move", "ptz.goto", "ptz.save", "ptz.remove", "item.do", "talk":
+            return privacy.isPrivate(camera) || waking ? ControlSocket.Reply(error: why) : nil
+        case "ptz.stop":
+            return unreachable ? ControlSocket.Reply() : nil
+        case "ptz.presets", "controls":
+            return unreachable ? ControlSocket.Reply(error: why) : nil
+        case "item.set":
+            guard unreachable, let item = request.item, let value = request.value else { return nil }
+            privacy.queue(camera, item: item, value)
+            log("· \(camera): \(item) to be set once it\u{2019}s back from privacy mode")
+            return ControlSocket.Reply(queued: true)
+        case "items.values":
+            return unreachable ? ControlSocket.Reply(values: privacy.pendingSettings(camera)) : nil
+        case "item.get":
+            guard unreachable else { return nil }
+            guard let value = request.item.flatMap({ privacy.pendingSettings(camera)[$0] }) else { return ControlSocket.Reply(error: why) }
+            return ControlSocket.Reply(value: value)
+        default:
+            return nil
+        }
+    }
+
+    /// What waited for the camera, set now it can be told: after it has settled, one at a time and spaced, so a
+    /// camera that has just started its video isn't flooded. What it can't take yet (no answer, too many logins)
+    /// waits, and is tried again a little later, a few times; what it refuses is let go.
+    func setWhatWaited(_ camera: String, fresh: Bool) {
+        let begin = lock.withLock { () -> Bool in
+            if fresh { settingTries[camera] = 0 }
+            // Already under way (it takes up what's queued meanwhile too).
+            guard setting[camera] == nil else { return false }
+            setting[camera] = [:]
+            return true
+        }
+        guard begin else { return }
+        Task.detached { [self] in
+            try? await Task.sleep(for: Self.settleTime)
+            await setWaiting(camera)
+            let again = lock.withLock { () -> Bool in
+                setting[camera] = nil
+                settingTries[camera, default: 0] += 1
+                return settingTries[camera, default: 0] < Self.tries
+            }
+            if again, !privacy.pendingSettings(camera).isEmpty {
+                try? await Task.sleep(for: Self.retryTime)
+                setWhatWaited(camera, fresh: false)
+            }
+        }
+    }
+
+    private func setWaiting(_ camera: String) async {
+        let asleep = { [self] in privacy.isWaking(camera) || (privacy.isPrivate(camera) && sync?.isDark(camera) == true) }
+        guard !asleep(), let controls = cameraControls(camera) else { return }
+        let waiting = privacy.takePending(camera)
+        guard !waiting.isEmpty else { return }
+        lock.withLock { setting[camera] = waiting }
+        var first = true
+        while let (item, value) = lock.withLock({ () -> (String, Config.Controls.Value)? in
+            guard let next = setting[camera]?.keys.sorted().first, let value = setting[camera]?.removeValue(forKey: next) else { return nil }
+            return (next, value)
+        }) {
+            if !first { try? await Task.sleep(for: Self.spacing) }
+            first = false
+            // Dark again: the rest wait for the next time.
+            if asleep() {
+                privacy.queue(camera, item: item, value)
+                continue
+            }
+            do throws(ControlFailure) {
+                try await controls.withItem(item) { c throws(ControlFailure) in try await c.set(value) }
+                log("· \(camera): \(item) set (it waited for privacy mode to end)")
+                HealthLog.shared.control(camera, ok: true, action: "item.set", detail: nil)
+            } catch .unreachable, .busy {
+                // Unless set anew meanwhile.
+                if privacy.pendingSettings(camera)[item] == nil { privacy.queue(camera, item: item, value) }
+            } catch {
+                log("! \(camera): \(item), which waited for privacy mode to end: \(error)")
+                HealthLog.shared.control(camera, ok: false, action: "item.set", detail: error.description)
+            }
+        }
+    }
+
     /// Pond's privacy for the camera, at once (the service stops recording and showing it); then the camera's
-    /// own privacy mode where its provider can switch it, without waiting for it.
+    /// own privacy mode where its provider can switch it, without waiting for it. Made public while dark, the
+    /// camera is waking for a while (its make's time).
     private func setPrivacy(_ request: ControlSocket.Request, on controls: CameraControls) -> ControlSocket.Reply {
         guard case let .on(on)? = request.value else { return ControlSocket.Reply(error: .failed("on or off?")) }
-        if privacy.set(request.camera, private: on) {
+        if privacy.set(request.camera, private: on, wakingFor: on ? nil : sync?.wakeTime(request.camera)) {
             log("· \(request.camera): \(on ? "private" : "no longer private")")
             HealthLog.shared.record(request.camera, on ? .madePrivate : .madePublic)
         }
@@ -286,7 +412,7 @@ public final class ControlServer: @unchecked Sendable {
                 log("! \(camera): the camera's own privacy mode: \(error)")
             }
         }
-        return ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
+        return ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted(), wakingCameras: privacy.wakingCameras.sorted())
     }
 
     static func perform(_ request: ControlSocket.Request, on controls: CameraControls) async -> ControlSocket.Reply {

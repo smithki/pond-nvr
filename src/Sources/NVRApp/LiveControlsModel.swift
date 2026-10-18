@@ -89,14 +89,24 @@ extension AppModel {
         }
     }
 
-    /// Sets an item, shown at once and put back if the camera refuses.
+    /// Sets an item, shown at once and put back if the camera refuses. While it's back from privacy mode, the
+    /// service keeps it until it is (marked waiting meanwhile).
     func setItem(_ camera: String, _ item: String, _ value: Config.Controls.Value) async {
         let before = itemValues[camera]?[item]
         itemValues[camera, default: [:]][item] = value
-        if await control(camera, .init(camera: camera, action: "item.set", item: item, value: value)) == nil {
+        guard let reply = await control(camera, .init(camera: camera, action: "item.set", item: item, value: value)) else {
             itemValues[camera, default: [:]][item] = before
+            return
+        }
+        if reply.queued == true {
+            pendingSettings[camera, default: [:]][item] = value
+        } else {
+            pendingSettings[camera]?[item] = nil
         }
     }
+
+    /// Set to this once the camera is back from its privacy mode.
+    func isPending(_ camera: String, _ item: String) -> Bool { pendingSettings[camera]?[item] != nil }
 
     func doItem(_ camera: String, _ item: String) async {
         await control(camera, .init(camera: camera, action: "item.do", item: item))
@@ -108,6 +118,17 @@ extension AppModel {
 
     /// Private in Pond, or on the camera itself.
     func isPrivate(_ camera: String) -> Bool { privateCameras.contains(camera) || privateOnCamera.contains(camera) }
+
+    /// Made public after its own privacy mode, and not sending video yet.
+    func isWaking(_ camera: String) -> Bool { wakingCameras.contains(camera) }
+
+    /// Can't be used just now (moved, talked through, its actions): private, or waking.
+    func isAsleep(_ camera: String) -> Bool { isPrivate(camera) || isWaking(camera) }
+
+    /// Why a control is off while it's asleep.
+    func asleepReason(_ camera: String) -> String {
+        isWaking(camera) ? "Not until it\u{2019}s back from privacy mode" : "Not while it\u{2019}s private"
+    }
 
     /// Private on the camera itself only (Pond can't turn that off).
     func isPrivateOnCameraOnly(_ camera: String) -> Bool { privateOnCamera.contains(camera) && !privateCameras.contains(camera) }
@@ -123,17 +144,37 @@ extension AppModel {
                 privateOnCamera = onCamera
             }
         }
+        let waking = state.wakingCameras, pending = state.allPending
+        if waking != wakingCameras { withAnimation(.snappy(duration: 0.3)) { wakingCameras = waking } }
+        if pending != pendingSettings {
+            // What was set meanwhile is read from the camera again.
+            for (camera, items) in pendingSettings where items.keys.contains(where: { pending[camera]?[$0] == nil }) {
+                Task { await loadItemValues(camera) }
+            }
+            pendingSettings = pending
+        }
     }
 
     /// Makes a camera private or not: shown at once; through the service, which applies it (and has the camera
     /// follow, where it can), or kept for it to apply when it starts.
     func setPrivacy(_ camera: String, _ on: Bool) async {
         privacyChanged = Date()
+        // Not talking through a camera made private.
+        if on, let talking, talking.camera == camera {
+            talking.stop()
+            self.talking = nil
+            talkLevel = 0
+        }
         withAnimation(.snappy(duration: 0.3)) {
             if on { privateCameras.insert(camera) } else { privateCameras.remove(camera) }
         }
         if controlClient.isAvailable {
-            if await control(camera, .init(camera: camera, action: "privacy.set", value: .on(on))) == nil { refreshPrivacy() }
+            if let reply = await control(camera, .init(camera: camera, action: "privacy.set", value: .on(on))) {
+                // Waking at once (not when the file's next read): its first failures to connect aren't shown.
+                withAnimation(.snappy(duration: 0.3)) { wakingCameras = Set(reply.wakingCameras ?? []) }
+            } else {
+                refreshPrivacy()
+            }
         } else {
             PrivacyState(path: privacyPath).set(camera, private: on)
         }

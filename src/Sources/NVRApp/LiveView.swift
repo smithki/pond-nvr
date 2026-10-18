@@ -1144,6 +1144,8 @@ enum TileStatus: Hashable {
     case failed(String)
     /// Made private in Pond: not shown (nor recorded).
     case keptPrivate
+    /// Made public after its own privacy mode: starting its video again (it may fail to connect meanwhile).
+    case waking
 }
 
 /// Each tile's status, collected by the stage.
@@ -1253,6 +1255,7 @@ struct CameraTile: View {
         if let frozen { return frozen }
         if model.isPrivate(camera.id) { return .keptPrivate }
         if noPassword { return .noPassword }
+        if model.isWaking(camera.id), stream?.state != .playing { return .waking }
         switch stream?.state {
         case .playing?: return .playing
         case .noPicture?: return .noPicture
@@ -1396,6 +1399,7 @@ struct CameraTile: View {
         .onHover { pointerInside = $0 }
         .preference(key: TileStatuses.self, value: frozen == nil ? [camera.id: status] : [:])
         .onChange(of: audible) { _, heard in stream?.muted = !heard }
+        .onChange(of: model.isWaking(camera.id)) { _, waking in stream?.retriesSoon = waking }
         .onDisappear { stopStreams() }
         .task(id: "\(camera.id) \(camera.main) \(camera.sub) \(camera.username) \(mainStream) \(model.isPrivate(camera.id))") {
             guard frozen == nil else { return }
@@ -1519,7 +1523,7 @@ struct CameraTile: View {
                 .transition(.opacity)
             }
             // Talking through its speaker: on hover, and while talking (lit, with the voice's level).
-            if model.controls(for: camera)?.talk != nil, frozen == nil, hovering || talking {
+            if model.controls(for: camera)?.talk != nil, frozen == nil, hovering || talking, !model.isAsleep(camera.id) {
                 TalkButton(camera: camera, compact: compact)
                     .transition(.opacity)
             }
@@ -1549,6 +1553,18 @@ struct CameraTile: View {
             .environment(\.colorScheme, .dark)
         case .playing:
             EmptyView()
+        case .waking:
+            VStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                if !compact {
+                    Text("Waking up\u{2026}").font(.callout).foregroundStyle(.secondary)
+                    Text("Its privacy mode is off; the camera is starting its video again.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .environment(\.colorScheme, .dark)
         case .keptPrivate:
             if model.isPrivateOnCameraOnly(camera.id) {
                 // Its own privacy mode: Pond can't turn it off.
@@ -1591,6 +1607,7 @@ struct CameraTile: View {
         }
         noPassword = false
         let s = LiveStream(url: mainStream ? camera.main : camera.sub, relay: model.streamRelay)
+        s.retriesSoon = model.isWaking(camera.id)
         s.muted = !audible
         // This camera's other stream (main or sub), already playing, stays the picture until this one plays. Only
         // this camera's: a tile can be given another camera, whose picture must not stand in for this one.

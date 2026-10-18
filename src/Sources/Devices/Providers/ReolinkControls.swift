@@ -301,7 +301,62 @@ final class ReolinkISPSwitch: ItemControl {
     }
 }
 
+/// Its privacy mode, through Reolink's own protocol (the HTTP API has none): set, and read as last pushed.
+final class BaichuanPrivacy: PrivacyControl {
+    /// Private, a Reolink camera closes its video stream (it answers 404) and its HTTP API; turned off, both are
+    /// back in about 10 s (an E1 Pro). Waited for up to this long, less when its video comes sooner.
+    static let wakeTime: TimeInterval = 45
+
+    let session: BaichuanSession
+    var wakeTime: TimeInterval { Self.wakeTime }
+
+    init(session: BaichuanSession) { self.session = session }
+
+    func isOn() async throws(ControlFailure) -> Bool {
+        if let known = session.privacyMode { return known }
+        do throws(BaichuanClient.Failure) { return try session.readPrivacyMode() } catch { throw error.control }
+    }
+
+    func set(_ on: Bool) async throws(ControlFailure) {
+        do throws(BaichuanClient.Failure) { _ = try session.setPrivacyMode(on) } catch { throw error.control }
+    }
+}
+
+extension BaichuanClient.Failure {
+    var control: ControlFailure {
+        switch self {
+        case .unreachable: .unreachable
+        case .loginRefused: .loginRefused
+        case let .status(code): .failed("the camera answered \(code)")
+        case let .unexpected(what): .failed(what)
+        }
+    }
+}
+
+extension BaichuanSession {
+    /// Connected, or turned down, or given up on after `seconds`: what it came to.
+    func settled(within seconds: Double) async -> State {
+        let until = Date().addingTimeInterval(seconds)
+        while Date() < until {
+            let now = state
+            if now == .connected || now == .refused { return now }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return state
+    }
+}
+
 extension ReolinkProvider {
+    /// Its privacy mode, over Baichuan, if it answers there.
+    public func privacy(_ access: CameraAccess) async -> Offer<any PrivacyControl> {
+        let session = await CameraSessions.shared.baichuan(access)
+        switch await session.settled(within: 8) {
+        case .connected: return .yes(BaichuanPrivacy(session: session))
+        case .refused: return .no
+        default: return .unknown
+        }
+    }
+
     public func ptz(_ access: CameraAccess) async -> Offer<any PTZControl> {
         switch await CameraSessions.shared.reolinkAbility(access) {
         case let .yes(ability) where ability.has("ptzCtrl") || ability.has("supportPt") || ability.has("supportZoom"):

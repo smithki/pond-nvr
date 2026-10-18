@@ -51,6 +51,15 @@ Talking back, brightness, contrast, saturation and sharpness go over ONVIF, whic
 
 Pond keeps one login per camera and shares it between everything that asks, logging out when the service stops. The API is polled about once a second while the camera is in HomeKit. It is tried over HTTPS first: Reolink cameras use a certificate they made themselves, which Pond accepts for the camera's own address only. Older firmware answers only on plain HTTP, where the login crosses the network in clear; Pond falls back to it, so keep such cameras on a trusted network.
 
+## Reolink's own protocol (Baichuan)
+
+Besides RTSP and the HTTP API, Pond keeps one connection per camera on TCP port 9000 in the protocol Reolink's apps use, Baichuan (as Home Assistant's integration does; Pond's follows reolink_aio). Over it:
+
+- **Privacy mode, both ways.** Made private in Pond, the camera's own privacy mode turns on (it stops sending video and closes its HTTP API, as it does from the Reolink app); turned on or off in the Reolink app, Pond follows within a second. The HTTP API has no privacy-mode command.
+- **What it notices, pushed.** Motion, a person, vehicle or animal, and a doorbell's visitor arrive as they happen, rather than Pond asking the HTTP API every second. A camera that doesn't answer on 9000 is asked over HTTP as before.
+
+The connection logs in with the camera's password (hashed with the camera's nonce, then encrypted) and takes one of its logins. `pond camera baichuan ID` logs in and says what the camera is and whether it's private; `pond camera baichuan ID watch` prints what it pushes; `pond camera baichuan ID privacy-on|privacy-off` switches it.
+
 ## Quirks
 
 What Reolink's RTSP server does, all of which Pond copes with:
@@ -60,6 +69,7 @@ What Reolink's RTSP server does, all of which Pond copes with:
 - **Uneven timestamps**: steps between frames vary a lot; Pond keeps each frame's own time.
 - **The sub-stream's description** sometimes leaves out the codec parameters; Pond reads them from the video instead.
 - **Over ONVIF**, an E1 Pro answered everything but the stream-address request, which it never answered; Pond asks Reolink cameras through their own API, so this doesn't matter for adding them.
+- **Privacy mode closes the stream**: while private, an E1 Pro closes the RTSP connection and says it has no stream at the address (rather than sending nothing); Pond knows it's private from Baichuan, so this isn't counted as a problem. Its HTTP API is off too, so settings changed while it's private wait until it's back. Turned off, video returns in about 10 s; Pond waits up to 45 s (`BaichuanPrivacy.wakeTime`) before a failure to connect counts.
 - **Few logins**: a camera allows only a few API logins at once, and answers "max session" after; Reolink's apps and other software count too. Pond shows the control as busy and tries again; close other apps if it stays busy.
 - **The guard position**: with a guard position set and on (in the Reolink app's PTZ settings), a PTZ camera goes back to its guard position after a while unmoved (a minute by default), so it can look as if it moved on its own. Pond's positions are the camera's own presets and are left as they are.
 - **Volume over ONVIF** is fixed (an E1 Pro gives a range of 50 to 50); Pond sets it through the API instead.

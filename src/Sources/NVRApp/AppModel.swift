@@ -68,6 +68,10 @@ final class AppModel {
     /// Private on the camera itself (its own privacy mode, as the recorder sees it): shown as private, but Pond
     /// can't turn it off.
     var privateOnCamera: Set<String> = []
+    /// Starting their video again after their own privacy mode turned off (from privacy.json).
+    var wakingCameras: Set<String> = []
+    /// Settings waiting for a camera to be back from its privacy mode, each item's (from privacy.json).
+    var pendingSettings: [String: [String: Config.Controls.Value]] = [:]
     /// Just changed here: not read back from the file until then (the service may not have written it yet).
     @ObservationIgnored var privacyChanged = Date.distantPast
     /// The open dock's narrowest width (its narrowest arrangement, measured), for the window to decide whether

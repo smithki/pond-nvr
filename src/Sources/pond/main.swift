@@ -108,6 +108,14 @@ struct RecordingAndHomeKit: ServiceRunning {
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")
         }
+        // Reolink cameras' own privacy mode, in step with Pond's both ways (over their Baichuan connections).
+        let privacySync = CameraPrivacySync { line in log.log("pond", line) }
+        for camera in config.cameras where !camera.isVideoOnly
+            && CameraProviders.choices(for: camera.device).contains(where: { $0.id == "reolink" }) {
+            guard let password = passwords[camera.id] else { continue }
+            let access = CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main)
+            Task { privacySync.watch(camera.id, await CameraSessions.shared.baichuan(access)) }
+        }
         // The app's live views read the same camera connections, through a local socket.
         let cameras = config.cameras
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
@@ -117,7 +125,7 @@ struct RecordingAndHomeKit: ServiceRunning {
         }) { line in log.log("pond", line) }
         relay.start()
         // Their controls (PTZ, night mode, talking back) too, through the connections the service keeps.
-        let controls = ControlServer(path: ControlSocket.path(nextTo: statusPath), lookup: { id in
+        let controls = ControlServer(path: ControlSocket.path(nextTo: statusPath), sync: privacySync, lookup: { id in
             guard let camera = cameras.first(where: { $0.id == id }), let password = passwords[camera.id] else { return nil }
             return (CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main), camera.device)
         }) { line in log.log("pond", line) }
@@ -621,6 +629,21 @@ if args.count >= 3, args[0] == "camera", args[1] == "baichuan" {
         FileHandle.standardError.write(Data("✗ No such camera, or no password for it.\n".utf8))
         exit(1)
     }
+    // watch [S]: what the camera pushes (privacy, motion, a visitor), for S seconds (60).
+    if args.count > 3, args[3] == "watch" {
+        let seconds = args.count > 4 ? Double(args[4]) ?? 60 : 60
+        let session = BaichuanSession(host: camera.host, username: camera.username, password: password)
+        @Sendable func now() -> String { Date().formatted(date: .omitted, time: .standard) }
+        session.observe(BaichuanSession.Observer(
+            privacy: { print("\(now())  privacy mode \($0 ? "on" : "off")") },
+            motion: { print("\(now())  motion \($0 ? "started" : "stopped")") },
+            pressed: { print("\(now())  visitor (the button)") },
+            state: { print("\(now())  \($0)") }))
+        session.start()
+        Thread.sleep(forTimeInterval: seconds)
+        session.stop()
+        exit(0)
+    }
     let client = BaichuanClient(host: camera.host, username: camera.username, password: password)
     do throws(BaichuanClient.Failure) {
         // A process's first connections fail while macOS decides whether it may use the local network.
@@ -635,7 +658,9 @@ if args.count >= 3, args[0] == "camera", args[1] == "baichuan" {
             }
         }
         print("✓ logged in over Baichuan")
-        if args.count > 3, let command = UInt32(args[3]) {
+        if args.count > 3, ["privacy-on", "privacy-off"].contains(args[3]) {
+            print("privacy mode: \(try client.setPrivacyMode(args[3] == "privacy-on") ? "on" : "off")")
+        } else if args.count > 3, let command = UInt32(args[3]) {
             print(try client.ask(command: command, body: args.count > 4 ? args[4] : nil))
         } else {
             // (Without its secrets, so what's printed can be shared.)

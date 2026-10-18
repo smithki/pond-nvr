@@ -42,9 +42,15 @@ final class LiveStream {
     var muted = true {
         didSet { if muted != oldValue { audio.setMuted(muted) } }
     }
+    /// Tried again every second when it fails, not after a growing pause: the camera is coming back (waking from
+    /// its privacy mode), so it'll answer soon.
+    var retriesSoon = false {
+        didSet { soonFlag.set(retriesSoon) }
+    }
     let layer = AVSampleBufferDisplayLayer()
     private let audio = AudioOutput()
     private let stopFlag = StopFlag()
+    private let soonFlag = Flag()
     private var started = false
 
     let url: String
@@ -63,7 +69,8 @@ final class LiveStream {
         started = true
         audio.setMuted(muted)
         let reader = Reader(url: url, relay: relay,
-                            renderer: SendableRenderer(layer.sampleBufferRenderer), audio: audio, stop: stopFlag) { [weak self] event in
+                            renderer: SendableRenderer(layer.sampleBufferRenderer), audio: audio, stop: stopFlag,
+                            soon: soonFlag) { [weak self] event in
             Task { @MainActor in self?.apply(event) }
         }
         let thread = Thread { reader.run() }
@@ -91,6 +98,12 @@ final class StopFlag: Sendable {
     var stopped: Bool { flag.load(ordering: .relaxed) }
 }
 
+final class Flag: Sendable {
+    private let flag = Atomic<Bool>(false)
+    func set(_ on: Bool) { flag.store(on, ordering: .relaxed) }
+    var isOn: Bool { flag.load(ordering: .relaxed) }
+}
+
 /// The reader thread attaches the renderer to its own synchronizer and feeds it from there.
 struct SendableRenderer: @unchecked Sendable {
     let renderer: AVSampleBufferVideoRenderer
@@ -110,6 +123,7 @@ private struct Reader: Sendable {
     let renderer: SendableRenderer
     let audio: AudioOutput
     let stop: StopFlag
+    let soon: Flag
     let report: @Sendable (Event) -> Void
 
     /// Seconds without a frame before the picture counts as gone.
@@ -142,9 +156,9 @@ private struct Reader: Sendable {
             } catch {
                 report(.state(.failed(CameraCheck.plain(error, host: URLComponents(string: url)?.host ?? url).text)))
             }
-            if played { pause = 1 }
+            if played || soon.isOn { pause = 1 }
             wait(pause)
-            pause = min(pause * 2, 15)
+            pause = soon.isOn ? 1 : min(pause * 2, 15)
         }
     }
 

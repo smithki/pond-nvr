@@ -240,7 +240,7 @@ public struct ReolinkProvider: CameraProvider {
     }
 
     public func events(host: String, username: String, password: String) -> CameraEvents? {
-        ReolinkEvents(access: CameraAccess(host: host, username: username, password: password))
+        ReolinkPushedEvents(access: CameraAccess(host: host, username: username, password: password))
     }
 
     public func streams(host: String) -> (main: String, sub: String)? {
@@ -250,6 +250,53 @@ public struct ReolinkProvider: CameraProvider {
 
 /// Polls GetEvents once a second: motion while its motion alarm (or an AI detection: a person, vehicle or
 /// animal) is on; a visitor alarm going from off to on is a doorbell press.
+/// What the camera notices, pushed over its Baichuan connection as it happens (nothing asked each second); if
+/// it doesn't answer there, asked of its HTTP API instead (ReolinkEvents).
+final class ReolinkPushedEvents: CameraEvents, @unchecked Sendable {
+    let access: CameraAccess
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var observer: (session: BaichuanSession, id: UUID)?
+    private var polled: ReolinkEvents?
+
+    init(access: CameraAccess) { self.access = access }
+
+    func start(motion: @escaping @Sendable (Bool) -> Void, pressed: @escaping @Sendable () -> Void,
+               state: @escaping @Sendable (DoorbellButtonState) -> Void) {
+        let access = self.access
+        let t = Task { [weak self] in
+            let session = await CameraSessions.shared.baichuan(access)
+            guard !Task.isCancelled else { return }
+            if await session.settled(within: 15) == .connected {
+                let id = session.observe(BaichuanSession.Observer(motion: motion, pressed: pressed, state: { now in
+                    switch now {
+                    case .connected: state(.watching)
+                    case .refused: state(.loginRefused)
+                    case .unreachable, .connecting: state(.unreachable)
+                    }
+                }))
+                self?.lock.withLock { self?.observer = (session, id) }
+            } else {
+                // No Baichuan: asked of the HTTP API, each second.
+                let events = ReolinkEvents(access: access)
+                self?.lock.withLock { self?.polled = events }
+                events.start(motion: motion, pressed: pressed, state: state)
+            }
+        }
+        lock.withLock { task = t }
+    }
+
+    func stop() {
+        let (task, observer, polled) = lock.withLock { () -> (Task<Void, Never>?, (session: BaichuanSession, id: UUID)?, ReolinkEvents?) in
+            defer { self.task = nil; self.observer = nil; self.polled = nil }
+            return (self.task, self.observer, self.polled)
+        }
+        task?.cancel()
+        if let observer { observer.session.forget(observer.id) }
+        polled?.stop()
+    }
+}
+
 final class ReolinkEvents: CameraEvents, @unchecked Sendable {
     /// The camera's login is the one its controls use too (CameraSessions): it allows only a few.
     let access: CameraAccess

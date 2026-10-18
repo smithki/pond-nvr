@@ -136,8 +136,15 @@ extension ItemControl {
 /// The camera's own privacy mode: it stops sending video and sound itself (Pond's privacy, PrivacyState, works
 /// for every camera; this is the camera following it, where its provider can switch it).
 public protocol PrivacyControl: Sendable {
+    /// How long its video may take to come back once its privacy mode is off (0: it never stopped). The camera's
+    /// make's: some (Reolink's) close their stream while private and take seconds to start it again.
+    var wakeTime: TimeInterval { get }
     func isOn() async throws(ControlFailure) -> Bool
     func set(_ on: Bool) async throws(ControlFailure)
+}
+
+extension PrivacyControl {
+    public var wakeTime: TimeInterval { 0 }
 }
 
 // MARK: - Talking back

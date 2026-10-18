@@ -43,6 +43,8 @@ public final class BaichuanClient: @unchecked Sendable {
     private var transport: SocketTransport?
     private var buffer: [UInt8] = []
     private var counter: UInt32 = 0
+    /// Sends one at a time (a session's requests come from other threads than its reader).
+    private let sending = NSLock()
     private var aesKey: [UInt8]?
     /// What the login answered (its device information), as XML.
     public private(set) var loginReply: String?
@@ -54,6 +56,35 @@ public final class BaichuanClient: @unchecked Sendable {
     }
 
     deinit { transport?.close() }
+
+    public func close() {
+        transport?.close()
+        transport = nil
+    }
+
+    /// What has come (whole messages), waiting up to `timeout` for more if none has: for a session's reader.
+    func pump(timeout: Double) throws(Failure) -> [Reply] {
+        var out: [Reply] = []
+        while let reply = try takeMessage() { out.append(reply) }
+        guard out.isEmpty else { return out }
+        do {
+            buffer += try transport?.receive(timeout: timeout) ?? []
+        } catch {
+            throw .unreachable("\(error)")
+        }
+        while let reply = try takeMessage() { out.append(reply) }
+        return out
+    }
+
+    /// The extension naming a channel, as a command to one carries it.
+    static func channelExtension(_ channel: Int) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <Extension version="1.1">
+        <channelId>\(channel)</channelId>
+        </Extension>
+        """
+    }
 
     // MARK: Logging in
 
@@ -99,15 +130,25 @@ public final class BaichuanClient: @unchecked Sendable {
         return sleep == "1"
     }
 
+    /// Its privacy mode set (Baichuan 575), then read back (574): what it now is.
+    @discardableResult
+    public func setPrivacyMode(_ on: Bool, channel: Int = 0, timeout: Double = 8) throws(Failure) -> Bool {
+        let body = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <body>
+        <sleepState version="1.1">
+        <operate>2</operate>
+        <sleep>\(on ? 1 : 0)</sleep>
+        </sleepState>
+        </body>
+        """
+        _ = try ask(command: 575, channel: channel, body: body, timeout: timeout)
+        return try privacyMode(channel: channel, timeout: timeout)
+    }
+
     /// One command to a channel of the camera, its reply's XML.
     public func ask(command: UInt32, channel: Int = 0, body: String?, timeout: Double = 5) throws(Failure) -> String {
-        let extensionXML = """
-        <?xml version="1.0" encoding="UTF-8" ?>
-        <Extension version="1.1">
-        <channelId>\(channel)</channelId>
-        </Extension>
-        """
-        try send(command: command, channel: UInt8(channel + 1), legacy: false, body: body, extension: extensionXML, aes: true)
+        try send(command: command, channel: UInt8(channel + 1), legacy: false, body: body, extension: Self.channelExtension(channel), aes: true)
         let reply = try receive(command: command, timeout: timeout)
         guard reply.status == 200 else { throw .status(reply.status) }
         return reply.xml
@@ -115,8 +156,10 @@ public final class BaichuanClient: @unchecked Sendable {
 
     // MARK: Messages
 
-    private func send(command: UInt32, channel: UInt8, legacy: Bool, body: String?, extension ext: String = "",
-                      aes: Bool = false) throws(Failure) {
+    func send(command: UInt32, channel: UInt8, legacy: Bool, body: String?, extension ext: String = "",
+              aes: Bool = false) throws(Failure) {
+        sending.lock()
+        defer { sending.unlock() }
         let extBytes = encrypt(Array(ext.utf8), channel: channel, aes: aes)
         let bodyBytes = encrypt(Array((body ?? "").utf8), channel: channel, aes: aes)
         var header = Self.magic
@@ -160,7 +203,7 @@ public final class BaichuanClient: @unchecked Sendable {
     }
 
     /// A whole message from the buffer, if one has come.
-    private func takeMessage() throws(Failure) -> Reply? {
+    func takeMessage() throws(Failure) -> Reply? {
         guard buffer.count >= 20 else { return nil }
         guard Array(buffer[0 ..< 4]) == Self.magic else { throw .unexpected("no magic: \(buffer.prefix(8).map { String(format: "%02x", $0) }.joined())") }
         let headerLength = try Self.headerLength(Array(buffer[18 ..< 20]))

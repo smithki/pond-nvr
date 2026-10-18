@@ -1,7 +1,8 @@
 // Records one camera continuously, on its own thread: connect, record segments, and when anything fails,
 // close the current segment and connect again after a pause that grows (1 s up to 30 s). Privacy mode is
 // recognised and retried every 30 s without filling the log. A camera made private in Pond (PrivacyState) isn't
-// recorded: its segment is closed and its connection let go until it's made public again.
+// recorded: its segment is closed and its connection let go until it's made public again. Made public while its
+// own privacy mode was on, it's waking (PrivacyState): tried again every 2 s, quietly, until its video flows.
 import Foundation
 import Ingest
 import NVRCore
@@ -135,6 +136,7 @@ public final class CameraWorker: @unchecked Sendable {
         var lastProblem: String?
         var problemSince = Date()
         var lastReported = Date()
+        var saidWaking = false
         // Its health, for the doctor: how the video flows, and what happens to it.
         var meter = VideoMeter(camera: camera.id, videoChannel: CameraSession.videoChannel)
         let health = HealthLog.shared
@@ -179,6 +181,9 @@ public final class CameraWorker: @unchecked Sendable {
                             lastProblem = nil
                             log.log(camera.id, "recording" + (session.audio == nil ? " (no audio)" : ""))
                             health.record(camera.id, .connected)
+                            saidWaking = false
+                            // Awake, if it was waking: what waited to be set on it is.
+                            privacy.awake(camera.id)
                             // Sending video: its own privacy mode (if it was on) is off.
                             privacy.cameraReports(camera.id, privacyMode: false)
                         }
@@ -202,6 +207,14 @@ public final class CameraWorker: @unchecked Sendable {
                 if let sample = meter.finish() { health.add(sample) }
                 // Private: the segment is closed and the connection let go; not a problem.
                 if case Stall.keptPrivate = error { continue }
+                // Starting its video again after its own privacy mode: not a problem (nor its privacy mode on).
+                if privacy.isWaking(camera.id) {
+                    if !saidWaking { log.log(camera.id, "waking from privacy mode: waiting for its video") }
+                    saidWaking = true
+                    setStatus(.connecting)
+                    pause(2)
+                    continue
+                }
                 let problem: String
                 var wait = backoff
                 switch error {

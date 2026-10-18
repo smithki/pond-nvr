@@ -24,6 +24,7 @@ To learn what a camera is (model, serial number, firmware, doorbell or not), pon
 | One TCP port per camera in HomeKit | The HAP server, advertised over Bonjour | paired devices only |
 | UDP ports per live stream | SRTP to the viewing device | the device that set up the stream |
 | One TCP port per camera recording to HKSV | HomeKit Data Stream | the home hub, with keys from its HAP session |
+| (Outgoing) TCP 9000 to each Reolink camera | Baichuan, Reolink's own protocol: privacy mode, events pushed | the camera's login, hashed and encrypted |
 | A Unix socket, `streams.sock` | Live video for the app (`StreamRelay`) | this user only (next to the settings file) |
 | A Unix socket, `controls.sock` | Camera controls for the app and the CLI (`ControlServer`): moving, positions, settings, privacy, talking through a camera's speaker | this user only (next to the settings file) |
 

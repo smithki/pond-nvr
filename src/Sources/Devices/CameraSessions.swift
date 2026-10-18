@@ -18,6 +18,8 @@ public actor CameraSessions {
 
     private var onvif: [CameraAccess: Task<ONVIFDevice?, Never>] = [:]
     private var reolink: [CameraAccess: ReolinkAPI] = [:]
+    /// Each Reolink camera's lasting Baichuan connection (its privacy mode, its events pushed).
+    private var baichuan: [CameraAccess: BaichuanSession] = [:]
     /// What each Reolink camera said it can do (ReolinkControls).
     var reolinkAbilities: [CameraAccess: ReolinkAbility] = [:]
 
@@ -46,10 +48,21 @@ public actor CameraSessions {
         return api
     }
 
+    /// The camera's Baichuan connection, started on first use and kept.
+    public func baichuan(_ access: CameraAccess) -> BaichuanSession {
+        // By its address and login alone (asked for with or without its stream's address): one per camera.
+        let key = CameraAccess(host: access.host, username: access.username, password: access.password)
+        if let session = baichuan[key] { return session }
+        let session = BaichuanSession(host: access.host, username: access.username, password: access.password)
+        baichuan[key] = session
+        session.start()
+        return session
+    }
+
     /// Logs out of every camera (when the service stops: a login left open holds one of the few a Reolink
     /// camera allows until it lapses, about an hour later).
     public func forgetAll() async {
-        for access in Set(reolink.keys).union(onvif.keys) { await forget(access) }
+        for access in Set(reolink.keys).union(onvif.keys).union(baichuan.keys) { await forget(access) }
     }
 
     /// Forgets a camera's connections (its password or address changed, or it was removed).
@@ -57,6 +70,7 @@ public actor CameraSessions {
         onvif[access] = nil
         reolinkAbilities[access] = nil
         if let api = reolink.removeValue(forKey: access) { await api.logout() }
+        baichuan.removeValue(forKey: CameraAccess(host: access.host, username: access.username, password: access.password))?.stop()
     }
 }
 
