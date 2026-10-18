@@ -49,6 +49,13 @@ app: build
 	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/NVRApp" $(APP)/Contents/MacOS/PondApp
 	@cp dist/pond $(APP)/Contents/MacOS/pond
 	@cp app/Info.plist $(APP)/Contents/Info.plist
+	@# The icon, from Icon Composer (app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
+	@# AppIcon.icns, as Xcode would.
+	@mkdir -p $(APP)/Contents/Resources
+	@xcrun actool app/AppIcon.icon --compile $(APP)/Contents/Resources --platform macosx --minimum-deployment-target 27.0 \
+	  --app-icon AppIcon --output-partial-info-plist $(APP)/Contents/Resources/.icon-info.plist \
+	  --output-format human-readable-text >/dev/null
+	@rm -f $(APP)/Contents/Resources/.icon-info.plist
 	@codesign --force --sign "$(SIGN)" --identifier pond $(APP)/Contents/MacOS/pond
 	@codesign --force --sign "$(SIGN)" $(APP)
 	@echo "✓ $(APP)"
