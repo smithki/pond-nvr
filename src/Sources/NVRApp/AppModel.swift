@@ -116,15 +116,23 @@ final class AppModel {
 
     /// The recorder runs with settings other than the saved ones: changed since it started, and not changed
     /// back.
+    /// Changes to the cameras and retention are taken up by a reload as they're saved, so they don't count
+    /// unless a reload failed (an older service); the storage always does.
     var needsRestart: Bool {
         guard case .running = serviceState, let recorderSettings, let config else { return false }
-        return passwordChangedSinceStart || RecorderSettings(config) != recorderSettings
+        let now = RecorderSettings(config)
+        if now.storage != recorderSettings.storage { return true }
+        return reloadFailed && (passwordChangedSinceStart || now != recorderSettings)
     }
+
+    /// The last reload didn't take (the service couldn't, or the change needed a restart).
+    private var reloadFailed = false
 
     /// The recorder (re)started now, with the saved settings.
     func recorderStarted() {
         recorderSettings = config.map(RecorderSettings.init)
         passwordChangedSinceStart = false
+        reloadFailed = false
     }
     /// What the main window shows; `--mode live|timeline|events` on the command line picks the first one.
     var mode: Mode = launchArgument("--mode").flatMap(Mode.init(rawValue:)) ?? .live {
@@ -253,7 +261,14 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             let reply = await controlClient.ask(.init(camera: "", action: "reload"), timeout: 60)
-            if reply.error == nil, reply.restartNeeded != true { recorderStarted() }
+            if reply.error == nil, reply.restartNeeded != true {
+                // (Keeping the storage it started with: a change of that still needs the restart.)
+                let storage = recorderSettings?.storage
+                recorderStarted()
+                if let storage { recorderSettings?.storage = storage }
+            } else {
+                reloadFailed = true
+            }
         }
     }
 
