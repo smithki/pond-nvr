@@ -186,8 +186,11 @@ public final class ControlServer: @unchecked Sendable {
     /// Tries at setting what waited, for each camera, since it last all went.
     private var settingTries: [String: Int] = [:]
     private var awakeObserver: UUID?
-    /// Each camera's items as last known (read, or set), so a setting that's already so doesn't wait to be set.
+    /// Each camera's items as last known (read, or set), so a setting that's already so doesn't wait to be set,
+    /// and a camera that can't be asked shows them still. Kept beside the socket (camera-values.json), so a
+    /// restart while a camera is private doesn't forget them.
     private var known: [String: [String: Config.Controls.Value]] = [:]
+    var knownPath: String { (NSString(string: path).deletingLastPathComponent as NSString).appendingPathComponent("camera-values.json") }
 
     /// After its video is back, how long a camera is left to settle before what waited is set; and between each.
     static let settleTime: Duration = .seconds(3)
@@ -203,6 +206,10 @@ public final class ControlServer: @unchecked Sendable {
         self.sync = sync
         self.lookup = lookup
         self.log = log
+        if let data = FileManager.default.contents(atPath: knownPath),
+           let kept = try? JSONDecoder().decode([String: [String: Config.Controls.Value]].self, from: data) {
+            known = kept
+        }
     }
 
     @discardableResult
@@ -336,7 +343,9 @@ public final class ControlServer: @unchecked Sendable {
             log("· \(camera): \(item) to be set once it\u{2019}s back from privacy mode")
             return ControlSocket.Reply(queued: true)
         case "items.values":
-            return unreachable ? ControlSocket.Reply(values: privacy.pendingSettings(camera)) : nil
+            // As last known, with what waits to be set over it.
+            let values = lock.withLock { known[camera] ?? [:] }.merging(privacy.pendingSettings(camera)) { $1 }
+            return unreachable ? ControlSocket.Reply(values: values) : nil
         case "item.get":
             guard unreachable else { return nil }
             guard let value = request.item.flatMap({ privacy.pendingSettings(camera)[$0] }) else { return refused }
@@ -349,14 +358,26 @@ public final class ControlServer: @unchecked Sendable {
     /// Its items' values, as the camera answered or took them.
     func remember(_ request: ControlSocket.Request, _ reply: ControlSocket.Reply) {
         guard reply.error == nil else { return }
-        lock.withLock {
-            switch request.action {
-            case "items.values": known[request.camera, default: [:]].merge(reply.values ?? [:]) { $1 }
-            case "item.get": if let item = request.item, let value = reply.value { known[request.camera, default: [:]][item] = value }
-            case "item.set": if let item = request.item, let value = request.value { known[request.camera, default: [:]][item] = value }
-            default: break
-            }
+        var values: [String: Config.Controls.Value] = [:]
+        switch request.action {
+        case "items.values": values = reply.values ?? [:]
+        case "item.get": if let item = request.item, let value = reply.value { values[item] = value }
+        case "item.set": if let item = request.item, let value = request.value { values[item] = value }
+        default: return
         }
+        remember(request.camera, values)
+    }
+
+    private func remember(_ camera: String, _ values: [String: Config.Controls.Value]) {
+        let changed = lock.withLock { () -> [String: [String: Config.Controls.Value]]? in
+            let before = known[camera]
+            known[camera, default: [:]].merge(values) { $1 }
+            return known[camera] == before ? nil : known
+        }
+        guard let changed else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try? encoder.encode(changed).write(to: URL(fileURLWithPath: knownPath), options: .atomic)
     }
 
     /// What waited for the camera, set now it can be told: after it has settled, one at a time and spaced, so a
@@ -406,7 +427,7 @@ public final class ControlServer: @unchecked Sendable {
             }
             do throws(ControlFailure) {
                 try await controls.withItem(item) { c throws(ControlFailure) in try await c.set(value) }
-                lock.withLock { known[camera, default: [:]][item] = value }
+                remember(camera, [item: value])
                 log("· \(camera): \(item) set (it waited for privacy mode to end)")
                 HealthLog.shared.control(camera, ok: true, action: "item.set", detail: nil)
             } catch .unreachable, .busy {

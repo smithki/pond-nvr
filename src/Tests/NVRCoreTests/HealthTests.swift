@@ -78,6 +78,18 @@ import Testing
         #expect(HealthDiagnosis.findings(camera: "porch", incidents: alone, samples: [], now: Self.now).map(\.kind) == [.dropsOff])
     }
 
+    @Test func videoThatDidntComeBackAfterPrivacyIsAProblemUntilItDoes() {
+        let incidents = [Self.at(10, "porch", .madePublic), Self.at(9, "porch", .wakeFailed),
+                         Self.at(9, "porch", .unreachable)]
+        let found = HealthDiagnosis.findings(camera: "porch", incidents: incidents, samples: [], now: Self.now)
+        #expect(found.first?.kind == .didntWake && found.first?.marksTile == true)
+        // Its video came back (restarted), or it's private again: over.
+        for after in [HealthIncident.Kind.connected, .madePrivate] {
+            #expect(!HealthDiagnosis.findings(camera: "porch", incidents: incidents + [Self.at(2, "porch", after)], samples: [], now: Self.now)
+                .contains { $0.kind == .didntWake })
+        }
+    }
+
     @Test func unreachableJustAfterTheServiceStartsIsntTheCameras() {
         let incidents = [Self.at(30, "", .serviceStarted), Self.at(29.8, "porch", .unreachable),
                          Self.at(20, "", .serviceStarted), Self.at(19.8, "porch", .unreachable),

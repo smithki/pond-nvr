@@ -17,7 +17,7 @@ public struct HealthFinding: Identifiable, Equatable, Sendable {
 
     public enum Kind: String, Sendable, CaseIterable {
         case unstableVideo, dropsOff, loginRefused, macNetwork, packetLoss, keyframesFarApart, clockOff, controlsFailing,
-             longPrivate
+             longPrivate, didntWake
     }
 
     public var kind: Kind
@@ -99,6 +99,16 @@ public enum HealthDiagnosis {
                 kind: .macNetwork, severity: .notice, headline: "This Mac lost the network",
                 evidence: "Every camera was unreachable at once at \(clock(lastMacWide))",
                 fix: nil, since: lastMacWide))
+        }
+
+        // Back from its privacy mode without its video, until it comes (or it's private again).
+        if let woke = mine.last(where: { $0.kind == .wakeFailed }),
+           !mine.contains(where: { [.connected, .madePrivate].contains($0.kind) && $0.time > woke.time }) {
+            found.append(HealthFinding(
+                kind: .didntWake, severity: .problem, headline: "Its video didn\u{2019}t come back after privacy mode",
+                evidence: "Privacy mode turned off, and no video since \(clock(woke.time))" + (woke.detail.map { " (\($0))" } ?? ""),
+                fix: "A fault in the camera: its video server didn\u{2019}t start again, though it may still answer its controls. Restart it (Restart in its controls, or unplug it for a few seconds).",
+                since: woke.time))
         }
 
         if let refused = lastHour.last(where: { $0.kind == .loginRefused }),

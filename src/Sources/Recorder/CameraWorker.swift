@@ -215,6 +215,14 @@ public final class CameraWorker: @unchecked Sendable {
                     pause(2)
                     continue
                 }
+                // Waking, and its time is up with no video: its video server is stuck. Said once; it's retried
+                // as any other problem from now on.
+                if saidWaking {
+                    saidWaking = false
+                    let why = (error as? RTSPError)?.description ?? "\(error)"
+                    log.log(camera.id, "didn\u{2019}t start its video again after privacy mode (\(why)); it may need restarting")
+                    health.record(camera.id, .wakeFailed, why)
+                }
                 let problem: String
                 var wait = backoff
                 switch error {

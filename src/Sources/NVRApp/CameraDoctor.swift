@@ -122,6 +122,7 @@ final class CameraDoctor {
         case .madePublic: "No longer private"
         case .controlFailed: "A control failed"
         case .serviceStarted: "The recorder started"
+        case .wakeFailed: "Didn\u{2019}t start its video after privacy mode"
         }
     }
 }

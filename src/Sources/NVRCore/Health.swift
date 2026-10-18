@@ -24,6 +24,9 @@ public struct HealthIncident: Codable, Equatable, Sendable {
         case controlFailed
         /// The service started (this Mac's side: everything reconnects).
         case serviceStarted
+        /// Its own privacy mode turned off, it didn't start its video again in its make's time (its video
+        /// server stuck; its controls may still answer).
+        case wakeFailed
     }
 
     public var camera: String

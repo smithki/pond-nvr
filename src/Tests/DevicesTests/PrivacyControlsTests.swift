@@ -5,8 +5,15 @@ import Testing
 
 /// What the service does with a camera's controls while it's private or waking (`ControlServer.whileAsleep`).
 @Suite struct PrivacyControlsTests {
-    static func server(_ privacy: PrivacyState) -> ControlServer {
-        ControlServer(path: NSTemporaryDirectory() + "pond-\(UUID().uuidString).sock", privacy: privacy, lookup: { _ in nil }, log: { _ in })
+    /// In a folder of its own (what it knows of the cameras is kept beside its socket).
+    static func server(_ privacy: PrivacyState, in folder: String = folder()) -> ControlServer {
+        ControlServer(path: folder + "/controls.sock", privacy: privacy, lookup: { _ in nil }, log: { _ in })
+    }
+
+    static func folder() -> String {
+        let folder = NSTemporaryDirectory() + "pond-controls-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     static func ask(_ action: String, item: String? = nil, value: Config.Controls.Value? = nil) -> ControlSocket.Request {
@@ -41,6 +48,23 @@ import Testing
         #expect(server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(false)))?.queued == true)
         _ = server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(true)))
         #expect(privacy.pendingSettings("porch").isEmpty)
+    }
+
+    @Test func whatsKnownOfItIsKeptAcrossARestart() {
+        let folder = Self.folder()
+        defer { try? FileManager.default.removeItem(atPath: folder) }
+        Self.server(PrivacyState(), in: folder)
+            .remember(Self.ask("items.values"), ControlSocket.Reply(values: ["dayNight": .choice("auto"), "statusLight": .on(true)]))
+        // The service started again while the camera is waking.
+        let privacy = PrivacyState()
+        privacy.set("porch", private: true)
+        privacy.set("porch", private: false, wakingFor: 45)
+        let server = Self.server(privacy, in: folder)
+        // Already so: not queued.
+        #expect(server.whileAsleep(Self.ask("item.set", item: "dayNight", value: .choice("auto")))?.queued == nil)
+        #expect(server.whileAsleep(Self.ask("item.set", item: "statusLight", value: .on(false)))?.queued == true)
+        // Shown as it is, with what waits over it.
+        #expect(server.whileAsleep(Self.ask("items.values"))?.values == ["dayNight": .choice("auto"), "statusLight": .on(false)])
     }
 
     @Test func privateButReachableItsSettingsAreSetAtOnce() {
