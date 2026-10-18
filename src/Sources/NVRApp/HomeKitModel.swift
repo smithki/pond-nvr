@@ -77,10 +77,12 @@ extension AppModel {
     }
 
     /// Puts the camera in HomeKit or takes it out, then starts or restarts the service so it takes effect.
-    func setHomeKit(_ id: String, _ on: Bool) {
+    /// `recording`: whether it's offered to HomeKit Secure Video too (unchanged if nil), in the same change.
+    func setHomeKit(_ id: String, _ on: Bool, recording: Bool? = nil) {
         guard update(affectsRecorder: false, { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
             config.cameras[i].homekit = on
+            if let recording { config.cameras[i].homekitRecording = recording ? true : nil }
         }) else { return }
         applyHomeKitChange()
     }

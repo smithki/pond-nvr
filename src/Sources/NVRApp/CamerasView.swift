@@ -295,6 +295,8 @@ struct AddCameraSheet: View {
     @State private var device: Config.Device?
     /// The optional last step: nil until chosen, then whether the camera goes in the Home app.
     @State private var homeKitChosen: Bool?
+    /// With it, whether it records to HomeKit Secure Video (as a camera's settings have it; on by default here).
+    @State private var homeKitRecording = true
     /// What the camera does to the storage, from the rate the check measured.
     @State private var impact: StorageOutlook.Impact?
     /// The stream addresses: typed in, or asked of the camera when checking (and where they came from).
@@ -480,18 +482,25 @@ struct AddCameraSheet: View {
         VStack(spacing: 16) {
             Spacer(minLength: 0)
             if homeKitChosen == nil {
+                VStack(spacing: 16) {
                 Image(systemName: "homekit")
                     .font(.system(size: 54))
                     .foregroundStyle(.tint)
                 Text("Put \(camera.name) in the Home app?").font(.title3.bold())
-                Text("It then shows in the Home app on your iPhone, iPad and Mac\(kind == .doorbell ? ", and rings there when its button is pressed" : ""), and can record to HomeKit Secure Video. Pond\u{2019}s background service serves it. \(camera.name) is added either way; you can do this later in its settings.")
+                Text("It then shows in the Home app on your iPhone, iPad and Mac\(kind == .doorbell ? ", and rings there when its button is pressed" : ""). Pond\u{2019}s background service serves it. \(camera.name) is added either way; you can do this later in its settings.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 400)
+                Toggle("Record to HomeKit Secure Video", isOn: $homeKitRecording)
+                    .toggleStyle(.checkbox)
+                    .help("Clips of what it notices, kept in iCloud (needs a home hub and iCloud+); set what it records in the Home app")
+                    .padding(.top, 4)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else {
-                HomeKitPairing(cameraID: camera.id)
-                    .frame(maxWidth: 440)
+                AddedToHome(cameraID: camera.id, recording: homeKitRecording)
+                    .transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
             Spacer(minLength: 0)
         }
@@ -641,8 +650,8 @@ struct AddCameraSheet: View {
     }
 
     func addToHome() {
-        homeKitChosen = true
-        model.setHomeKit(camera.id, true)
+        withAnimation(.smooth(duration: 0.35)) { homeKitChosen = true }
+        model.setHomeKit(camera.id, true, recording: homeKitRecording)
     }
 
     func save() {
@@ -1326,4 +1335,103 @@ struct StreamAddressField: View {
         .padding(16)
         .frame(width: 440)
     }
+}
+
+/// Add Camera's HomeKit page once asked: the code to scan, large and centred as the offer before it, while the
+/// Home app hasn't the camera; then that it's there (and what's next); what's wrong, if anything, as the
+/// camera's settings say it.
+struct AddedToHome: View {
+    @Environment(AppModel.self) private var model
+    let cameraID: String
+    let recording: Bool
+
+    /// How tall the code's digits stand (the font's cap height), for its placeholder.
+    static let codeDigitHeight: CGFloat = NSFont.monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .title1).pointSize,
+                                                                      weight: .semibold).capHeight
+
+    var camera: Config.Camera? { model.config?.cameras.first { $0.id == cameraID } }
+
+    var body: some View {
+        if let camera, let state = model.homeKitState(for: camera) {
+            Group {
+                switch state {
+                case .ready, .live:
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 54))
+                            .foregroundStyle(.green)
+                            .symbolEffect(.bounce, value: state)
+                        Text("\(camera.name) is in the Home app").font(.title3.bold())
+                        Text(recording
+                             ? "It records to HomeKit Secure Video: choose what it records in the Home app, in its settings \u{203A} Recording Options."
+                             : "Find it in the Home app on your iPhone, iPad and Mac.")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 400)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                case .notAdded, .waitingForService:
+                    let setup = model.homeKitSetup(for: camera)
+                    VStack(spacing: 12) {
+                        Text("Scan with the Home app").font(.title3.bold())
+                        // The code's place kept from the start (a tile, then the code in it), so nothing moves
+                        // when the service has made it: it comes up where it'll stay.
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(.quaternary.opacity(setup == nil ? 0.6 : 0))
+                                .overlay { if setup == nil { ProgressView().controlSize(.small) } }
+                            if let setup {
+                                SetupQRCode(payload: setup.uri)
+                                    .padding(6)
+                                    .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.94))
+                                                                .combined(with: .blur), removal: .opacity))
+                            }
+                        }
+                        .frame(width: 168, height: 168)
+                        // Until then, a bar as wide as the code and as tall as its digits, where they'll be.
+                        Text(setup?.code ?? "000-00-000")
+                            .font(.system(.title, design: .monospaced).weight(.semibold))
+                            .opacity(setup == nil ? 0 : 1)
+                            .overlay {
+                                if setup == nil {
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(.quaternary)
+                                        .frame(height: Self.codeDigitHeight)
+                                        .transition(.opacity)
+                                }
+                            }
+                            .textSelection(.enabled)
+                        
+                        Text("In the Home app, choose **+ \u{203A} Add Accessory** and scan the code (or enter it). Then choose **Add Anyway**: Pond isn\u{2019}t certified by Apple, which the Home app mentions.")
+                            .multilineTextAlignment(.center)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 400)
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(state == .notAdded ? "Waiting for the Home app\u{2026}" : "Starting HomeKit\u{2026}")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .animation(.spring(duration: 0.55, bounce: 0.15), value: setup?.code)
+                    .transition(.opacity)
+                default:
+                    HomeKitPairing(cameraID: cameraID).frame(maxWidth: 440)
+                }
+            }
+            .animation(.smooth(duration: 0.35), value: state)
+        }
+    }
+}
+
+extension AnyTransition {
+    /// Out of focus to sharp (or back).
+    static var blur: AnyTransition { .modifier(active: BlurModifier(radius: 8), identity: BlurModifier(radius: 0)) }
+}
+
+struct BlurModifier: ViewModifier {
+    let radius: Double
+    func body(content: Content) -> some View { content.blur(radius: radius) }
 }
