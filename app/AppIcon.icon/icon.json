@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.52549,0.90196,0.87059,1.00000",
-      "display-p3:0.70980,0.89020,0.87451,1.00000"
+      "display-p3:0.06275,0.11373,0.16863,1.00000",
+      "display-p3:0.09412,0.23922,0.28627,1.00000"
     ]
   },
   "groups" : [
@@ -11,13 +11,14 @@
         {
           "blend-mode" : "normal",
           "fill" : "automatic",
+          "glass" : true,
           "image-name" : "mark.svg",
           "name" : "mark",
           "position" : {
-            "scale" : 0.74,
+            "scale" : 0.59,
             "translation-in-points" : [
-              0,
-              0
+              1.1368683772161603e-13,
+              1.1368683772161603e-13
             ]
           }
         }
