@@ -691,8 +691,9 @@ struct LiveControlsDock: View {
 
     /// The dock's width for this camera in the full arrangement.
     func width(for controls: Config.Controls, camera: String) -> CGFloat {
-        controls.ptz == nil ? everydayWidth + insets(controls)
-            : side(for: controls, camera: camera) + 124 + 2 * Self.spacing + everydayWidth + insets(controls)
+        let everyday = widths(camera).everyday
+        return controls.ptz == nil ? everyday + insets(controls)
+            : side(for: controls, camera: camera) + 124 + 2 * Self.spacing + everyday + insets(controls)
     }
 
     /// What's around its controls: its padding, and the adjustments' edge (beside which the padding is less, the
@@ -705,11 +706,12 @@ struct LiveControlsDock: View {
 
     /// Its controls' width in an arrangement (as they lay themselves out, measured), without what's around them.
     func contentWidth(_ arrangement: Arrangement, controls: Config.Controls, camera: String) -> CGFloat {
-        if controls.ptz == nil { return everydayWidth }
+        let measured = widths(camera)
+        if controls.ptz == nil { return measured.everyday }
         return switch arrangement {
         case .full: width(for: controls, camera: camera) - insets(controls)
-        case .beside: besideWidth
-        case .narrow: narrowWidth
+        case .beside: measured.beside
+        case .narrow: measured.narrow
         }
     }
 
@@ -725,16 +727,34 @@ struct LiveControlsDock: View {
     /// narrow the camera's controls are (the dock widens to it as it slides).
     nonisolated static let adjustmentsWidth: CGFloat = 460
 
-    /// The widest arrangement that fits.
+    /// The widest arrangement that fits: in the room it has, less what the rail and the adjustments' sidebar
+    /// would take back if they came back (the rail hidden for room, the adjustments in the dock). So a resize
+    /// moves it one way only: the rail hiding (or the sidebar leaving) gives room it doesn't then take, which
+    /// made it narrow, then wide again, then narrow as they came back: it bounced.
     func fitting(controls: Config.Controls, camera: String) -> Arrangement {
-        if available >= width(.full, controls: controls, camera: camera) { return .full }
-        if available >= width(.beside, controls: controls, camera: camera) { return .beside }
+        // From the window's width, not the room as last measured: the rail and the sidebar coming or going in the
+        // same moment, that was a step behind (it chose, then chose again).
+        var room = available
+        if model.liveWidth > 0 {
+            room = model.liveWidth - LiveLayout.stageMargins
+            if showRail || model.railMadeRoom { room -= LiveLayout.railRoom(railKeptWidth) }
+            if adjusting, !DockContents.adjustments(controls).isEmpty { room -= LiveLayout.sidebarRoom }
+        }
+        if room >= width(.full, controls: controls, camera: camera) { return .full }
+        if room >= width(.beside, controls: controls, camera: camera) { return .beside }
         return .narrow
     }
 
-    /// How wide its narrower arrangements' controls are (measured, as the everyday controls are).
-    @State private var besideWidth: CGFloat = 470
-    @State private var narrowWidth: CGFloat = 330
+    /// How wide each camera's controls lay themselves out (measured, unseen), kept per camera: a camera switched
+    /// to has its widths at once, so both sides of the dock move together (one measured late moved after).
+    struct Measured {
+        var everyday: CGFloat = 230
+        var beside: CGFloat = 470
+        var narrow: CGFloat = 330
+    }
+    @State private var measuredWidths: [String: Measured] = [:]
+
+    func widths(_ camera: String) -> Measured { measuredWidths[camera] ?? Measured() }
 
     /// The strip down its right edge that opens the adjustments' sidebar.
     nonisolated static let sidebarButton: CGFloat = 44
@@ -743,8 +763,6 @@ struct LiveControlsDock: View {
     /// About how wide the name is, to tell whether it fits beside the dock.
     nonisolated static let edgeLabelWidth: CGFloat = 112
 
-    /// How wide its everyday controls are (measured), for its sides.
-    @State private var everydayWidth: CGFloat = 230
 
     /// Its arrangements, widest first: chosen by width (each measured as it lays itself out), so a change
     /// between them can crossfade. Narrower than the narrowest, its controls are scaled down to fit: they never
@@ -759,6 +777,8 @@ struct LiveControlsDock: View {
     @AppStorage(LiveControlsDock.adjustingKey) private var adjusting = false
     nonisolated static let adjustingKey = "dockAdjusting"
     @AppStorage(LiveView.railKey) private var showRail = true
+    /// The rail's own width, as kept (what it takes across: LiveLayout.railRoom).
+    @AppStorage("liveRailWidth") private var railKeptWidth = CameraRail.defaultWidth
     /// It has been on screen a moment: until then, arrangements are taken at once as its controls are measured
     /// (not crossfaded, which shifted the dock as it opened).
     @State private var measured = false
@@ -772,6 +792,9 @@ struct LiveControlsDock: View {
     /// change comes apart from the click's animation, and an animation keyed to it slid the frames as the
     /// window was resized.
     @State private var filmAdjusting = false
+    @State private var roomCheck: Task<Void, Never>?
+    /// Whether the adjustments were a frame of the dock when its arrangement was last chosen.
+    @State private var arrangedFilming: Bool?
 
     /// The edge clicked: the adjustments opened or closed, the film sliding along with it.
     func toggleAdjustments() {
@@ -798,19 +821,34 @@ struct LiveControlsDock: View {
                 }
             }
             .onChange(of: fitting(controls: current.controls, camera: current.camera.id), initial: true) { _, fitting in
-                if measured {
+                // Its controls coming back into view (the adjustments leaving the dock as the window widened): in
+                // the arrangement they now fit, at once (one they were in unseen, crossfaded, slid the dock).
+                let revealed = arrangedFilming != filming
+                arrangedFilming = filming
+                if measured, !revealed {
                     withAnimation(withSidebar ? LiveView.dockAnimation : .easeInOut(duration: 0.25)) { arrangement = fitting }
                 } else {
-                    arrangement = fitting
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { arrangement = fitting }
                 }
+            }
+            .onChange(of: filming) { _, now in
+                guard arrangedFilming != now else { return }
+                arrangedFilming = now
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { arrangement = fitting(controls: current.controls, camera: current.camera.id) }
             }
             .task {
                 try? await Task.sleep(for: .seconds(0.4))
                 measured = true
             }
-            .onChange(of: available) { _, width in fitRail(width) }
+            // (Resized: at once, as everything else reflows with the window.)
+            .onChange(of: available) { _, width in fitRail(width, animated: false) }
             .onChange(of: width(.narrow, controls: current.controls, camera: current.camera.id), initial: true) { _, narrowest in
                 if abs(model.dockNarrowest - narrowest) > 1 { model.dockNarrowest = narrowest }
+                LiveLayout.check(narrowest: narrowest, camera: current.camera.name)
             }
             .onChange(of: open) { fitRail(available) }
             .onDisappear {
@@ -829,8 +867,27 @@ struct LiveControlsDock: View {
             .onChange(of: camera.id) {
                 closeMore()
                 mover.set(PTZVelocity(), camera: current.camera.id, model: model)
+                let (next, nextControls) = (camera, controls)
                 Task { @MainActor in
-                    withAnimation(.easeInOut(duration: 0.3)) { shown = (camera, controls) }
+                    // A camera not shown before is measured first (unseen, below), for a moment at most.
+                    for _ in 0 ..< 6 where measuredWidths[next.id] == nil { try? await Task.sleep(for: .milliseconds(50)) }
+                    // On the dock's own spring, with the arrangement it fits in: the contents' crossfade, its width
+                    // and its arrangement as one (the arrangement chosen after moved apart, on its own curve).
+                    withAnimation(LiveView.dockAnimation) {
+                        arrangement = fitting(controls: nextControls, camera: next.id)
+                        shown = (next, nextControls)
+                    }
+                }
+            }
+            // The camera coming in, measured unseen before it's shown (its widths known as it arrives).
+            .background {
+                if shown != nil, shown?.camera.id != camera.id, measuredWidths[camera.id] == nil {
+                    DockContents(camera: camera, controls: controls, arrangement: arrangement,
+                                 left: side(for: controls, camera: camera.id), right: widths(camera.id).everyday, mover: mover,
+                                 measured: { kind, width in measured(camera.id, kind, width) })
+                        .hidden()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
             }
     }
@@ -848,14 +905,14 @@ struct LiveControlsDock: View {
                     var instant = Transaction()
                     instant.disablesAnimations = true
                     withTransaction(instant) { model.adjustmentsInSidebar = open }
-                    fitRail(available)
+                    fitRail(available, animated: false)
                     return
                 }
                 withSidebar = true
                 // No room beside the sidebar for even the narrowest dock: the cameras' rail makes room. It comes
                 // back with the sidebar's going only if there's room for it then (checked once it has gone).
                 if open, showRail, !model.sidebarFloats,
-                   available - LiveView.sidebarRoom < width(.narrow, controls: current.controls, camera: current.camera.id) {
+                   available - LiveLayout.sidebarRoom < width(.narrow, controls: current.controls, camera: current.camera.id) {
                     withAnimation(LiveView.dockAnimation) { showRail = false }
                     model.railMadeRoom = true
                 }
@@ -898,8 +955,8 @@ struct LiveControlsDock: View {
         return HStack(spacing: 0) {
             ZStack {
                 DockContents(camera: camera, controls: controls, arrangement: arrangement,
-                             left: side(for: controls, camera: camera.id), right: everydayWidth, mover: mover,
-                             measured: { kind, width in measured(kind, width) })
+                             left: side(for: controls, camera: camera.id), right: widths(camera.id).everyday, mover: mover,
+                             measured: { kind, width in measured(camera.id, kind, width) })
                     .id(camera.id)
                     .transition(.opacity)
             }
@@ -1040,17 +1097,51 @@ struct LiveControlsDock: View {
     /// The cameras' rail and the open dock side by side: the window made too narrow for the dock's narrowest,
     /// the rail makes room (as when the sidebar opens), and comes back once there's room again (or the dock
     /// closes). The rail can't be dragged wider than leaves the dock room.
-    func fitRail(_ width: CGFloat) {
+    func fitRail(_ width: CGFloat, animated: Bool = true) {
+        // The room worked out (as `fitting` does) against what was laid out, once it has settled (mid-resize,
+        // the two are told apart).
+        roomCheck?.cancel()
+        roomCheck = Task {
+            try? await Task.sleep(for: .seconds(0.6))
+            guard !Task.isCancelled, model.liveWidth > 0, !withSidebar, !model.railMovesAtOnce else { return }
+            var expected = model.liveWidth - LiveLayout.stageMargins
+            if showRail { expected -= LiveLayout.railRoom(railKeptWidth) }
+            // (The sidebar is beside the stage only while the dock is open.)
+            if open, model.adjustmentsInSidebar, !model.sidebarFloats { expected -= LiveLayout.sidebarRoom }
+            LiveLayout.check(room: expected, measured: available)
+        }
+        // Moved by the window's size, the rail comes and goes at once (the sidebar beside it does too: one
+        // animated and not the other, the dock jumped, then slid); opened or closed by hand, it slides.
+        func change(_ show: Bool) {
+            if animated {
+                withAnimation(LiveView.dockAnimation) { showRail = show }
+            } else {
+                model.railMovesAtOnce = true
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { showRail = show }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    model.railMovesAtOnce = false
+                }
+            }
+        }
         let narrowest = self.width(.narrow, controls: current.controls, camera: current.camera.id)
-        let limit: CGFloat? = open && showRail ? model.railWidth + width - narrowest : nil
+        let limit: CGFloat? = open && showRail ? CGFloat(railKeptWidth.clamped(to: CameraRail.widths)) + width - narrowest : nil
         if model.railLimit != limit { model.railLimit = limit }
-        if model.railMadeRoom, !showRail, !withSidebar, !open || width - model.railWidth - LiveView.railGap >= narrowest + 8 {
-            withAnimation(LiveView.dockAnimation) { showRail = true }
+        // The adjustments open in the dock (a narrow window) take their sidebar's room once there's enough: the
+        // rail comes back only with room for both (else it came back, the sidebar took its room, and it went
+        // again: the dock bounced).
+        let sidebarToCome = adjusting && !DockContents.adjustments(current.controls).isEmpty && model.sidebarFloats
+            ? LiveLayout.sidebarRoom : 0
+        if model.railMadeRoom, !showRail, !withSidebar,
+           !open || width - LiveLayout.railRoom(railKeptWidth) - sidebarToCome >= narrowest + 8 {
+            change(true)
             model.railMadeRoom = false
             return
         }
         guard open, showRail, !withSidebar, width < narrowest else { return }
-        withAnimation(LiveView.dockAnimation) { showRail = false }
+        change(false)
         model.railMadeRoom = true
     }
 
@@ -1060,13 +1151,15 @@ struct LiveControlsDock: View {
     }
 
     /// Its controls' widths, as they lay themselves out.
-    func measured(_ kind: DockContents.Measure, _ width: CGFloat) {
+    func measured(_ camera: String, _ kind: DockContents.Measure, _ width: CGFloat) {
         let width = width.rounded(.up)
+        var widths = measuredWidths[camera] ?? Measured()
         switch kind {
-        case .everyday: if abs(width - everydayWidth) > 1 { everydayWidth = width }
-        case .beside: if abs(width - besideWidth) > 1 { besideWidth = width }
-        case .narrow: if abs(width - narrowWidth) > 1 { narrowWidth = width }
+        case .everyday: guard abs(width - widths.everyday) > 1 || measuredWidths[camera] == nil else { return }; widths.everyday = width
+        case .beside: guard abs(width - widths.beside) > 1 || measuredWidths[camera] == nil else { return }; widths.beside = width
+        case .narrow: guard abs(width - widths.narrow) > 1 || measuredWidths[camera] == nil else { return }; widths.narrow = width
         }
+        measuredWidths[camera] = widths
     }
 
     func closeMore() {

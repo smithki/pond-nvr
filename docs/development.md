@@ -62,6 +62,7 @@ The package is in `src/`; `swift build --package-path src` and Xcode (open `src/
 - **Glass is never drawn into a drag image**: drags get a plain preview (`DragPreview`); drawing glass that way crashed the app.
 - **Vendor-neutral wording**: name a camera's own app only through its provider (`appName`, "the Reolink app"), else "the camera's own app". Say "ID", HomeKit, HKSV, RTSP, macOS.
 - **The timeline's live mode is only ever chosen** by the viewer (LIVE or L); playing recording pauses at its end rather than switching to live.
+- **The live view's spacing across lives in `LiveLayout`** (the rail's padding, the dock's inset, the adjustments' sidebar, the narrowest dock and the window's minimum). The view is laid out with those values and the dock works out its room from them, so a padding changed anywhere else breaks which arrangement it chooses and whether the rail or sidebar fits. Two checks log a fault (subsystem `camera.pond`, category `layout`) when that happens: the room worked out disagrees with the room laid out, or a camera's narrowest dock is wider than `narrowestDock` (an everyday control was added: measure again, and raise it and the window's minimum).
 - **Errors say what happened in plain words** and name only a cause the error itself shows; a problem with a fix comes with the button for it.
 
 ## Message style

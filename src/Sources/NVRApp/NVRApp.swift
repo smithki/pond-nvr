@@ -15,7 +15,7 @@ struct NVRApp: App {
             ContentView()
                 .environment(model)
                 .preferredColorScheme(appearance.scheme)
-                .frame(minWidth: LiveView.minimumWindowWidth, minHeight: 560)
+                .frame(minWidth: LiveLayout.minimumWindowWidth, minHeight: 560)
         }
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)

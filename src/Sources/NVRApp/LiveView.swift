@@ -88,9 +88,7 @@ struct LiveView: View {
                 HStack(spacing: 0) {
                     if showRail {
                         railView(cameras)
-                            // (How much room it takes, for the dock to know when there's room for it again.)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if $0 > 0 { model.railWidth = $0 } }
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .transition(model.railMovesAtOnce ? .identity : .move(edge: .leading).combined(with: .opacity))
                     }
                     // The stage, and under it the controls of a camera watched on its own.
                     let docked = docked(cameras)
@@ -116,7 +114,7 @@ struct LiveView: View {
                                         LiveControlsDock(camera: docked.camera, controls: docked.controls, open: controlsOpen)
                                             .opacity(controlsOpen ? 1 : 0)
                                     }
-                                    .padding(.horizontal, 12)
+                                    .padding(.horizontal, LiveLayout.dockInset)
                                     .offset(y: controlsOpen ? Self.dockToggleRoom - Self.controlsButtonHeight - 8
                                                             : -(Self.controlsButtonHeight + 14))
                                 }
@@ -131,9 +129,10 @@ struct LiveView: View {
                     // keeps its height.
                     if let docked, controlsOpen, model.adjustmentsInSidebar, !model.sidebarFloats {
                         AdjustmentsView(camera: docked.camera, controls: docked.controls)
-                            .frame(width: Self.sidebarRoom - 12)
+                            .frame(width: LiveLayout.sidebarWidth)
                             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .padding([.trailing, .vertical], 12)
+                            .padding(.trailing, LiveLayout.sidebarInset)
+                            .padding(.vertical, 12)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
@@ -167,10 +166,13 @@ struct LiveView: View {
                         .keyboardShortcut("l", modifiers: [.command, .option])
                         .hidden()
                 }
-                .animation(.snappy(duration: 0.25), value: showRail)
+                .animation(model.railMovesAtOnce ? nil : .snappy(duration: 0.25), value: showRail)
                 // Whether the adjustments fit beside the stage (the rail out of the way if need be) or float over it.
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
-                .onChange(of: contentWidth - Self.stageMargins - Self.sidebarRoom < model.dockNarrowest, initial: true) { _, floats in
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                    contentWidth = $0
+                    if abs(model.liveWidth - $0) > 0.5 { model.liveWidth = $0 }
+                }
+                .onChange(of: contentWidth - LiveLayout.stageMargins - LiveLayout.sidebarRoom < model.dockNarrowest, initial: true) { _, floats in
                     // At once, not animated: the window is being resized (the adjustments moving between the sidebar
                     // and the dock's second frame, animated, were seen twice, leaving and arriving).
                     guard model.sidebarFloats != floats else { return }
@@ -242,18 +244,6 @@ struct LiveView: View {
     static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)
     /// Above the dock: room for the button that shows and hides it.
     static let dockToggleRoom: CGFloat = 52
-    /// What the adjustments' sidebar takes from the stage: its width and its margin.
-    static let sidebarRoom: CGFloat = 292
-    /// The narrowest dock of a camera with every everyday control (day and night, a picture, privacy;
-    /// positions, talking, volume, home), as measured.
-    static let narrowestDock: CGFloat = 604
-    static let stageMargins: CGFloat = 24
-    /// What the cameras' rail takes from the stage besides its own width: the gap between them.
-    static let railGap: CGFloat = 18
-    /// The window's narrowest: that dock with the stage's margins (the cameras' rail out of the way, the
-    /// adjustments a frame of the dock), so the dock never has to shrink; narrow enough that Pond fits in
-    /// half of any Mac's screen beside another app.
-    static let minimumWindowWidth: CGFloat = 640
     /// The longest the dock waits for what it holds before opening.
     static let dockWait = 0.8
     /// The show and hide button's height (a large glass capsule).
@@ -293,9 +283,9 @@ struct LiveView: View {
     /// beside the stage): its width as kept, whether it's shown or not.
     func railFits(_ cameras: [Config.Camera]) -> Bool {
         guard docked(cameras) != nil, controlsOpen else { return true }
-        let sidebar = model.adjustmentsInSidebar && !model.sidebarFloats ? Self.sidebarRoom : 0
-        let rail = railKeptWidth.clamped(to: CameraRail.widths)
-        return contentWidth - rail - Self.railGap - Self.stageMargins - sidebar >= model.dockNarrowest
+        let sidebar = model.adjustmentsInSidebar && !model.sidebarFloats ? LiveLayout.sidebarRoom : 0
+        let rail = LiveLayout.railRoom(railKeptWidth)
+        return contentWidth - rail - LiveLayout.stageMargins - sidebar >= model.dockNarrowest
     }
 
     /// The camera whose controls go under the stage: the one watched on its own. Every camera has some (a
@@ -556,8 +546,8 @@ struct CameraRail: View {
             // Centred in the gap between the rail and the stage, clear of both.
             .offset(x: 16)
         }
-        .padding([.leading, .vertical], 12)
-        .padding(.trailing, 6)
+        .padding([.leading, .vertical], LiveLayout.railLeading)
+        .padding(.trailing, LiveLayout.railTrailing)
     }
 }
 
