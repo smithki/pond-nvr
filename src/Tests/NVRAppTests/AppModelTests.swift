@@ -121,7 +121,7 @@ final class StubLaunchd: Launchd, @unchecked Sendable {
         #expect(r.lines == [CheckLine(.error, "The camera refused the username admin or the password.", fix: .password)])
     }
 
-    @Test func savingWhileRecordingAsksForARestart() async {
+    @Test func savingWhileRecordingAsksForARestartOnlyForStorage() async {
         let m = model()
         m.createSettings()
         defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -129,16 +129,19 @@ final class StubLaunchd: Launchd, @unchecked Sendable {
         await m.installService()?.value
         #expect(m.serviceState == .running(pid: "7"))
         #expect(!m.needsRestart)
-        let days = m.config?.retention.events.days ?? 30
+        // The cameras and retention: taken up by a reload as they're saved, no restart asked.
         m.update { $0.retention.events.days = 60 }
-        #expect(m.needsRestart)
-        // Changed back: the recorder has these settings already.
-        m.update { $0.retention.events.days = days }
         #expect(!m.needsRestart)
-        // A change it doesn't use (the cameras' order, a name) asks for nothing.
         m.update { $0.cameras[0].name = "Front" }
         #expect(!m.needsRestart)
-        m.update { $0.retention.events.days = 60 }
+        // The storage: only a restart takes it up.
+        let database = m.config?.storage.database ?? ""
+        m.update { $0.storage.database = dir + "/elsewhere/pond.sqlite" }
+        #expect(m.needsRestart)
+        // Changed back: the recorder has it already.
+        m.update { $0.storage.database = database }
+        #expect(!m.needsRestart)
+        m.update { $0.storage.database = dir + "/elsewhere/pond.sqlite" }
         await m.restartService().value
         #expect(!m.needsRestart)
         await m.uninstallService().value
