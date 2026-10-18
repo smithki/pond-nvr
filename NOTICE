@@ -8,3 +8,6 @@ the HomeKit Data Stream) were written with reference to these projects, also und
 - HAP-NodeJS (https://github.com/homebridge/HAP-NodeJS)
 - HomeKitADK (https://github.com/apple/HomeKitADK)
 Source files that follow one of them closely name it in a comment.
+
+Reolink's own protocol (Baichuan) was written with reference to reolink_aio
+(https://github.com/starkillerOG/reolink_aio), under the MIT License, Copyright (c) 2023 starkillerOG.

@@ -613,6 +613,43 @@ if args.count >= 4, args[0] == "camera", args[1] == "reolink" {
     exit(0)
 }
 
+/// `pond camera baichuan ID [COMMAND [BODY]]`: Reolink's own protocol (TCP 9000): logs in and says what the login
+/// answered, and the privacy mode; or one command's reply (its number, a body's XML if any), for investigating.
+if args.count >= 3, args[0] == "camera", args[1] == "baichuan" {
+    guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == args[2] }),
+          let password = try? KeychainCredentialStore().password(for: camera.id) else {
+        FileHandle.standardError.write(Data("✗ No such camera, or no password for it.\n".utf8))
+        exit(1)
+    }
+    let client = BaichuanClient(host: camera.host, username: camera.username, password: password)
+    do throws(BaichuanClient.Failure) {
+        // A process's first connections fail while macOS decides whether it may use the local network.
+        var tries = 0
+        while true {
+            do throws(BaichuanClient.Failure) {
+                try client.login()
+                break
+            } catch .unreachable where tries < 2 {
+                tries += 1
+                Thread.sleep(forTimeInterval: 2)
+            }
+        }
+        print("✓ logged in over Baichuan")
+        if args.count > 3, let command = UInt32(args[3]) {
+            print(try client.ask(command: command, body: args.count > 4 ? args[4] : nil))
+        } else {
+            // (Without its secrets, so what's printed can be shared.)
+            let reply = (client.loginReply ?? "").split(separator: "\n").filter { !$0.localizedCaseInsensitiveContains("secret") }
+            print(reply.prefix(45).joined(separator: "\n"))
+            print("privacy mode: \(try client.privacyMode() ? "on" : "off")")
+        }
+    } catch {
+        print("✗ \(error.description)")
+        exit(1)
+    }
+    exit(0)
+}
+
 /// `pond camera onvif-call ID SERVICE BODY`: one ONVIF request (BODY, the SOAP body's XML) to SERVICE ("media",
 /// "ver20/media", "imaging", "ptz", "device"), its reply as the camera writes it.
 if args.count >= 5, args[0] == "camera", args[1] == "onvif-call" {
