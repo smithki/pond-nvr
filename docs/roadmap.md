@@ -17,6 +17,7 @@ Status: **done**, **in progress**, **next**, **later**.
 | Recording the sub-stream instead | later | For a camera that doesn't fit at full resolution: keep the main stream for live view and HomeKit, record the sub-stream. |
 | Live frames in transitions | later | When tiles change rows quickly, the fading stand-in shows the camera's latest recorded still, up to a minute old. It should show the tile's last live frame (`AVSampleBufferVideoRenderer.copyDisplayedPixelBuffer()` with the clock briefly paused, or decoding in the app and keeping the last frame). |
 | H.265 cameras | later | Recording as is (`hvc1`), and re-encoding to H.264 for HomeKit live view. |
+| A menu bar item | later | Pond at a glance without its window: whether it's recording, each camera's state (the doctor's mark, private, waking), privacy on and off per camera, and opening the live view or a camera's doctor. Optional, in Settings › General. |
 | A signed, notarized release | later | Today Pond is built from source; a release needs a Developer ID, notarization and an app bundle identifier of its own. |
 
 ## HomeKit
