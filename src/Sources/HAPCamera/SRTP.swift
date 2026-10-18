@@ -97,6 +97,43 @@ public struct SRTPSender: Sendable {
     }
 }
 
+/// Reads the viewer's SRTP (its microphone, talking back): checks the tag, then decrypts the payload. Nil if the
+/// tag is wrong. The packet index is the sequence number with a rollover count kept as it wraps (RFC 3711 3.3.1).
+public struct SRTPReceiver: Sendable {
+    let keys: SRTPKeys
+    private var rolloverCounter: UInt32 = 0
+    private var highest: UInt16?
+
+    public init(masterKey: [UInt8], masterSalt: [UInt8]) {
+        keys = SRTPKeys(masterKey: masterKey, masterSalt: masterSalt)
+    }
+
+    /// The RTP packet back (header as sent, payload decrypted).
+    public mutating func unprotect(_ packet: [UInt8]) -> [UInt8]? {
+        guard packet.count >= 12 + 10 else { return nil }
+        let headerLength = 12 + 4 * Int(packet[0] & 0x0F)
+        guard packet.count >= headerLength + 10 else { return nil }
+        let sequence = UInt16(packet[2]) << 8 | UInt16(packet[3])
+        // Which rollover this packet belongs to: a sequence far below the highest has wrapped; far above, is late.
+        var roc = rolloverCounter
+        if let highest {
+            if sequence < highest, highest - sequence > 0x8000 { roc &+= 1 }
+            else if sequence > highest, sequence - highest > 0x8000, roc > 0 { roc &-= 1 }
+        }
+        let signed = Array(packet[0 ..< packet.count - 10])
+        let rocBytes: [UInt8] = [UInt8(roc >> 24), UInt8(roc >> 16 & 0xFF), UInt8(roc >> 8 & 0xFF), UInt8(roc & 0xFF)]
+        guard keys.tag(signed + rocBytes) == Array(packet[packet.count - 10 ..< packet.count]) else { return nil }
+        if roc > rolloverCounter || highest.map({ roc == rolloverCounter && sequence > $0 }) ?? true {
+            rolloverCounter = roc
+            highest = sequence
+        }
+        let ssrc = UInt32(packet[8]) << 24 | UInt32(packet[9]) << 16 | UInt32(packet[10]) << 8 | UInt32(packet[11])
+        let index = UInt64(roc) << 16 | UInt64(sequence)
+        return Array(signed[0 ..< headerLength])
+            + AESCM.crypt(key: keys.cipherKey, iv: keys.iv(ssrc: ssrc, index: index), Array(signed[headerLength...]))
+    }
+}
+
 /// Reads the viewer's SRTCP (its reports): checks the tag, then decrypts. Nil if the tag is wrong. HomeKit
 /// streams use the same keys both ways.
 public struct SRTCPReceiver: Sendable {

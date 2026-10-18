@@ -53,6 +53,18 @@ On a camera's page, **Run Check Now** checks it once, only when asked:
 
 A private or waking camera isn't checked, because there's nothing to watch and it may not answer.
 
+## HomeKit Secure Video
+
+For a camera that records to HomeKit Secure Video, a camera's page also says when Pond last sent the home hub a clip. Whether the hub keeps it, Pond can't see: the hub analyses each clip (its notifications come from that) and stores it or not.
+
+If clips are sent but never appear in the Home app, while another camera's do, the home hub's recording setup for that camera may be stuck. It happened with a doorbell: the hub took valid clips, notified about them, and kept none. The fix is to give the camera a fresh HomeKit identity:
+
+1. In Pond, Settings › Cameras › the camera › **Remove from HomeKit…** (or `pond homekit reset ID`).
+2. In the Home app, remove the accessory too.
+3. In Pond, **Add to the Home App…**, and add it with its new setup code. Its Home app settings (room, notifications, Recording Options, automations) are set up again.
+
+To look at exactly what the hub is sent, make a folder named `hksv-dump` beside the settings (`~/Library/Application Support/Pond/hksv-dump`): while it exists, each recording is also written there whole, as a playable MP4 named `<camera>-<time>-<stream>.mp4`. Remove the folder when done; nothing is written without it.
+
 ## Copy Report
 
 **Copy Report** puts a camera's state on the clipboard as text for a bug report: its make, model and firmware, its findings, its last day's video figures and incidents. It leaves out the camera's address and password.

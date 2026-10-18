@@ -114,6 +114,34 @@ import Testing
         #expect(w.audioFrames >= 155)
     }
 
+    @Test func aacFramesLastTheir1024SamplesWhenTheyArriveInBursts() throws {
+        // Sound timed in bursts, as a doorbell sends it (frames 54 samples apart, then a pause): each frame still
+        // lasts 1024, one after another; a real gap (here 5 frames' worth) is kept.
+        let w = FragmentWriter(video: MP4Tests.video, audio: MP4Tests.audio, fragmentSeconds: 2)
+        var time: Int64 = 0
+        for n in 0 ..< 30 {
+            w.addAudio(time: time, data: [0x21])
+            // Three frames 54 apart, then a pause: four frames over 4096 samples, as real time has it.
+            time += n % 4 == 3 ? 4 * 1024 - 54 * 3 : 54
+            if n == 20 { time += 5 * 1024 }
+        }
+        _ = w.addVideo(time: 0, nalus: [[0x65]], isKeyframe: true)
+        _ = w.addVideo(time: 3000, nalus: [[0x41]], isKeyframe: false)
+        let fragment = try #require(w.finish(until: 360_000))
+        let audio = try #require(Box.parse(fragment)[0].children.filter { $0.type == "traf" }[1].find("trun"))
+        let flags = audio.u32(0) & 0xFF_FFFF
+        let fields = [0x100, 0x200, 0x400, 0x800].filter { flags & UInt32($0) != 0 }.count
+        var at = 8 + (flags & 0x1 != 0 ? 4 : 0) + (flags & 0x4 != 0 ? 4 : 0)
+        var durations: [UInt32] = []
+        for _ in 0 ..< audio.u32(4) {
+            durations.append(audio.u32(at))
+            at += 4 * fields
+        }
+        #expect(durations.count == 30)
+        #expect(durations.filter { $0 == 1024 }.count == 29)
+        #expect(durations.contains { $0 > 5 * 1024 })
+    }
+
     @Test func framesBeforeTheFirstKeyframeAreDropped() {
         let w = FragmentWriter(video: MP4Tests.video, audio: nil)
         #expect(w.addVideo(time: 0, nalus: [[0x41]], isKeyframe: false) == nil)

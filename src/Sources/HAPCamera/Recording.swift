@@ -180,6 +180,9 @@ public final class RecordingController: @unchecked Sendable {
     }
     let log: @Sendable (String) -> Void
 
+    /// The camera's id (for the copies of its recordings kept while looking into them; see RecordingSession).
+    var camera = "camera"
+
     init(options: RecordingOptions, state: RecordingState?, source: (url: String, username: String, password: String)? = nil,
          prebuffer given: Prebuffer? = nil, log: @escaping @Sendable (String) -> Void) {
         self.options = options
@@ -387,7 +390,7 @@ public final class RecordingController: @unchecked Sendable {
             connection.send(message.response(status: 6, body: .dictionary([("status", .int(2))])))
             return
         }
-        let session = RecordingSession(streamID: streamID, connection: connection, selected: selected,
+        let session = RecordingSession(camera: camera, streamID: streamID, connection: connection, selected: selected,
                                        audio: s.audioActive ? audioTrack(for: selected, prebuffer: prebuffer) : nil,
                                        prebuffer: prebuffer, log: log)
         // Done (closed by the hub, or its connection): the clip it made, or the hub's error.

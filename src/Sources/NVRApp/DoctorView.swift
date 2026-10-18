@@ -122,6 +122,39 @@ struct DoctorView: View {
         .textCase(nil)
     }
 
+    /// For a camera recording to HomeKit Secure Video: when Pond last sent the home hub a clip, and what to do if
+    /// they're sent but never show in the Home app (which Pond can't see: the hub keeps them or not). Seen with a
+    /// doorbell whose clips the hub took, analysed (its notifications came) and threw away, until it was removed
+    /// from HomeKit and added again: its recording setup in the hub had gone wrong.
+    @ViewBuilder
+    func homeKitRecordingSection(_ camera: Config.Camera) -> some View {
+        if let recording = model.homeKitRecording(for: camera) {
+            Section {
+                LabeledContent("Last clip sent to the home hub") {
+                    if let clip = recording.lastClip {
+                        Text(clip.at.formatted(date: Calendar.current.isDateInToday(clip.at) ? .omitted : .abbreviated, time: .shortened)
+                             + " (\(Int(clip.seconds.rounded())) s)")
+                    } else {
+                        Text("None yet").foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("HomeKit Secure Video")
+            } footer: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Clips sent but never in the Home app? The home hub\u{2019}s recording setup for \(camera.name) may be stuck. Remove it from HomeKit in its settings, remove it in the Home app too, then add it again with its new setup code (its Home app settings and automations are set up again).")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Camera Settings\u{2026}") {
+                        model.settingsTab = .cameras
+                        model.cameraToEdit = camera.id
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
     // MARK: All cameras
 
     var overview: some View {
@@ -177,6 +210,7 @@ struct DoctorView: View {
         } header: {
             header(camera)
         }
+        homeKitRecordingSection(camera)
         Section("Last 24 hours") {
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
                 .frame(height: 90)

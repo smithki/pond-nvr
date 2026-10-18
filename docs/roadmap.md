@@ -33,7 +33,7 @@ Status: **done**, **in progress**, **next**, **later**.
 | HomeKit Secure Video | done | Recording on the camera's motion, from a prebuffer, re-encoded to the hub's choice; status and "Allow recording" in the app. Needs a home hub and iCloud+. |
 | Doorbells | done | A video doorbell accessory that rings on a press (Reolink's API, or ONVIF events) and records to HomeKit Secure Video on motion or a ring. A 4:3 doorbell is recorded fitted inside the size the hub chooses. Tried with a Reolink Video Doorbell WiFi. |
 | Motion from ONVIF cameras | done | A pull-point subscription to the camera's events: any motion, person, vehicle or animal detector drives the motion sensor, and a doorbell's visitor event rings. Tried end to end over ONVIF with a Reolink doorbell. |
-| Talkback | later | The Home app's microphone to the camera's speaker: see two-way audio under ONVIF. |
+| Talkback | done | The Home app's microphone to the camera's speaker, for a camera that can be talked through (it then has a Speaker in HomeKit): the Home app's AAC-ELD back over the live view's audio port, decoded, resampled and sent through the camera's own way of talking (the ONVIF backchannel). The camera's speaker opens with the first sound and closes after 2 s of silence. |
 
 The Home app on a Mac without a microphone plays no live sound from any camera; that is the Home app's behaviour, not Pond's.
 
@@ -51,11 +51,11 @@ Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login)
 | Two-way audio | done | The ONVIF backchannel (RTSP with `Require: www.onvif.org/ver20/backchannel`, then G.711 RTP to the camera): push-to-talk in the app and `pond camera talk`. |
 | Imaging | done | Day/night (IR cut filter), brightness, contrast, saturation, sharpness; speaker volume; relay outputs. The everyday ones in the dock, the rest in its Adjustments sidebar. |
 | Controls through a make's own API | done | Providers per make, ONVIF the fallback: each control is resolved on its own, from the camera's chosen provider, then any that fit, then ONVIF. Reolink's HTTP API for PTZ, day/night and volume. |
-| HomeKit talkback | later | The Home app's microphone to the camera's speaker, through the same backchannel. |
+| HomeKit talkback | done | Through the same backchannel: see Talkback under HomeKit. |
 | Privacy | done | Per camera, for every camera: not recorded, shown live or served to HomeKit (shown as off in the Home app), applied at once by the service; in the dock, the list's menu, its settings and `pond camera privacy`. |
 | Privacy on the camera itself | done | Two-way through a provider: Pond's privacy switches the camera's own mode, and its changes are pushed to Pond (Reolink: Baichuan's 574 to read, 575 to set, 623 pushed); a change made on the camera while Pond wasn't connected stands. Coming back, a camera is waking (its make's time) and its settings wait until its video returns. A camera without a provider for it that goes into its own privacy mode is seen by the recorder and shown as private on the camera. |
 | Reolink's own protocol (Baichuan) | done | A provider over TCP 9000, as Home Assistant's integration does (following reolink_aio, MIT): one lasting connection per camera. Privacy mode both ways, and motion, detections and doorbell presses pushed (HTTP polling only for a camera that doesn't answer there). Talking back over it, for cameras without an ONVIF backchannel, is later. |
-| More of a make's own controls | in progress | Reolink's IR lights, status light, mirror and flip are done (and restarting any ONVIF camera); its siren, chime volume and spotlight are next. |
+| More of a make's own controls | later | Reolink's IR lights, status light, mirror and flip are done (and restarting any ONVIF camera); its siren, chime volume and spotlight are next. |
 
 Not every camera speaks ONVIF, and some do two-way audio only through their own protocol; the camera check says what a camera supports, so the app shows only the controls that work.
 

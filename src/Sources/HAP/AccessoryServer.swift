@@ -81,6 +81,8 @@ public final class AccessoryServer: @unchecked Sendable {
         guard let keys = conn.keys else { return HTTPResponse(status: 470) }
         switch (request.method, request.path) {
         case ("GET", "/accessories"):
+            // Read when a controller first meets it, or after its shape changed (its configuration number went up).
+            log?("… HomeKit: its services read by controller \(keys.controller.identifier.prefix(8))…")
             return HTTPResponse(status: 200, contentType: "application/hap+json",
                                 body: Self.json(["accessories": [accessory.json()]]))
         case ("GET", "/characteristics"):

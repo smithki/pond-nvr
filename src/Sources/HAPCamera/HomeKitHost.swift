@@ -197,6 +197,7 @@ public final class HomeKitHost: @unchecked Sendable {
             ? RecordingController(options: RecordingOptions(doorbell: doorbell), state: record.recording,
                                   source: (camera.main, camera.username, password),
                                   log: Self.labelled(camera.name, log)) : nil
+        recording?.camera = id
         recording?.statusChanged = { [weak self] status in self?.update(id) { $0.recording = status } }
         // Told once now, so the app shows the camera waiting for the hub before the hub writes anything.
         recording?.report { _ in }
@@ -207,8 +208,27 @@ public final class HomeKitHost: @unchecked Sendable {
                 store.save(latest, for: id)
             }
         }
+        // Talking back from the Home app, for a camera that can be talked through (as the app's talk button): its
+        // speaker through the same controls, and connections, the service keeps for it.
+        let talks = camera.device?.controls?.talk != nil && !camera.isVideoOnly
+        let controls = talks ? CameraControls(access: CameraAccess(host: camera.host, username: camera.username, password: password,
+                                                                   mainStream: camera.main), device: camera.device) : nil
+        let privacy = self.privacy
+        var speaker: (@Sendable () async -> (any TalkSession)?)?
+        if let controls {
+            speaker = { @Sendable () async -> (any TalkSession)? in
+                // Not while private: nothing of it is shown, and nothing is said through it.
+                guard !privacy.isPrivate(id) else { return nil }
+                do throws(ControlFailure) {
+                    let session: any TalkSession = try await controls.withTalk { c throws(ControlFailure) in try await c.open() }
+                    return session
+                } catch {
+                    return nil
+                }
+            }
+        }
         let accessory = CameraAccessory(name: camera.name, details: AccessoryDetails(device: camera.device, cameraID: id),
-                                        doorbell: doorbell, streams: streams, recording: recording)
+                                        doorbell: doorbell, streams: streams, recording: recording, speaker: speaker)
         // The recording offers count as the shape too: changed, controllers look again.
         let configNumber = Self.configNumber(for: accessory.accessory.layoutDigest + (recording?.options.digest ?? ""),
                                              camera: id, records: records)
@@ -218,7 +238,6 @@ public final class HomeKitHost: @unchecked Sendable {
         snapshots.keyframe = { streams.lazy.compactMap(\.latestKeyframe).first }
         let name = camera.name
         let log = self.log
-        let privacy = self.privacy
         for stream in streams { stream.allowed = { !privacy.isPrivate(id) } }
         // Nor its main stream held for HomeKit Secure Video's prebuffer.
         recording?.prebuffer?.paused = { privacy.isPrivate(id) }
@@ -405,6 +424,7 @@ final class MotionHold: @unchecked Sendable {
                 try? await Task.sleep(for: .seconds(wait))
                 guard let self, !Task.isCancelled else { return }
                 lock.withLock { self.since = nil }
+                log("HomeKit: motion over at \(name)")
                 accessory?.motion.update(.bool(false))
             }
         }

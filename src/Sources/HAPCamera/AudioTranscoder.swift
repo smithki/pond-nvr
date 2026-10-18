@@ -117,6 +117,103 @@ public final class AudioTranscoder {
     }
 }
 
+/// The other way, for talking back: the Home app's AAC-ELD frames (mono, at the rate the stream was set up with)
+/// decoded to 16-bit PCM, then resampled to the rate a camera's speaker takes. The decoder is told the stream's
+/// format by the magic cookie of an encoder made for the same rate (what the Home app's encoder makes too).
+public final class ELDDecoder {
+    public let inputRate: Int
+    public let outputRate: Int
+    private let decoder: AudioConverterRef
+    private let resampler: AudioConverterRef?
+    private let decodeFeed = Feed()
+    private let resampleFeed = Feed()
+
+    public init?(sampleRate: Int, outputRate: Int) {
+        var eld = AudioStreamBasicDescription(
+            mSampleRate: Double(sampleRate), mFormatID: kAudioFormatMPEG4AAC_ELD, mFormatFlags: 0, mBytesPerPacket: 0,
+            mFramesPerPacket: AudioTranscoder.eldFrameLength, mBytesPerFrame: 0, mChannelsPerFrame: 1, mBitsPerChannel: 0,
+            mReserved: 0)
+        var pcm = Self.pcm(sampleRate)
+        var outPCM = Self.pcm(outputRate)
+        // The stream's description, from an encoder of the same: ELD can't be decoded without it.
+        var encoder: AudioConverterRef?
+        guard AudioConverterNew(&pcm, &eld, &encoder) == noErr, let encoder else { return nil }
+        defer { AudioConverterDispose(encoder) }
+        var size: UInt32 = 0
+        guard AudioConverterGetPropertyInfo(encoder, kAudioConverterCompressionMagicCookie, &size, nil) == noErr, size > 0
+        else { return nil }
+        var cookie = [UInt8](repeating: 0, count: Int(size))
+        guard AudioConverterGetProperty(encoder, kAudioConverterCompressionMagicCookie, &size, &cookie) == noErr else { return nil }
+
+        var dec: AudioConverterRef?
+        guard AudioConverterNew(&eld, &pcm, &dec) == noErr, let dec else { return nil }
+        guard AudioConverterSetProperty(dec, kAudioConverterDecompressionMagicCookie, size, cookie) == noErr else {
+            AudioConverterDispose(dec)
+            return nil
+        }
+        var res: AudioConverterRef?
+        if outputRate != sampleRate {
+            guard AudioConverterNew(&pcm, &outPCM, &res) == noErr, res != nil else {
+                AudioConverterDispose(dec)
+                return nil
+            }
+        }
+        decoder = dec
+        resampler = res
+        inputRate = sampleRate
+        self.outputRate = outputRate
+    }
+
+    deinit {
+        AudioConverterDispose(decoder)
+        if let resampler { AudioConverterDispose(resampler) }
+    }
+
+    static func pcm(_ rate: Int) -> AudioStreamBasicDescription {
+        AudioStreamBasicDescription(
+            mSampleRate: Double(rate), mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, mBytesPerPacket: 2,
+            mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
+    }
+
+    /// One AAC-ELD frame in; its samples at the output rate out (some may come with the next frame).
+    public func decode(_ frame: [UInt8]) -> [Int16] {
+        decodeFeed.packet = frame
+        var out = [UInt8](repeating: 0, count: Int(AudioTranscoder.eldFrameLength) * 2 * 2)
+        var pcm: [UInt8] = []
+        while true {
+            var frames = UInt32(out.count / 2)
+            let status = out.withUnsafeMutableBytes { raw -> OSStatus in
+                var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                    mNumberChannels: 1, mDataByteSize: UInt32(raw.count), mData: raw.baseAddress))
+                return AudioConverterFillComplexBuffer(decoder, Feed.packetInput, Unmanaged.passUnretained(decodeFeed).toOpaque(),
+                                                       &frames, &list, nil)
+            }
+            pcm += out[0 ..< Int(frames) * 2]
+            if frames == 0 || status != noErr { break }
+        }
+        guard let resampler else { return Self.samples(pcm) }
+        resampleFeed.pcm += pcm
+        var resampled: [UInt8] = []
+        while true {
+            var frames = UInt32(out.count / 2)
+            let status = out.withUnsafeMutableBytes { raw -> OSStatus in
+                var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                    mNumberChannels: 1, mDataByteSize: UInt32(raw.count), mData: raw.baseAddress))
+                return AudioConverterFillComplexBuffer(resampler, Feed.pcmInput, Unmanaged.passUnretained(resampleFeed).toOpaque(),
+                                                       &frames, &list, nil)
+            }
+            resampled += out[0 ..< Int(frames) * 2]
+            if frames == 0 || status != noErr { break }
+        }
+        return Self.samples(resampled)
+    }
+
+    static func samples(_ bytes: [UInt8]) -> [Int16] {
+        stride(from: 0, to: bytes.count - 1, by: 2).map { Int16(bitPattern: UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8) }
+    }
+}
+
 /// What a converter is fed from, kept alive while it reads it.
 private final class Feed {
     /// "No more data for now": the converter keeps its state and is fed again later.

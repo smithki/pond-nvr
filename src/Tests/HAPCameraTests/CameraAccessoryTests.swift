@@ -29,6 +29,34 @@ final class MemoryRecords: HomeKitRecords, @unchecked Sendable {
         #expect(camera.motion.type == HAPType.motionDetected)
     }
 
+    @Test func aCameraThatCanBeTalkedThroughHasASpeaker() {
+        let stream = StreamManagement(main: ("rtsp://h/main", "u", "p"), sub: ("rtsp://h/sub", "u", "p"), log: { _ in })
+        let camera = CameraAccessory(name: "Porch", details: AccessoryDetails(device: nil, cameraID: "porch"), streams: [stream],
+                                     speaker: { nil })
+        let speaker = camera.accessory.services.first { $0.type == HAPType.speaker }
+        #expect(speaker?.characteristics.map(\.type) == [HAPType.mute, HAPType.volume])
+        #expect(stream.openSpeaker != nil)
+        // Without one, none.
+        #expect(!CameraAccessory(name: "Porch", details: AccessoryDetails(device: nil, cameraID: "porch")).accessory.services
+            .contains { $0.type == HAPType.speaker })
+    }
+
+    @Test func aSpeakerLeavesTheRecordingServicesWhereTheyWere() {
+        // The hub keeps a recording camera's services by their ids: a speaker added before them moved them, and
+        // it stopped asking to record.
+        func recordingIDs(speaker: Bool) -> [Int] {
+            let recording = RecordingController(options: RecordingOptions(doorbell: true), state: nil) { _ in }
+            let stream = StreamManagement(main: ("rtsp://h/main", "u", "p"), sub: ("rtsp://h/sub", "u", "p"), log: { _ in })
+            let camera = CameraAccessory(name: "Door", details: AccessoryDetails(device: nil, cameraID: "door"), doorbell: true,
+                                         streams: [stream], recording: recording, speaker: speaker ? { @Sendable in nil } : nil)
+            let all = camera.accessory.services
+            let first = all.firstIndex { $0.type == HAPType.cameraRecordingManagement } ?? all.count
+            return all[first...].filter { $0.type != HAPType.speaker }.flatMap { [$0.iid] + $0.characteristics.map(\.iid) }
+        }
+        #expect(!recordingIDs(speaker: false).isEmpty)
+        #expect(recordingIDs(speaker: true) == recordingIDs(speaker: false))
+    }
+
     @Test func eachViewerSlotIsAStreamingServiceAfterTheRest() {
         func slots(_ n: Int) -> [StreamManagement] {
             (0 ..< n).map { _ in StreamManagement(main: ("rtsp://x/main", "u", "p"), sub: ("rtsp://x/sub", "u", "p")) { _ in } }

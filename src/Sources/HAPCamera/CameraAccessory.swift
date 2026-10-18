@@ -1,6 +1,8 @@
 // A camera as a HomeKit accessory: Accessory Information, Protocol Information, Camera RTP Stream Management
 // (the camera itself, with the stream settings it offers, and live view through StreamManagement), a
-// Microphone and a Motion Sensor. Without a StreamManagement, stream setups are answered "error".
+// Microphone, a Speaker when the camera can be talked through (the Home app then offers to talk back), and a
+// Motion Sensor. Without a StreamManagement, stream setups are answered "error".
+import Devices
 import Foundation
 import HAP
 import NVRCore
@@ -95,7 +97,8 @@ public final class CameraAccessory: @unchecked Sendable {
     let recording: RecordingController?
 
     init(name: String, details: AccessoryDetails, doorbell: Bool = false, options: CameraStreamOptions = .standard,
-         streams: [StreamManagement] = [], recording: RecordingController? = nil) {
+         streams: [StreamManagement] = [], recording: RecordingController? = nil,
+         speaker openSpeaker: (@Sendable () async -> (any TalkSession)?)? = nil) {
         self.recording = recording
         self.streams = streams
         self.details = details
@@ -142,8 +145,25 @@ public final class CameraAccessory: @unchecked Sendable {
         }
         // Recording's services after all the rest, so theirs keep their ids.
         if let recording {
-            let sensors = [motionSensor] + (doorbell ? services.filter { $0.type == HAPType.doorbell } : [])
-            services += recording.services(sensors: sensors, statusActive: [motionSensor.characteristic(HAPType.statusActive)!])
+            // The motion sensor linked to it, not a doorbell's button (as HAP-NodeJS links them): linked too, the hub
+            // took a doorbell's recordings (valid, and its notifications sent) and kept none of them.
+            services += recording.services(sensors: [motionSensor], statusActive: [motionSensor.characteristic(HAPType.statusActive)!])
+        }
+        // Talking back: a speaker (muted and how loud, as the Home app sets them), last of all: added before the
+        // recording services, it moved theirs, and the hub stopped asking to record (it keeps them by their ids).
+        if let openSpeaker {
+            let speakerMute = Characteristic(type: HAPType.mute, format: .bool, permissions: [.read, .write, .notify],
+                                             value: .bool(false))
+            let volume = Characteristic(type: HAPType.volume, format: .uint8, permissions: [.read, .write, .notify],
+                                        value: .int(100))
+            volume.minValue = 0
+            volume.maxValue = 100
+            services.append(Service(type: HAPType.speaker, [speakerMute, volume]))
+            for stream in streams {
+                stream.openSpeaker = openSpeaker
+                stream.speakerMuted = { speakerMute.value == .bool(true) }
+                stream.speakerVolume = { if case let .int(level) = volume.value { Double(level) / 100 } else { 1 } }
+            }
         }
         accessory = Accessory(services: services)
     }

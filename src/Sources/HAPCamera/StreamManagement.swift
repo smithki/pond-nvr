@@ -2,6 +2,7 @@
 // ports and SRTP keys) and reads back ours; then it writes Selected RTP Stream Configuration to start the
 // stream (with the resolution, payload type, bitrate and packet size it wants), reconfigure, or end it.
 // Field layouts follow HAP-NodeJS's RTPStreamManagement; numbers are little-endian.
+import Devices
 import Foundation
 import HAP
 import NVRCore
@@ -45,6 +46,12 @@ public final class StreamManagement: @unchecked Sendable {
     var allowed: @Sendable () -> Bool = { true }
     /// The accessory's microphone is muted in the Home app: no sound is sent.
     var microphoneMuted: @Sendable () -> Bool = { false }
+    /// Talking back (the accessory has a speaker): the camera's speaker opened, and the Home app's Speaker
+    /// muted or how loud. Nil: the camera can't be talked through.
+    var openSpeaker: (@Sendable () async -> (any TalkSession)?)?
+    var speakerMuted: @Sendable () -> Bool = { false }
+    var speakerVolume: @Sendable () -> Double = { 1 }
+    private var talkback: Talkback?
     private var prepared: PreparedStream?
     private var live: LiveSession?
     private let lock = NSLock()
@@ -196,15 +203,30 @@ public final class StreamManagement: @unchecked Sendable {
             session.enableAudio(audio, socket: prepared.audioSocket, masterKey: prepared.audioKey,
                                 masterSalt: prepared.audioSalt, muted: microphoneMuted)
         }
-        session.onEnd = { [weak self] in self?.statusChanged?(false) }
+        // The Home app's microphone back, to the camera's speaker (only with sound, and a speaker to talk through).
+        var talkback: Talkback?
+        if let audio, let openSpeaker {
+            talkback = Talkback(socket: prepared.audioSocket, masterKey: prepared.audioKey, masterSalt: prepared.audioSalt,
+                                sampleRate: audio.sampleRate, open: openSpeaker, muted: speakerMuted, volume: speakerVolume) { line in
+                log(line.replacingOccurrences(of: "HomeKit talkback:", with: "HomeKit talkback (\(viewer)):"))
+            }
+        }
+        session.onEnd = { [weak self] in
+            self?.lock.withLock { self?.talkback }?.stop()
+            self?.statusChanged?(false)
+        }
         session.onProblem = { [weak self] kind in self?.problem?(kind) }
         session.onPlaying = { [weak self] in self?.playing?() }
-        lock.withLock {
+        let previous = lock.withLock { () -> Talkback? in
             live?.stop()
             live = session
+            defer { self.talkback = talkback }
+            return self.talkback
         }
+        previous?.stop()
         statusChanged?(true)
         session.start()
+        talkback?.start()
     }
 
     /// The main stream (about 2–3 Mbit/s) only for a large view with the bandwidth for it; otherwise the
@@ -239,10 +261,11 @@ public final class StreamManagement: @unchecked Sendable {
     }
 
     func stop() {
-        let session = lock.withLock {
-            defer { live = nil; prepared = nil }
-            return live
+        let (session, talkback) = lock.withLock {
+            defer { live = nil; prepared = nil; self.talkback = nil }
+            return (live, self.talkback)
         }
         session?.stop()
+        talkback?.stop()
     }
 }

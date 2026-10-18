@@ -63,6 +63,23 @@ public struct RTPPacketizer: Sendable {
         packetize(aac: [frame], timestamp: timestamp)
     }
 
+    /// The AAC frames in an RTP payload made as `packetize(aac:)` makes it (RFC 3640, AAC-hbr: 13-bit sizes).
+    public static func aacFrames(inPayload payload: [UInt8]) -> [[UInt8]] {
+        guard payload.count >= 2 else { return [] }
+        let headerBits = Int(payload[0]) << 8 | Int(payload[1])
+        let headers = (headerBits + 7) / 8
+        guard payload.count >= 2 + headers else { return [] }
+        var frames: [[UInt8]] = []
+        var at = 2 + headers
+        for i in stride(from: 2, to: 2 + headers - 1, by: 2) {
+            let size = (Int(payload[i]) << 8 | Int(payload[i + 1])) >> 3
+            guard size > 0, at + size <= payload.count else { break }
+            frames.append(Array(payload[at ..< at + size]))
+            at += size
+        }
+        return frames
+    }
+
     private mutating func packet(_ payload: [UInt8], timestamp: UInt32, marker: Bool) -> [UInt8] {
         let header: [UInt8] = [
             0x80, (marker ? 0x80 : 0) | payloadType & 0x7F,

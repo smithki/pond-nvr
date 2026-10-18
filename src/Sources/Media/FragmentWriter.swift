@@ -1,6 +1,11 @@
 // Collects frames and cuts them into fragments: a new fragment starts at the first keyframe after
 // `fragmentDuration`. A sample's duration is the gap to the next one, so the last frame is held back until
 // the next arrives. Audio follows video: a fragment takes the audio that starts before its end.
+//
+// An AAC frame is 1024 samples, whatever its timestamp says: each lasts that long, one after another, and
+// only a real gap in the sound (the next frame more than two frames late) is kept as a longer one. A camera
+// that sends its sound in bursts (a doorbell's frames 3 ms apart, then a pause) otherwise made frames of
+// 54 and 59 samples, and the home hub kept none of its recordings.
 
 public final class FragmentWriter {
     public let video: VideoTrack
@@ -11,6 +16,9 @@ public final class FragmentWriter {
     private var pendingVideo: [(time: Int64, data: [UInt8], key: Bool)] = []
     private var pendingAudio: [(time: Int64, data: [UInt8])] = []
     private var lastVideoDuration: Int64 = 3000
+    /// Where the audio written so far ends (sample-rate units): the next fragment's sound carries on from it.
+    private var audioEnd: Int64?
+    static let aacFrame: Int64 = 1024
 
     /// Frames written so far, for reporting.
     public private(set) var videoFrames = 0
@@ -68,12 +76,19 @@ public final class FragmentWriter {
         var audioTime: Int64 = 0
         if let audio {
             let endInAudio = end * Int64(audio.sampleRate) / Int64(VideoTrack.timescale)
-            let take = pendingAudio.prefix { $0.time < endInAudio }
-            audioTime = take.first?.time ?? 0
+            let take = Array(pendingAudio.prefix { $0.time < endInAudio })
+            // Carrying on from the last fragment's sound, unless this one starts after a gap.
+            var running = take.first.map { first in audioEnd.map { $0 >= first.time - 2 * Self.aacFrame ? max($0, first.time) : first.time } ?? first.time } ?? 0
+            audioTime = running
             for (i, frame) in take.enumerated() {
-                let next = i + 1 < take.count ? take[take.startIndex + i + 1].time : frame.time + 1024
-                audioSamples.append(MP4Sample(data: frame.data, duration: UInt32(max(1, next - frame.time)), isSync: true))
+                // A frame's length, longer only to bridge a real gap before the next.
+                let next = i + 1 < take.count ? take[i + 1].time : running + Self.aacFrame
+                let gap = next - running
+                let duration = gap > 2 * Self.aacFrame ? gap : Self.aacFrame
+                audioSamples.append(MP4Sample(data: frame.data, duration: UInt32(duration), isSync: true))
+                running += duration
             }
+            if !take.isEmpty { audioEnd = running }
             pendingAudio.removeFirst(take.count)
         }
         sequence += 1

@@ -64,6 +64,8 @@ A provider that can switch a camera's own privacy mode offers a `PrivacyControl`
 
 The app never talks to a camera itself: it asks the service over the control socket (`controls.sock` beside the settings; `ControlServer`, `ControlClient`), one JSON line per request (`ptz.move`, `ptz.presets`, `items.values`, `item.set`, `talk`, …), so passwords stay with the service and the logins stay shared. Talking back sends the microphone's sound over the same socket after a `talk` request.
 
+The Home app talks back too. A camera that can be talked through has a Speaker in HomeKit, and the Home app's talk button then sends its microphone during a live view: AAC-ELD over the stream's audio port, with the same SRTP keys as the sound sent to it (`Talkback`). The service decodes it, resamples it to the rate the camera's speaker takes and sends it through the same `TalkControl` as the app's button. The camera's speaker opens with the first sound (what arrives meanwhile is held, so the first words aren't lost) and closes after 2 s without any, so a live view alone doesn't hold it. The Home app's Speaker mute and volume apply; a private camera isn't talked through.
+
 ## Adding a make
 
 A provider for another make, or another protocol for one (Reolink's own Baichuan, say), is a file in `Devices/Providers/` and an entry in `CameraProviders.all`:

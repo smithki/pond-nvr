@@ -10,6 +10,7 @@ import Media
 import NVRCore
 
 final class RecordingSession: @unchecked Sendable {
+    let camera: String
     let streamID: Int64
     let connection: DataStreamConnection
     let selected: SelectedRecording
@@ -43,8 +44,23 @@ final class RecordingSession: @unchecked Sendable {
     /// The largest chunk of a fragment in one event.
     static let maxChunk = 0x40000
 
-    init(streamID: Int64, connection: DataStreamConnection, selected: SelectedRecording, audio: AudioTrack?,
+    /// For looking into what the hub is sent: while a folder `hksv-dump` is beside the settings, each recording
+    /// is also written there whole (its initialization segment and fragments, a playable MP4), named by its
+    /// camera's id, when it began and its stream. Nothing is written without the folder.
+    static var dumpFolder: String {
+        (NSString(string: Brand.supportFolder).expandingTildeInPath as NSString).appendingPathComponent("hksv-dump")
+    }
+    private lazy var dumpFile: FileHandle? = {
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: Self.dumpFolder, isDirectory: &isFolder), isFolder.boolValue else { return nil }
+        let path = (Self.dumpFolder as NSString).appendingPathComponent("\(camera)-\(Int(began.timeIntervalSince1970))-\(streamID).mp4")
+        FileManager.default.createFile(atPath: path, contents: nil)
+        return FileHandle(forWritingAtPath: path)
+    }()
+
+    init(camera: String = "camera", streamID: Int64, connection: DataStreamConnection, selected: SelectedRecording, audio: AudioTrack?,
          prebuffer: Prebuffer, log: @escaping @Sendable (String) -> Void) {
+        self.camera = camera
         self.streamID = streamID
         self.connection = connection
         self.selected = selected
@@ -148,6 +164,7 @@ final class RecordingSession: @unchecked Sendable {
             sentBytes += data.count
             return sequence
         }
+        lock.withLock { try? dumpFile?.write(contentsOf: data) }
         if number == 1 { log("✓ HomeKit: recording stream \(streamID) under way: \(selected.width)×\(selected.height) at \(selected.bitrate) kbit/s\(audio == nil ? ", no sound" : "")") }
         var offset = 0, chunk: Int64 = 1
         while offset < data.count {
