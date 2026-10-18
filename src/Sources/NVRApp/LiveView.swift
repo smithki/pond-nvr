@@ -32,6 +32,13 @@ struct LiveView: View {
     /// preferences can arrive as a separate update, after the animation meant for it.
     @State private var stagedList: [String]?
     @AppStorage(LiveView.railKey) private var showRail = true
+    /// The rail as drawn: the stored preference, followed (it changes apart from the animation meant for it), or
+    /// set here with the stage, so the rail coming back or stepping aside as one camera becomes several (or one)
+    /// moves in the same animation as the tiles and the sidebar, not on its own a moment later.
+    @State private var railShown: Bool?
+    /// The dock's adjustments shown (its stored preference), to bring their sidebar with the stage's change.
+    @AppStorage(LiveControlsDock.adjustingKey) private var dockAdjusting = false
+    private var railDrawn: Bool { railShown ?? showRail }
     /// The live controls dock is open under a camera watched on its own: kept between launches, and in view
     /// state for this session (a stored preference's change can arrive apart from the animation meant for it,
     /// and the dock and stage would then jump).
@@ -86,7 +93,7 @@ struct LiveView: View {
                 }
             } else {
                 HStack(spacing: 0) {
-                    if showRail {
+                    if railDrawn {
                         railView(cameras)
                             .transition(model.railMovesAtOnce ? .identity : .move(edge: .leading).combined(with: .opacity))
                     }
@@ -144,7 +151,16 @@ struct LiveView: View {
                     let camera = docked.camera.id
                     @MainActor func ready() {
                         guard !dockReady, self.docked(cameras)?.camera.id == camera else { return }
-                        withAnimation(Self.dockAnimation) { dockReady = true }
+                        withAnimation(Self.dockAnimation) {
+                            dockReady = true
+                            // The adjustments' sidebar comes with it: the rail steps aside in the same motion if
+                            // there isn't room for both (else the dock's own check moved it a moment later).
+                            if controlsWanted, model.adjustmentsInSidebar, !model.sidebarFloats, railDrawn,
+                               !railFitsBesideSidebar {
+                                setRail(false)
+                                model.railMadeRoom = true
+                            }
+                        }
                     }
                     // Whichever is first: loaded, or waited long enough (the loading goes on either way).
                     let loading = Task {
@@ -166,7 +182,18 @@ struct LiveView: View {
                         .keyboardShortcut("l", modifiers: [.command, .option])
                         .hidden()
                 }
-                .animation(model.railMovesAtOnce ? nil : .snappy(duration: 0.25), value: showRail)
+                // The preference changed elsewhere (the toolbar, the dock making room): followed, sliding (or at once,
+                // as the window is resized).
+                .onChange(of: showRail) { _, shown in
+                    guard railDrawn != shown else { return }
+                    if model.railMovesAtOnce {
+                        var instant = Transaction()
+                        instant.disablesAnimations = true
+                        withTransaction(instant) { railShown = shown }
+                    } else {
+                        withAnimation(.snappy(duration: 0.25)) { railShown = shown }
+                    }
+                }
                 // Whether the adjustments fit beside the stage (the rail out of the way if need be) or float over it.
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
                     contentWidth = $0
@@ -349,8 +376,45 @@ struct LiveView: View {
     static let recedeScale = 0.98
 
     func stage(_ ids: [String]) {
-        withAnimation(motion == .calm ? Self.calmAnimation : Self.layoutAnimation) { stagedList = ids }
+        withAnimation(motion == .calm ? Self.calmAnimation : Self.layoutAnimation) {
+            alongStage(next: ids)
+            stagedList = ids
+        }
         stagedIDs = ids.joined(separator: ",")
+    }
+
+    /// The rail drawn (and kept so), in the current transaction.
+    func setRail(_ shown: Bool) {
+        railShown = shown
+        if showRail != shown { showRail = shown }
+    }
+
+    /// The rail and the adjustments' sidebar for the stage about to be shown, in the same transaction as the
+    /// stage's change, so they move with the tiles (and the dock coming or going), not on their own a moment later
+    /// (the stage's width changing then, mid-move, the tiles were sent on at once):
+    /// - one camera becoming several: the dock goes, so a rail that stepped aside for it comes back;
+    /// - several becoming one with its controls open: its adjustments' sidebar comes (if they're shown and it has
+    ///   some; the dock, new, would bring it only after it appeared, at once), and the rail steps aside if there
+    ///   isn't room for it beside them.
+    func alongStage(next ids: [String]) {
+        let cameras = model.config?.cameras ?? []
+        let now = staged(cameras).count
+        if ids.count > 1, now == 1, model.railMadeRoom, !railDrawn {
+            setRail(true)
+            model.railMadeRoom = false
+        } else if ids.count == 1, now > 1, controlsOpen, let camera = cameras.first(where: { $0.id == ids[0] }) {
+            let adjustments = !DockContents.adjustments(model.controls(for: camera) ?? Config.Controls()).isEmpty
+            if dockAdjusting, adjustments, !model.sidebarFloats, !model.adjustmentsInSidebar { model.adjustmentsInSidebar = true }
+            if model.adjustmentsInSidebar, !model.sidebarFloats, railDrawn, !railFitsBesideSidebar {
+                setRail(false)
+                model.railMadeRoom = true
+            }
+        }
+    }
+
+    /// The rail, the stage at its margins, the sidebar and the narrowest dock fit across the window.
+    var railFitsBesideSidebar: Bool {
+        contentWidth - LiveLayout.railRoom(railKeptWidth) - LiveLayout.stageMargins - LiveLayout.sidebarRoom >= model.dockNarrowest
     }
 
     /// Moves a dragged camera to another's place in the order (its priority, saved in the settings), the
@@ -372,7 +436,10 @@ struct LiveView: View {
         // As for solo: the motion first, then the change.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(16))
-            withAnimation(Self.revealAnimation) { stagedList = ids }
+            withAnimation(Self.revealAnimation) {
+                alongStage(next: ids)
+                stagedList = ids
+            }
             stagedIDs = ids.joined(separator: ",")
             try? await Task.sleep(for: .seconds(0.8))
             inFront = []
@@ -402,9 +469,15 @@ struct LiveView: View {
                 instant.disablesAnimations = true
                 withTransaction(instant) { stagedList = [id] }
             case .focus:
-                withAnimation(Self.focusAnimation) { stagedList = [id] }
+                withAnimation(Self.focusAnimation) {
+                    alongStage(next: [id])
+                    stagedList = [id]
+                }
             default:
-                withAnimation(Self.recedeAnimation) { stagedList = [id] }
+                withAnimation(Self.recedeAnimation) {
+                    alongStage(next: [id])
+                    stagedList = [id]
+                }
             }
             stagedIDs = id
         }

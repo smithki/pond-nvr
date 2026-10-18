@@ -10,29 +10,35 @@ import SwiftUI
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
     @State private var everything = false
+    /// The list of what happened takes the room the page leaves, so a camera's page fits without scrolling
+    /// (only the list scrolls): from where it starts to the tab's bottom, less the form's margin. The page
+    /// doesn't scroll while it fits, so where the list starts stays put (scrolled, it moved, the list grew, and
+    /// the page scrolled on and on); with too many findings for even a short list, the page scrolls instead.
+    @State private var tabHeight = 560.0
+    @State private var listTop: Double?
+    /// The form's inset at its sides (the list spans its card, so its left edge is the card's): the same is kept
+    /// below the last card, at the window's bottom edge.
+    @State private var sideInset = 20.0
+
+    static let shortestList = 96.0
+
+    /// From the list's top to the tab's bottom, less the side inset (its card then sits as far from the bottom
+    /// edge as from the sides; measured on screen to the point).
+    var room: Double { tabHeight - (listTop ?? tabHeight) - sideInset }
+    var listHeight: Double { max(Self.shortestList, room) }
+    /// It fits: the page holds still.
+    var fits: Bool { room >= Self.shortestList }
 
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
     var doctor: CameraDoctor { model.doctor }
 
     var body: some View {
-        @Bindable var model = model
         Form {
-            Section {
-                Picker("Camera", selection: $model.doctorCamera) {
-                    Text("All cameras").tag(String?.none)
-                    Divider()
-                    ForEach(cameras) { Text($0.name).tag(String?.some($0.id)) }
-                }
-            } footer: {
-                // Said once, on the overview: a camera's page keeps its room for the camera.
-                if model.doctorCamera == nil {
-                    Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras unless you run a check.")
-                        .foregroundStyle(.secondary)
-                }
-            }
             if !doctor.hasRecords {
                 Section {
                     Text("Nothing recorded yet. The recorder keeps what it sees of each camera while it runs.").foregroundStyle(.secondary)
+                } header: {
+                    header(nil)
                 }
             } else if let id = model.doctorCamera, let camera = cameras.first(where: { $0.id == id }) {
                 cameraSections(camera)
@@ -41,6 +47,9 @@ struct DoctorView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollDisabled(model.doctorCamera != nil && fits)
+        .coordinateSpace(.named(Self.space))
+        .onGeometryChange(for: Double.self) { $0.size.height } action: { tabHeight = $0 }
         .task {
             while !Task.isCancelled {
                 await doctor.refresh(config: model.config)
@@ -49,34 +58,91 @@ struct DoctorView: View {
         }
     }
 
+    nonisolated static let space = "doctor"
+
+    /// The page's first row, its title: which camera (or all) as a heading like the page's others, in line with
+    /// them, opening a menu of the cameras (a chevron after it says so); then what can be done with it.
+    func header(_ camera: Config.Camera?) -> some View {
+        HStack(spacing: 10) {
+            Menu {
+                Picker("Camera", selection: Binding(get: { model.doctorCamera }, set: { model.doctorCamera = $0 })) {
+                    Text("All Cameras").tag(String?.none)
+                    Divider()
+                    ForEach(cameras) { Text($0.name).tag(String?.some($0.id)) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 5) {
+                    Text(camera?.name ?? "All Cameras")
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(.rect)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Which camera the doctor shows")
+            Spacer()
+            // Its buttons as any others (not in the heading's type).
+            Group {
+                if let camera {
+                    // Only when asked: the doctor otherwise asks nothing of the camera.
+                    Button {
+                        Task { await doctor.check(camera, model: model) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if doctor.checking.contains(camera.id) { ProgressView().controlSize(.mini) }
+                            Text(doctor.checking.contains(camera.id) ? "Checking\u{2026}" : "Run Check Now")
+                        }
+                    }
+                    .disabled(doctor.checking.contains(camera.id))
+                    .help("Watch \(camera.name)\u{2019}s video for a few seconds and read its controls, now")
+                    Button("Copy Report") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(doctor.report(camera), forType: .string)
+                    }
+                    .help("Copy what the doctor sees of \(camera.name) as text, for a bug report (without its address or password)")
+                }
+            }
+            .font(.body)
+        }
+        .controlSize(.small)
+        .textCase(nil)
+    }
+
     // MARK: All cameras
 
     var overview: some View {
         Group {
-            camerasSection
-            ThresholdsSection()
-        }
-    }
-
-    var camerasSection: some View {
-        Section("Cameras") {
-            ForEach(cameras) { camera in
-                Button { model.doctorCamera = camera.id } label: {
-                    HStack(spacing: 10) {
-                        StatusDot(finding: doctor.worst(camera.id), isPrivate: model.isPrivate(camera.id))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(camera.name)
-                            Text(doctor.worst(camera.id)?.headline ?? (model.isPrivate(camera.id) ? "Private" : "No problems"))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+            Section {
+                ForEach(cameras) { camera in
+                    Button { model.doctorCamera = camera.id } label: {
+                        HStack(spacing: 10) {
+                            StatusDot(finding: doctor.worst(camera.id), isPrivate: model.isPrivate(camera.id))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(camera.name)
+                                Text(doctor.worst(camera.id)?.headline ?? (model.isPrivate(camera.id) ? "Private" : "No problems"))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        .contentShape(.rect)
                     }
-                    .contentShape(.rect)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+            } header: {
+                header(nil)
+            } footer: {
+                Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras unless you run a check.")
+                    .foregroundStyle(.secondary)
             }
+            ThresholdsSection()
         }
     }
 
@@ -91,28 +157,17 @@ struct DoctorView: View {
                     .foregroundStyle(.green)
             }
             ForEach(found) { finding in FindingRow(camera: camera, finding: finding) }
-        } header: {
-            HStack {
-                Text("Findings")
-                Spacer()
-                // Only when asked: the doctor otherwise asks nothing of the camera.
-                Button {
-                    Task { await doctor.check(camera, model: model) }
-                } label: {
-                    HStack(spacing: 6) {
-                        if doctor.checking.contains(camera.id) { ProgressView().controlSize(.mini) }
-                        Text(doctor.checking.contains(camera.id) ? "Checking\u{2026}" : "Run Check Now")
-                    }
+            if let check = doctor.checks[camera.id] {
+                // The last check, under the findings it may explain.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Checked at " + check.time.formatted(date: .omitted, time: .shortened))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    CheckLinesView(lines: check.lines)
                 }
-                .controlSize(.small)
-                .disabled(doctor.checking.contains(camera.id))
-                .help("Watch \(camera.name)\u{2019}s video for a few seconds and read its controls, now")
             }
-        }
-        if let check = doctor.checks[camera.id] {
-            Section("Checked at " + check.time.formatted(date: .omitted, time: .shortened)) {
-                CheckLinesView(lines: check.lines)
-            }
+        } header: {
+            header(camera)
         }
         Section("Last 24 hours") {
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
@@ -120,8 +175,12 @@ struct DoctorView: View {
         }
         Section {
             IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
-                .frame(height: 120)
+                .frame(height: listHeight)
                 .listRowInsets(EdgeInsets())
+                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
+                    listTop = origin.y
+                    if origin.x > 0 { sideInset = origin.x }
+                }
         } header: {
             HStack {
                 Text("What happened")
@@ -134,15 +193,6 @@ struct DoctorView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-            }
-        } footer: {
-            HStack {
-                Spacer()
-                Button("Copy Report") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(doctor.report(camera), forType: .string)
-                }
-                .help("Copy what the doctor sees of \(camera.name) as text, for a bug report (without its address or password)")
             }
         }
     }
@@ -332,39 +382,48 @@ struct IncidentList: View {
 /// then, the defaults). Folded away; the figures a finding shows say what it saw against them.
 struct ThresholdsSection: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("doctorThresholdsShown") private var shown = false
+    /// Open or not: held here, so its change and its animation come together (a stored preference's change
+    /// arrives apart from the animation meant for it, and the rows just appeared); kept between launches.
+    @AppStorage("doctorThresholdsShown") private var kept = false
+    @State private var shown: Bool?
 
     var body: some View {
         @Bindable var doctor = model.doctor
         Section {
-            DisclosureGroup("Thresholds", isExpanded: $shown) {
-                Stepper(value: $doctor.thresholds.stallsPerHour, in: 1 ... 30) {
-                    LabeledContent("Video keeps stopping", value: "\(doctor.thresholds.stallsPerHour) times an hour")
+            // The settings' own fold: the whole row opens it.
+            FoldRow(title: "Thresholds", summary: doctor.thresholds == .standard ? "Defaults" : "Changed",
+                    expanded: Binding(get: { shown ?? kept }, set: { shown = $0; kept = $0 }))
+            if shown ?? kept {
+                Group {
+                    Stepper(value: $doctor.thresholds.stallsPerHour, in: 1 ... 30) {
+                        LabeledContent("Video keeps stopping", value: "\(doctor.thresholds.stallsPerHour) times an hour")
+                    }
+                    Stepper(value: $doctor.thresholds.unreachablePerHour, in: 1 ... 30) {
+                        LabeledContent("Drops off the network", value: "\(doctor.thresholds.unreachablePerHour) times an hour")
+                    }
+                    Stepper(value: $doctor.thresholds.lossRate, in: 0.005 ... 0.1, step: 0.005) {
+                        LabeledContent("Losing packets", value: "over " + doctor.thresholds.lossRate.formatted(.percent.precision(.fractionLength(0 ... 1))))
+                    }
+                    Stepper(value: $doctor.thresholds.keyframeSeconds, in: 1 ... 20, step: 0.5) {
+                        LabeledContent("Keyframes far apart", value: "over \(Self.number(doctor.thresholds.keyframeSeconds)) s")
+                    }
+                    Stepper(value: $doctor.thresholds.clockSeconds, in: 5 ... 600, step: 5) {
+                        LabeledContent("Its clock is off", value: "by over \(Self.number(doctor.thresholds.clockSeconds)) s")
+                    }
+                    Stepper(value: $doctor.thresholds.controlFailureRate, in: 0.05 ... 1, step: 0.05) {
+                        LabeledContent("Controls failing", value: doctor.thresholds.controlFailureRate.formatted(.percent.precision(.fractionLength(0)))
+                                       + " of at least \(doctor.thresholds.controlsAtLeast)")
+                    }
+                    Stepper(value: $doctor.thresholds.privateHours, in: 1 ... 168) {
+                        LabeledContent("Private for long", value: "over \(Self.number(doctor.thresholds.privateHours)) h")
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Restore Defaults") { doctor.thresholds = .standard }
+                            .disabled(doctor.thresholds == .standard)
+                    }
                 }
-                Stepper(value: $doctor.thresholds.unreachablePerHour, in: 1 ... 30) {
-                    LabeledContent("Drops off the network", value: "\(doctor.thresholds.unreachablePerHour) times an hour")
-                }
-                Stepper(value: $doctor.thresholds.lossRate, in: 0.005 ... 0.1, step: 0.005) {
-                    LabeledContent("Losing packets", value: "over " + doctor.thresholds.lossRate.formatted(.percent.precision(.fractionLength(0 ... 1))))
-                }
-                Stepper(value: $doctor.thresholds.keyframeSeconds, in: 1 ... 20, step: 0.5) {
-                    LabeledContent("Keyframes far apart", value: "over \(Self.number(doctor.thresholds.keyframeSeconds)) s")
-                }
-                Stepper(value: $doctor.thresholds.clockSeconds, in: 5 ... 600, step: 5) {
-                    LabeledContent("Its clock is off", value: "by over \(Self.number(doctor.thresholds.clockSeconds)) s")
-                }
-                Stepper(value: $doctor.thresholds.controlFailureRate, in: 0.05 ... 1, step: 0.05) {
-                    LabeledContent("Controls failing", value: doctor.thresholds.controlFailureRate.formatted(.percent.precision(.fractionLength(0)))
-                                   + " of at least \(doctor.thresholds.controlsAtLeast)")
-                }
-                Stepper(value: $doctor.thresholds.privateHours, in: 1 ... 168) {
-                    LabeledContent("Private for long", value: "over \(Self.number(doctor.thresholds.privateHours)) h")
-                }
-                HStack {
-                    Spacer()
-                    Button("Restore Defaults") { doctor.thresholds = .standard }
-                        .disabled(doctor.thresholds == .standard)
-                }
+                .padding(.leading, FoldRow.indent)
             }
         } footer: {
             Text("When a finding is made, for every camera. The defaults suit most cameras; to keep one camera\u{2019}s finding off its tile, Ignore it instead.")
