@@ -85,6 +85,35 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
     var seconds: Double { end.timeIntervalSince(start) }
 }
 
+/// One camera's events by start, with the longest's length: those in a stretch of time are found by search
+/// (from as far back as the longest could start and still reach into it), not by looking at every one.
+struct EventIndex: Sendable {
+    let events: [TimelineEvent]
+    let longest: TimeInterval
+
+    init(_ events: [TimelineEvent]) {
+        self.events = events.sorted { $0.start < $1.start }
+        longest = events.map(\.seconds).max() ?? 0
+    }
+
+    /// Those overlapping `range`, by start.
+    func overlapping(_ range: ClosedRange<Date>) -> [TimelineEvent] {
+        let from = first { $0.start >= range.lowerBound.addingTimeInterval(-longest) }
+        let to = first { $0.start > range.upperBound }
+        return events[from ..< to].filter { $0.end > range.lowerBound }
+    }
+
+    /// The index of the first event that `isAfter` (they're in order of start).
+    private func first(_ isAfter: (TimelineEvent) -> Bool) -> Int {
+        var low = 0, high = events.count
+        while low < high {
+            let mid = (low + high) / 2
+            if isAfter(events[mid]) { high = mid } else { low = mid + 1 }
+        }
+        return low
+    }
+}
+
 /// Where the app reads events and private stretches from (the settings' database and events folder).
 struct EventSource: Sendable {
     var database: String

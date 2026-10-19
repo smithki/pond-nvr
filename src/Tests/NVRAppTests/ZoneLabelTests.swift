@@ -48,3 +48,41 @@ import Testing
         #expect(TimelineLanes.joined([t ... t.addingTimeInterval(600)], to: longer) == [t ... t.addingTimeInterval(600)])
     }
 }
+
+@MainActor
+@Suite struct TimelineLoadTests {
+    /// A very busy day: 20,000 events on one camera (one every ~4 s), of three kinds, some long.
+    static func busyDay(_ day: Date) -> [TimelineEvent] {
+        (0 ..< 20000).map { i in
+            let start = day.addingTimeInterval(Double(i) * 4.3)
+            let kind: TimelineEvent.Kind = [.person, .vehicle, .animal][i % 3]
+            return TimelineEvent(id: "\(i)", camera: "street", kind: kind, start: start,
+                                 end: start.addingTimeInterval(i % 500 == 0 ? 900 : 6), summary: "")
+        }
+    }
+
+    @Test func findingAndDrawingABusyDayStaysCheap() {
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+        let index = EventIndex(Self.busyDay(day))
+        // An hour's view: only that hour's events (and a long one reaching in), found by search.
+        let hour = day.addingTimeInterval(36000) ... day.addingTimeInterval(39600)
+        let inHour = index.overlapping(hour)
+        #expect(inHour.count < 900 && inHour.allSatisfy { $0.end > hour.lowerBound && $0.start <= hour.upperBound })
+        #expect(inHour.contains { $0.seconds == 900 } || !index.events.contains { $0.seconds == 900 && $0.start < hour.lowerBound && $0.end > hour.lowerBound })
+
+        // The whole day at 24 h in a 1,400-point lane: every event in view, merged to what can be told apart.
+        let whole = day ... day.addingTimeInterval(86400)
+        let started = Date()
+        let marks = index.overlapping(whole).map { e in
+            (kind: e.kind, rect: CGRect(x: e.start.timeIntervalSince(day) / 86400 * 1400, y: 0,
+                                        width: max(3, e.seconds / 86400 * 1400), height: 20))
+        }
+        let runs = TimelineLanes.runs(marks)
+        let took = Date().timeIntervalSince(started)
+        // Three kinds, about one shape a kind for each few points: a few hundred, not 20,000.
+        #expect(runs.count < 3 * 1400 / 2)
+        // Well within a frame, even in a debug build (a release build is several times faster).
+        #expect(took < 0.25, "took \(took) s")
+        print("busy day: \(marks.count) events in view, \(runs.count) shapes, \(Int(took * 1000)) ms")
+    }
+}

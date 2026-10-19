@@ -45,7 +45,9 @@ final class TimelineModel {
 
     let player = AVQueuePlayer()
     /// Midnight, local time, of the day in the middle of the view.
-    private(set) var day = Calendar.current.startOfDay(for: Date())
+    private(set) var day = Calendar.current.startOfDay(for: Date()) {
+        didSet { if day != oldValue { deriveDay() } }
+    }
     var camera: String?
     /// How much of the day shows; remembered.
     var zoom = UserDefaults.standard.object(forKey: "timelineZoom").flatMap { ($0 as? Double).flatMap(Zoom.init) } ?? .day {
@@ -105,8 +107,13 @@ final class TimelineModel {
     }
     /// Where events and private stretches are read from (set from the settings before loading).
     var source: EventSource?
-    /// The events in `loaded`, all kinds; `shown` filters them.
-    private(set) var events: [TimelineEvent] = []
+    /// The events in `loaded`, all kinds; `shown` filters them. What's worked out from them (each camera's index,
+    /// the shown ones, the day's) is worked out once as they change, not each time they're drawn.
+    private(set) var events: [TimelineEvent] = [] {
+        didSet { derive() }
+    }
+    /// Each camera's events by start, to find those in a stretch of time without looking at them all.
+    @ObservationIgnored private(set) var index: [String: EventIndex] = [:]
     /// When each camera was private, in `loaded`, as read (up to when it was read).
     private(set) var privateSpans: [String: [ClosedRange<Date>]] = [:]
     private var privacyRead = Date.distantPast
@@ -128,12 +135,27 @@ final class TimelineModel {
         }
         return spans
     }
-    /// The kinds of event there are in `loaded` (the filters offered).
-    var kindsPresent: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { k in events.contains { $0.kind == k } } }
-    /// The events of the day in the middle of the view.
-    var dayEvents: [TimelineEvent] { events.filter { $0.start >= day && $0.start < dayEnd } }
-    var shownKinds = Set(TimelineEvent.Kind.allCases)
-    var shownEvents: [TimelineEvent] { events.filter { shownKinds.contains($0.kind) } }
+    /// The events of the day in the middle of the view, and how many of each kind.
+    private(set) var dayEvents: [TimelineEvent] = []
+    private(set) var dayCounts: [TimelineEvent.Kind: Int] = [:]
+    /// The kinds with events that day, in order (the filters offered).
+    var dayKinds: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { (dayCounts[$0] ?? 0) > 0 } }
+    var shownKinds = Set(TimelineEvent.Kind.allCases) {
+        didSet { if shownKinds != oldValue { shownEvents = events.filter { shownKinds.contains($0.kind) } } }
+    }
+    private(set) var shownEvents: [TimelineEvent] = []
+
+    private func derive() {
+        index = Dictionary(grouping: events, by: \.camera).mapValues(EventIndex.init)
+        shownEvents = events.filter { shownKinds.contains($0.kind) }
+        deriveDay()
+    }
+
+    private func deriveDay() {
+        let (start, end) = (day, dayEnd)
+        dayEvents = events.filter { $0.start >= start && $0.start < end }
+        dayCounts = dayEvents.reduce(into: [:]) { $0[$1.kind, default: 0] += 1 }
+    }
     /// Nothing is recorded at the playhead (or after it, that day).
     private(set) var nothingRecorded = false
     /// Paused on the last frame of the recordings, with nothing later to play: the player says so.
@@ -288,7 +310,9 @@ final class TimelineModel {
         firstRecording = first
         cameraStarts = starts
         coverage = trimmed.mapValues { RecordingIndex.coverage($0) }
-        events = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : kept
+        // (Only when they changed: a reload that found nothing new changes nothing, and draws nothing again.)
+        let next = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : kept
+        if next != events { events = next }
         privateSpans = privacy
         privacyRead = min(to, Date())
         loaded = from ... to

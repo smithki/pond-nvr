@@ -759,8 +759,8 @@ struct TimelineLanes: View, @MainActor Animatable {
         func distance(_ e: TimelineEvent) -> Double {
             t < e.start ? e.start.timeIntervalSince(t) : t > e.end ? t.timeIntervalSince(e.end) : 0
         }
-        return timeline.shownEvents
-            .filter { $0.camera == cameras[lane].id && distance($0) <= slack }
+        let near = timeline.index[cameras[lane].id]?.overlapping(t.addingTimeInterval(-slack) ... t.addingTimeInterval(slack)) ?? []
+        return near.filter { timeline.shownKinds.contains($0.kind) && distance($0) <= slack }
             .min { distance($0) < distance($1) }
     }
 
@@ -956,6 +956,21 @@ struct TimelineLanes: View, @MainActor Animatable {
         if midX - box.width / 2 >= lane.minX + 2 { context.draw(label, at: CGPoint(x: midX, y: lane.midY)) }
     }
 
+    /// Marks of a kind that touch or nearly (within a point) as one: what's drawn for a lane.
+    static func runs(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect)]) -> [(kind: TimelineEvent.Kind, rect: CGRect)] {
+        var out: [(kind: TimelineEvent.Kind, rect: CGRect)] = []
+        for (kind, group) in Dictionary(grouping: marks, by: \.kind).sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            for mark in group.sorted(by: { $0.rect.minX < $1.rect.minX }) {
+                if let last = out.last, last.kind == kind, mark.rect.minX <= last.rect.maxX + 1 {
+                    out[out.count - 1].rect = last.rect.union(mark.rect)
+                } else {
+                    out.append(mark)
+                }
+            }
+        }
+        return out
+    }
+
     /// Private stretches reaching out to the recording beside them, where it stopped a little before the change
     /// or started again a little after (within a minute and a half): never pulled in, so a stretch always covers
     /// the whole time it was private (recording that seems to run into it lies under it).
@@ -1087,25 +1102,29 @@ struct TimelineLanes: View, @MainActor Animatable {
                 }
             }
             // The hovered one last, on top of any it overlaps, so its outline is whole.
-            // Shown, or fading in or out with its filter.
-            let marks = timeline.events.filter { $0.camera == camera.id && $0.end > visible.lowerBound && $0.start < visible.upperBound
-                && visibility($0.kind, at: frame) > 0 }
-            for event in marks.filter({ $0.id != highlighted }) + marks.filter({ $0.id == highlighted }) {
-                let mark = markRect(event, width: size.width, visible: visible)
-                let isHovered = highlighted == event.id
+            // Those in view (found in the camera's index, not by looking at all), shown or fading with their filter;
+            // marks of a kind within a point of each other drawn as one (zoomed out, a busy day is a few hundred
+            // shapes a lane at most, however many events), the hovered one on its own, on top.
+            let marks = (timeline.index[camera.id]?.overlapping(visible) ?? []).filter { visibility($0.kind, at: frame) > 0 }
+            let hovered = marks.first { $0.id == highlighted }
+            let runs = Self.runs(marks.filter { $0.id != highlighted }.map { ($0.kind, markRect($0, width: size.width, visible: visible)) })
+            var symbols: [TimelineEvent.Kind: GraphicsContext.ResolvedText] = [:]
+            for (kind, mark, isHovered) in runs.map({ ($0.kind, $0.rect, false) })
+                + (hovered.map { [($0.kind, markRect($0, width: size.width, visible: visible), true)] } ?? []) {
                 var context = context
-                context.opacity = visibility(event.kind, at: frame)
+                context.opacity = visibility(kind, at: frame)
                 context.fill(Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2)),
-                             with: .color(event.kind.color.opacity(isHovered ? 1 : selected ? 0.9 : 0.6)))
+                             with: .color(kind.color.opacity(isHovered ? 1 : selected ? 0.9 : 0.6)))
                 if isHovered {
                     context.stroke(Path(roundedRect: mark.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5),
                                    with: .color(.primary), lineWidth: 1.5)
                 }
-                // Room for the symbol when zoomed in far enough.
+                // Room for the symbol when zoomed in far enough (each kind's made once a frame).
                 if mark.width > 22, mark.height >= 10 {
                     // As text, so the symbol keeps its own shape (a walking figure is taller than wide).
-                    let symbol = context.resolve(Text(Image(systemName: event.kind.symbol))
+                    let symbol = symbols[kind] ?? context.resolve(Text(Image(systemName: kind.symbol))
                         .font(.system(size: min(11, mark.height - 2), weight: .semibold)).foregroundStyle(.white))
+                    symbols[kind] = symbol
                     let box = symbol.measure(in: mark.size)
                     context.draw(symbol, at: CGPoint(x: mark.minX + 4 + box.width / 2, y: mark.midY))
                 }
@@ -1231,7 +1250,7 @@ struct EventFilters: View {
     @Namespace private var glass
 
     /// Only kinds with events that day (a filter for nothing is noise).
-    var kinds: [TimelineEvent.Kind] { timeline.kindsPresent.filter { k in timeline.dayEvents.contains { $0.kind == k } } }
+    var kinds: [TimelineEvent.Kind] { timeline.dayKinds }
 
     static let animation = Animation.snappy(duration: 0.35)
 
@@ -1259,7 +1278,7 @@ struct EventFilters: View {
     }
 
     func chip(_ kind: TimelineEvent.Kind) -> some View {
-        let count = timeline.dayEvents.count { $0.kind == kind }
+        let count = timeline.dayCounts[kind] ?? 0
         let on = timeline.shownKinds.contains(kind)
         return Button {
             withAnimation(Self.animation) {
