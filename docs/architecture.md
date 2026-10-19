@@ -4,7 +4,7 @@
 
 ```
 camera ──RTSP──► Ingest (StreamHub: one connection per stream) ──┬──► Recorder ──► 1-minute MP4 segments on disk
- main + sub                                                      ├──► Pond.app's live views (through the service's StreamRelay)
+ main + sub                                                      ├──► Pond NVR.app's live views (through the service's StreamRelay)
                                                                  ├──► HomeKit live view (SRTP to each viewer)
                                                                  └──► prebuffer (last few seconds) ──► HKSV (fMP4 over HomeKit Data Stream)
 camera's motion (Devices) ──► HomeKit motion sensor ──► the home hub asks for a recording
@@ -25,7 +25,7 @@ One SwiftPM package, `src/`, with a module per responsibility:
 | `HAPCamera` | A camera as an accessory (`CameraAccessory`: stream management, microphone, motion sensor, doorbell), snapshots (`Snapshotter`), the Keychain record (`HomeKitRecord`), `HomeKitHost`; live view: stream setup (`StreamManagement`), RTP packets (`RTPPacketizer`), SRTP, sound (`AudioTranscoder`: AAC-LC to AAC-ELD), optional re-encoding (`VideoTranscoder` on VideoToolbox, steered by `RateControl` from the viewer's RTCP reports) and the stream itself (`LiveSession`); HKSV: the recording services and selection (`RecordingController`), the prebuffer (`Prebuffer`) and one recording sent to the hub (`RecordingSession`) | no | done |
 | `Devices` | What a camera is (maker, model, serial, firmware, doorbell), its events (motion, doorbell presses) and its controls (PTZ, talking back, and declared items: day and night, image settings, volume, home, tours, relays), behind `CameraProvider`: `ReolinkProvider` (HTTP API) and `ONVIFProvider`; `DeviceReader` asks them in turn, `CameraControls` resolves each control to the first provider that offers it, `CameraSessions` shares one login per camera, and `ControlServer` serves the app over a socket (see [controls.md](controls.md)) | no | done |
 | `Control` | Shared by the CLI and the app: the login service (`ServiceControl`, `LaunchAgent`, launchd), its log (`LogReader`) and the wording of camera checks (`CameraCheck`) | yes | done |
-| `NVRApp` | The SwiftUI app (`Pond.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and H.264 depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events. The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done but Events |
+| `NVRApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and H.264 depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events. The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done but Events |
 | `Storage` | SQLite index of segments, events, descriptions and embeddings | yes | later |
 | `Detection` | Motion gate, YOLO in Core ML, Vision, a multi-object tracker, zones, event lifecycle | no | later |
 | `Understanding` | Event descriptions (Foundation Models, image input) and MobileCLIP embeddings, one event at a time | no | later |

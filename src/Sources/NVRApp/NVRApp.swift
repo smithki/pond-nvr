@@ -1,4 +1,4 @@
-// Pond.app: live view, the recordings timeline and (later) events in one window, and the settings in the
+// Pond NVR.app: live view, the recordings timeline and (later) events in one window, and the settings in the
 // Settings window (⌘,). Recording itself is done by the login service (`pond run`); closing the app does not
 // stop it.
 import Control

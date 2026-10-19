@@ -5,7 +5,7 @@ A network video recorder for the Mac, written in Swift ([pond.camera](https://po
 Work in progress. What works today:
 
 - **Continuous recording** of every camera's main stream, in 1-minute MP4 files, with retention by age, size and free space. It reconnects when a camera drops, and stops writing (and says so) when the drive is unplugged instead of filling the startup disk.
-- **Pond.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
+- **Pond NVR.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
 - **HomeKit**, implemented natively (the HomeKit Accessory Protocol in Swift): each camera you choose is a camera in the Home app, with snapshots, live video and sound, several viewers at once, and **HomeKit Secure Video** recording on the camera's own motion detection. Doorbells are supported as video doorbells.
 - **Camera controls**: under a camera watched on its own, a dock to move it, keep and go to positions, switch day and night, talk through its speaker and change its picture and volume, through its make's own API where Pond knows one (Reolink) and ONVIF otherwise.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
@@ -23,7 +23,7 @@ Planned: on-device detection of people, vehicles, animals and packages (Core ML)
 
 ```sh
 make signing                # once per Mac, if you have no Apple Development certificate: see docs/development.md
-make app && open dist/Pond.app
+make app && open "dist/Pond NVR.app"
 ```
 
 In the app, **Settings › Storage** chooses the recordings folder, **Settings › Cameras › Add Camera** adds a camera by its address (it logs in, checks the streams and keeps the password in your Keychain), and **Settings › Recorder** starts the background recorder. Closing the app does not stop recording.
@@ -45,7 +45,7 @@ pond service install                               # record whenever you are log
 
 ## The app
 
-`Pond.app` has three views, chosen in the toolbar (Back and Forward, ⌘[ and ⌘], move between them):
+`Pond NVR.app` has three views, chosen in the toolbar (Back and Forward, ⌘[ and ⌘], move between them):
 
 - **Live**: a rail of every camera beside a stage showing the chosen cameras live, as large as the window allows. Click a camera to add it or take it off, double-click it to watch it alone, drag to reorder. Large tiles play the main stream, small ones the sub-stream; one camera is heard at a time. A camera that is offline, sends no picture or has stopped being recorded is marked, and a tile without a picture says why.
 - **Timeline**: the recordings of any day, a lane per camera. Click or drag to move, space to play or pause, ← and → for 10 seconds, ½× to 16×, zoom from a whole day to 15 minutes; scroll back across midnight into earlier days. **LIVE** (L) shows the selected camera as it is now.

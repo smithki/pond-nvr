@@ -23,7 +23,7 @@ SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
-	@echo "make app            build dist/Pond.app (the settings app, with pond inside for the login service)"
+	@echo "make app            build dist/Pond NVR.app (the settings app, with pond inside for the login service)"
 	@echo "make check          compile everything, tests included, with warnings as errors"
 	@echo "make test           run the tests here (they write only temporary files, so a Mac is fine)"
 	@echo "make test-docker    run the tests of the modules that build on Linux, in a throwaway container (needs Docker)"
@@ -40,42 +40,47 @@ build:
 	@codesign --force --sign "$(SIGN)" --identifier pond dist/pond
 	@echo "✓ dist/pond$(if $(filter -,$(SIGN)), (signed ad hoc; make signing to stop repeated Keychain prompts))"
 
-# Pond.app: the app's executable plus pond itself (Contents/MacOS/pond), which the login service runs when it is
+# Pond NVR.app: the app's executable plus pond itself (Contents/MacOS/pond), which the login service runs when it is
 # installed from the app. Signed as make build signs.
-APP := dist/Pond.app
+APP := dist/Pond NVR.app
 app: build
 	swift build --package-path $(PKG) -c release --product NVRApp
-	@rm -rf $(APP) && mkdir -p $(APP)/Contents/MacOS
-	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/NVRApp" $(APP)/Contents/MacOS/PondApp
-	@cp dist/pond $(APP)/Contents/MacOS/pond
-	@cp app/Info.plist $(APP)/Contents/Info.plist
+	@rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS"
+	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/NVRApp" "$(APP)/Contents/MacOS/PondApp"
+	@cp dist/pond "$(APP)/Contents/MacOS/pond"
+	@cp app/Info.plist "$(APP)/Contents/Info.plist"
 	@# The icon, from Icon Composer (app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
 	@# AppIcon.icns, as Xcode would.
-	@mkdir -p $(APP)/Contents/Resources
-	@xcrun actool app/AppIcon.icon --compile $(APP)/Contents/Resources --platform macosx --minimum-deployment-target 27.0 \
-	  --app-icon AppIcon --output-partial-info-plist $(APP)/Contents/Resources/.icon-info.plist \
+	@mkdir -p "$(APP)/Contents/Resources"
+	@xcrun actool app/AppIcon.icon --compile "$(APP)/Contents/Resources" --platform macosx --minimum-deployment-target 27.0 \
+	  --app-icon AppIcon --output-partial-info-plist "$(APP)/Contents/Resources/.icon-info.plist" \
 	  --output-format human-readable-text >/dev/null
-	@rm -f $(APP)/Contents/Resources/.icon-info.plist
+	@rm -f "$(APP)/Contents/Resources/.icon-info.plist"
 	@# The detection models built in (models/: a Core ML package and its manifest each), compiled now so they load
 	@# at once.
-	@rm -rf $(APP)/Contents/Resources/Models && mkdir -p $(APP)/Contents/Resources/Models
+	@rm -rf "$(APP)/Contents/Resources/Models" && mkdir -p "$(APP)/Contents/Resources/Models"
 	@for m in models/*.mlpackage; do \
-	  xcrun coremlcompiler compile "$$m" $(APP)/Contents/Resources/Models >/dev/null && \
-	  cp "$${m%.mlpackage}.json" $(APP)/Contents/Resources/Models/; \
+	  xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Models" >/dev/null && \
+	  cp "$${m%.mlpackage}.json" "$(APP)/Contents/Resources/Models/"; \
 	done
-	@codesign --force --sign "$(SIGN)" --identifier pond $(APP)/Contents/MacOS/pond
-	@codesign --force --sign "$(SIGN)" $(APP)
+	@codesign --force --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
+	@codesign --force --sign "$(SIGN)" "$(APP)"
 	@echo "✓ $(APP)"
 	@# A setup from before the rename (nvr) moves over once: its service, settings, log and Keychain items.
 	@if /bin/launchctl print gui/$$(id -u)/com.local.nvr >/dev/null 2>&1 || [ -e "$$HOME/Library/LaunchAgents/com.local.nvr.plist" ] \
 	  || [ -e "$$HOME/Library/Application Support/nvr" ] || [ -e "$$HOME/Library/Logs/nvr" ]; then \
-	  $(APP)/Contents/MacOS/pond migrate && rm -rf dist/NVR.app dist/nvr; \
+	  "$(APP)/Contents/MacOS/pond" migrate && rm -rf dist/NVR.app dist/nvr; \
 	fi
 	@# The login service may run the pond just replaced: macOS then stops letting the running copy reach the
 	@# network ("No route to host"), so it is restarted on the new one.
 	@if /bin/launchctl print gui/$$(id -u)/camera.pond.recorder 2>/dev/null | grep -q "program = $(CURDIR)/$(APP)/"; then \
-	  $(APP)/Contents/MacOS/pond service restart; \
+	  "$(APP)/Contents/MacOS/pond" service restart; \
 	fi
+	@# The app was Pond.app before it was Pond NVR.app: a login service still running the old one is installed
+	@# again from the new (the same settings and Keychain items), and the old app goes.
+	@if /bin/launchctl print gui/$$(id -u)/camera.pond.recorder 2>/dev/null | grep -q "program = $(CURDIR)/dist/Pond.app/"; then \
+	  "$(APP)/Contents/MacOS/pond" service install && rm -rf dist/Pond.app; \
+	elif [ -d dist/Pond.app ]; then rm -rf dist/Pond.app; fi
 
 check:
 	swift build --package-path $(PKG) --build-tests -Xswiftc -warnings-as-errors

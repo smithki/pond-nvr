@@ -17,13 +17,13 @@ make build         # dist/pond (release)
 make check         # compile everything, tests included, with warnings as errors
 make test          # every test, on the Mac
 make test-docker   # the modules that build on Linux, in a throwaway container
-make app           # dist/Pond.app
+make app           # dist/Pond NVR.app
 ```
 
 **Pictures of the app.** `POND_SNAPSHOTS=<folder>` makes the app save each view of the main window and each Settings tab as PNGs and quit; it draws its own window, so no screen-recording permission is needed. With `POND_CONFIG` it can show any settings file:
 
 ```sh
-open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots dist/Pond.app
+open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots "dist/Pond NVR.app"
 ```
 
 (Liquid Glass comes out flatter in these pictures than on screen; with screen-recording permission, `screencapture -l <window id>` takes the real thing.) `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.

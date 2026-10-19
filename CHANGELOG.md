@@ -4,6 +4,9 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 
 ## Unreleased
 
+### Name
+- **The app is Pond NVR** (`Pond NVR.app`): its name in the menu bar, the Dock and the Finder. Pond is still what it calls itself, and the command is still `pond`. `make app` moves a login service from the old Pond.app to the new one.
+
 ### Licence
 - **Pond is now under the GNU Affero General Public License v3.0** (it was Apache-2.0; earlier versions stay available under it), with Ultralytics YOLO26 built in. Contributions come under a Contributor License Agreement ([CLA.md](CLA.md), [CONTRIBUTING.md](CONTRIBUTING.md)), which keeps other licences possible later.
 

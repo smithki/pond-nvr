@@ -508,7 +508,7 @@ final class AppModel {
     @discardableResult
     func installService() -> Task<Void, Never>? {
         guard let helperPath else {
-            alert = "The recorder can only be installed from Pond.app (make app builds it)."
+            alert = "The recorder can only be installed from Pond NVR.app (make app builds it)."
             return nil
         }
         guard let config, config.problems().isEmpty, !config.cameras.isEmpty else {

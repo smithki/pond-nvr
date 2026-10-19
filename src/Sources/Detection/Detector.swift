@@ -215,7 +215,7 @@ public enum ModelStore {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Pond/Models")
     }
 
-    /// The built-in ones: the app's resources (pond runs from Pond.app/Contents/MacOS), or `POND_MODELS` (a
+    /// The built-in ones: the app's resources (pond runs from Pond NVR.app/Contents/MacOS), or `POND_MODELS` (a
     /// folder, for development: the repository's models/).
     static var builtInFolders: [URL] {
         var folders = [Bundle.main.resourceURL?.appendingPathComponent("Models")].compactMap { $0 }
