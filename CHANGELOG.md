@@ -4,6 +4,12 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 
 ## Unreleased
 
+### Licence
+- **Pond is now under the GNU Affero General Public License v3.0** (it was Apache-2.0; earlier versions stay available under it), with Ultralytics YOLO26 built in. Contributions come under a Contributor License Agreement ([CLA.md](CLA.md), [CONTRIBUTING.md](CONTRIBUTING.md)), which keeps other licences possible later.
+
+### Detection
+- **Detection models, pluggable**: any Core ML (or, from macOS 27, Core AI) detection model with a small manifest, built in or added to the Models folder, swapped while running. Four output formats are read (end-to-end like YOLO26, raw YOLO with Pond's own suppression, Vision pipelines, DETR-style), and labels put in Pond's terms (person, vehicle, animal, package). Built in: **Ultralytics YOLO26 small**, compiled into the app, 5–11 ms a frame on the Neural Engine. `pond detect` tries a model on recordings ([docs/detection.md](docs/detection.md)).
+
 The first version: recording, the app and HomeKit.
 
 ### Renamed: nvr is now Pond

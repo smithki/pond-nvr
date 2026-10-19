@@ -87,6 +87,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 
 - [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
 - [docs/controls.md](docs/controls.md): camera controls, and how each goes through the best way Pond has for a camera.
+- [docs/detection.md](docs/detection.md): detection models: the one built in, adding another, `pond detect`.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
@@ -97,4 +98,6 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 
 ## License
 
-Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+GNU Affero General Public License v3.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). It includes Ultralytics YOLO26 (AGPL-3.0) as its built-in detection model; other models can be used in its place ([docs/detection.md](docs/detection.md)).
+
+Contributions are welcome under the [Contributor License Agreement](CLA.md): see [CONTRIBUTING.md](CONTRIBUTING.md).

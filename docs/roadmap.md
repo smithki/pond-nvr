@@ -72,12 +72,23 @@ A doctor for each camera: what's going wrong, since when, and what to try. First
 | Thresholds | done | Fixed defaults (stalls an hour, packet loss, keyframe spacing, clock drift, control failures), shown with the actual figures; changeable as an advanced setting in the doctor (Thresholds, under the cameras), and **Ignore** per finding per camera. See [doctor.md](doctor.md). Privacy is never a problem: a private camera's gaps are explained, not flagged. |
 | What cameras say about themselves | later | Through the providers, gently (every few minutes, more often while a problem is open): ONVIF's device information, clock and monitoring events (last reboot, processor use); Reolink's CPU, Wi-Fi signal, connected users and SD card. They feed the same rules ("CPU at 96% while video stalls: the camera is overloaded"). |
 
+## Away from home
+
+Pond stays open source; what's paid for is convenience, as with Home Assistant Cloud.
+
+| Goal | Status | Notes |
+|---|---|---|
+| Remote access | later | A phone app reaching the Mac directly (WebRTC, peer to peer), with a small signaling service to introduce them and a TURN relay for networks that won't connect directly. Push alerts with a snapshot (APNs needs a sender of Pond's). Designed in from detection on: the Mac's side of the protocol is Pond's. |
+| A hosted service | later | Signaling, relay and push run for those who'd rather not, for a small fee (a few dollars a month); the service is open source too, to deploy oneself. The phone app is a separate program (an App Store–friendly licence). |
+| Models | later | Detection models beyond the built-in one (packages, or fitted to a home's own scenes), perhaps from others, from an official Pond model marketplace. Any model's terms are its maker's and travel with its file; the built-in one is Ultralytics YOLO26 (AGPL-3.0, as Pond is). Should Pond need other terms one day (a commercial or App Store version), the ways out: Ultralytics' enterprise licence, another built-in model, or YOLO26 as an optional download from the marketplace. |
+| Sponsorship | later | Donations and sponsors (GitHub Sponsors, Open Collective). |
+
 ## Detection, events, search
 
 | Goal | Status | Notes |
 |---|---|---|
-| Detection | later | People, vehicles, animals and packages, in zones, on the Neural Engine (Core ML), from the sub-stream. It then drives the HomeKit motion sensor instead of the camera's own motion. **Revisit Video only then:** today a video-only camera's HomeKit Secure Video is paused, because only the camera's own motion can start a recording; with Pond's own detection it could record again (`HomeKitHost`'s recording condition, and the paused toggle in camera settings). |
+| Detection | in progress | Models: done. Any Core ML detection model with a manifest, built in (Ultralytics YOLO26 small) or added to the Models folder, swapped while running; four output formats read (end-to-end, raw YOLO, Vision, DETR); `pond detect` tries one on recordings ([detection.md](detection.md)). Next: running it on the cameras. People, vehicles, animals and packages, in zones, on the Neural Engine (Core ML), from the sub-stream. It then drives the HomeKit motion sensor instead of the camera's own motion. **Revisit Video only then:** today a video-only camera's HomeKit Secure Video is paused, because only the camera's own motion can start a recording; with Pond's own detection it could record again (`HomeKitHost`'s recording condition, and the paused toggle in camera settings). |
 | Event clips and the Events view | later | Clips kept longer than continuous recording; the app's Events view (`POND_MOCK_EVENTS=1` shows made-up events until then). |
-| Descriptions | later | A sentence per event, from Apple's on-device models. |
+| Descriptions | later | A sentence per event, from the Mac's own on-device model (Foundation Models, which takes pictures from macOS 27; tried: "A person is standing in the driveway", 3 s on an M6). On-device only, never Private Cloud Compute. Without Apple Intelligence (`SystemLanguageModel.availability`: not enabled, model not ready, Mac not eligible) everything else works and events show what was found instead; Settings says why, with Open Settings… to Apple Intelligence & Siri when it's only switched off, and sentences are written for earlier events once it's on. |
 | Search | later | Plain-language questions ("packages delivered this week") to filters and semantic ranking, results that open the clip. |
 | Zones in the app | later | Drawn on the camera's picture; edited by hand in the settings file until then. |
