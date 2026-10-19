@@ -41,7 +41,10 @@ targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRC
 // Detection: a model (built in, or added) run on the Neural Engine, its answers in Pond's terms.
 targets.append(.target(name: "Detection"))
 targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection"]
+// Watching the cameras: their pictures decoded, motion, the model, tracks, and events kept.
+targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
+targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore"]))
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health"]))

@@ -1,6 +1,6 @@
 // The service's cameras, each run by its own parts: its recorder (RecordingService's worker), its HomeKit
-// accessory, its sub-stream held open for instant live view (StreamKeeper), and its Baichuan connection (a
-// Reolink's privacy mode). Started together; then, asked to reload (the app's "reload" on the control socket,
+// accessory, its sub-stream held open for instant live view (StreamKeeper), its Baichuan connection (a
+// Reolink's privacy mode), and its watcher (detection, making events). Started together; then, asked to reload (the app's "reload" on the control socket,
 // or `pond service reload`), it reads the settings and the passwords again and starts, stops or starts again
 // only the parts whose settings changed, the other cameras going on. A change of storage can't be made so: the
 // service is restarted for it.
@@ -12,6 +12,7 @@ import Ingest
 import NVRCore
 import NVRMac
 import Recorder
+import Watch
 
 final class CameraSupervisor: @unchecked Sendable {
     let configPath: String
@@ -21,11 +22,16 @@ final class CameraSupervisor: @unchecked Sendable {
     let privacySync: CameraPrivacySync
     /// Its cache of each camera's controls, forgotten for a camera that changed.
     var controls: ControlServer?
+    /// The detection model, shared by the cameras' watchers; nil if none could be loaded (nothing is watched).
+    var detector: SharedDetector?
+    /// Where events are kept.
+    var events: EventStore?
 
     private let lock = NSLock()
     private var config: Config
     private var passwords: [String: String]
     private var keepers: [String: StreamKeeper] = [:]
+    private var watchers: [String: CameraWatcher] = [:]
     /// The login each Baichuan connection was opened with, to close it with.
     private var baichuanAccess: [String: CameraAccess] = [:]
     /// What each part was started with, by camera: changed, the part starts again.
@@ -36,6 +42,7 @@ final class CameraSupervisor: @unchecked Sendable {
         var homekit: String?
         var keeper: String?
         var baichuan: String?
+        var watch: String?
     }
 
     init(config: Config, passwords: [String: String], configPath: String, log: EventLog, recording: RecordingService,
@@ -61,15 +68,17 @@ final class CameraSupervisor: @unchecked Sendable {
             lock.withLock { started[camera.id] = parts }
             startKeeper(camera, parts)
             startBaichuan(camera, parts)
+            startWatcher(camera, parts)
         }
     }
 
     func stopAll() {
-        let all = lock.withLock { () -> [StreamKeeper] in
-            defer { keepers = [:] }
-            return Array(keepers.values)
+        let (all, watching) = lock.withLock { () -> ([StreamKeeper], [CameraWatcher]) in
+            defer { keepers = [:]; watchers = [:] }
+            return (Array(keepers.values), Array(watchers.values))
         }
         for keeper in all { keeper.stop() }
+        for watcher in watching { watcher.stop() }
     }
 
     // MARK: Reloading
@@ -115,7 +124,7 @@ final class CameraSupervisor: @unchecked Sendable {
         for camera in next.cameras {
             let parts = Self.parts(camera, password: nextPasswords[camera.id])
             guard let old = before[camera.id] else {
-                start(camera, parts: parts, changed: Parts(recording: "", homekit: "", keeper: "", baichuan: ""))
+                start(camera, parts: parts, changed: Parts(recording: "", homekit: "", keeper: "", baichuan: "", watch: ""))
                 said.append("\(camera.id) added")
                 continue
             }
@@ -126,10 +135,11 @@ final class CameraSupervisor: @unchecked Sendable {
             if parts.homekit != was.homekit { changed.homekit = "" }
             if parts.keeper != was.keeper { changed.keeper = "" }
             if parts.baichuan != was.baichuan { changed.baichuan = "" }
+            if parts.watch != was.watch { changed.watch = "" }
             stop(old, parts: changed)
             start(camera, parts: parts, changed: changed)
             let names = [changed.recording.map { _ in "recording" }, changed.homekit.map { _ in "HomeKit" },
-                         changed.keeper.map { _ in "live view held open" }, changed.baichuan.map { _ in "Baichuan" }]
+                         changed.keeper.map { _ in "live view held open" }, changed.baichuan.map { _ in "Baichuan" }, changed.watch.map { _ in "detection" }]
                 .compactMap { $0 }
             said.append("\(camera.id): \(names.joined(separator: ", ")) started again")
         }
@@ -146,11 +156,13 @@ final class CameraSupervisor: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let whole = (try? encoder.encode(camera)).map { String(decoding: $0, as: UTF8.self) } ?? camera.id
+        let zones = (try? encoder.encode(camera.zones)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         let reolink = !camera.isVideoOnly && CameraProviders.choices(for: camera.device).contains { $0.id == "reolink" }
         return Parts(recording: "\(camera.main)\n\(login)",
                      homekit: camera.homekit ? "\(whole)\n\(login)" : nil,
                      keeper: camera.keepsLiveReady ? "\(camera.sub)\n\(login)" : nil,
-                     baichuan: reolink && password != nil ? "\(camera.host)\n\(login)" : nil)
+                     baichuan: reolink && password != nil ? "\(camera.host)\n\(login)" : nil,
+                     watch: camera.watches ? "\(camera.sub)\n\(login)\n\(zones)" : nil)
     }
 
     /// Starts the parts marked in `changed` (a value there means "this one").
@@ -161,6 +173,7 @@ final class CameraSupervisor: @unchecked Sendable {
         if changed.homekit != nil { host.add(camera, password: password) }
         if changed.keeper != nil { startKeeper(camera, parts) }
         if changed.baichuan != nil { startBaichuan(camera, parts) }
+        if changed.watch != nil { startWatcher(camera, parts) }
         controls?.forget(camera.id)
     }
 
@@ -170,6 +183,9 @@ final class CameraSupervisor: @unchecked Sendable {
         if all || changed.homekit != nil { host.remove(camera.id) }
         if all || changed.keeper != nil {
             lock.withLock { keepers.removeValue(forKey: camera.id) }?.stop()
+        }
+        if all || changed.watch != nil {
+            lock.withLock { watchers.removeValue(forKey: camera.id) }?.stop()
         }
         if all || changed.baichuan != nil, was?.baichuan != nil {
             privacySync.unwatch(camera.id)
@@ -187,6 +203,16 @@ final class CameraSupervisor: @unchecked Sendable {
                                   paused: { PrivacyState.shared.isPrivate(id) })
         lock.withLock { keepers[id] = keeper }
         keeper.start()
+    }
+
+    private func startWatcher(_ camera: Config.Camera, _ parts: Parts) {
+        guard parts.watch != nil, let detector, let password = password(camera.id) else { return }
+        let log = log, id = camera.id
+        let watcher = CameraWatcher(camera: id, url: camera.sub, username: camera.username, password: password, detector: detector,
+                                    store: events, eventsFolder: lock.withLock { config.storage.eventsPath },
+                                    zones: camera.zones) { line in log.log(id, line) }
+        lock.withLock { watchers[id] = watcher }
+        watcher.start()
     }
 
     private func startBaichuan(_ camera: Config.Camera, _ parts: Parts) {

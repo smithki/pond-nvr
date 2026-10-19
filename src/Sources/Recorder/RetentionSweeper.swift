@@ -29,14 +29,14 @@ public struct RetentionSweeper {
         return f
     }()
 
-    /// Recorded files under `<base>/<kind folder>/<camera>/<day>/<time>[-n].mp4`.
+    /// Recorded files under `<base>/<kind folder>/<camera>/<day>/<time>[-n].mp4` (and events' pictures, .jpg).
     public static func list(base: String, folder: String, kind: RecordedFile.Kind) -> [RecordedFile] {
         let top = "\(base)/\(folder)"
         let fm = FileManager.default
         var out: [RecordedFile] = []
         for camera in (try? fm.contentsOfDirectory(atPath: top)) ?? [] {
             for day in (try? fm.contentsOfDirectory(atPath: "\(top)/\(camera)")) ?? [] {
-                for name in (try? fm.contentsOfDirectory(atPath: "\(top)/\(camera)/\(day)")) ?? [] where name.hasSuffix(".mp4") {
+                for name in (try? fm.contentsOfDirectory(atPath: "\(top)/\(camera)/\(day)")) ?? [] where name.hasSuffix(".mp4") || name.hasSuffix(".jpg") {
                     let stem = String(name.dropLast(4).prefix(8))   // HH-MM-SS, without any -n suffix
                     guard let start = nameFormatter.date(from: "\(day)/\(stem)") else { continue }
                     let path = "\(top)/\(camera)/\(day)/\(name)"

@@ -32,7 +32,9 @@ pond check
       "sub": "rtsp://192.168.1.20:554/h264Preview_01_sub",
       "username": "admin",
       "zones": [
-        { "id": "steps", "name": "Steps", "points": [[0.30, 0.55], [0.70, 0.55], [0.75, 1.0], [0.25, 1.0]] }
+        { "id": "steps", "name": "Steps", "points": [[0.30, 0.55], [0.70, 0.55], [0.75, 1.0], [0.25, 1.0]],
+          "categories": ["person", "package"] },
+        { "id": "road", "name": "Road", "points": [[0, 0.1], [1, 0.1], [1, 0.3], [0, 0.3]], "kind": "ignore" }
       ]
     }
   ]
@@ -101,10 +103,11 @@ pond camera remove ID [--delete-recordings] [--yes]
 | `cameras[].homekit` | `true` to serve the camera to HomeKit (from the login service). Default `false`. |
 | `cameras[].homekitVideo` | The picture the Home app gets. `camera` (the default): the camera's sub-stream (or main, for a viewer with the bandwidth) as the camera makes it, no work for the Mac; sharpen it in the camera's own app. `reencoded`: Pond re-encodes the main stream on the Mac's video hardware to the size, bitrate and frame rate each viewer asks for (sharper, fits slow connections; some work per viewer, about 0.1 s later). |
 | `cameras[].instantLive` | `true` to keep the sub-stream open in the service, so live views (the Home app's and Pond's) and snapshots start at once from its latest keyframe; one more camera connection and about 0.3 Mbit/s. Default: on for a camera in HomeKit. |
+| `cameras[].detection` | `false` to stop watching the camera for people, vehicles, animals and packages (no events are made for it). Default `true` ([detection.md](detection.md)). |
 | `cameras[].homekitRecording` | `true` to allow HomeKit Secure Video for the camera (in the app: Allow recording in the Home app). The Home app then decides whether it records, in the camera's Recording Options. Needs a home hub and iCloud+. Default `false`. |
 | `cameras[].homekitViewers` | How many can watch the camera live in the Home app at once, 1–4 (each iPhone, iPad, Mac or Apple TV takes one; one more is told it is busy). All share one camera connection; Pond's own windows don't count. Default 2. |
 | `cameras[].device` | Optional, written by pond: what the camera says it is (`manufacturer`, `model`, `serial`, `firmware`, `isDoorbell`, and `provider`, how Pond talks to it: `reolink`, `onvif`, or `video` for its video only, with no logins for its details or events, so its motion and button aren't watched and its HomeKit Secure Video pauses). HomeKit shows the same. `pond camera identify ID` asks again. |
-| `cameras[].zones` | Optional. Polygons in fractions of the frame: `[0, 0]` is top left, `[1, 1]` bottom right; at least 3 points. Zone ids are unique per camera. Edited by hand for now; the app will draw them. |
+| `cameras[].zones` | Optional. Polygons in fractions of the frame: `[0, 0]` is top left, `[1, 1]` bottom right; at least 3 points. Zone ids are unique per camera. `kind`: `"watch"` (the default) or `"ignore"`; `categories`: what a watched zone takes, of `"person"`, `"vehicle"`, `"animal"`, `"package"` (left out: all). Drawn in the app: camera settings › Detection › Edit Zones ([detection.md](detection.md#zones)). |
 
 **HomeKit status.** While it runs, the login service writes `homekit-status.json` next to the settings: each camera's HomeKit state (running, added to a home, viewers, the latest problem as a kind such as `loginRefused`), which the app shows. It holds no keys; a camera's setup code is in it only until the camera is added to a home. The file is readable only by you.
 

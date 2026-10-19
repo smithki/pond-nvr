@@ -8,9 +8,11 @@ import Recorder
 #if canImport(NVRMac)
 import Devices
 import HAP
+import Detection
 import Health
 import HAPCamera
 import NVRMac
+import Watch
 #endif
 #if canImport(Darwin)
 import Darwin
@@ -94,7 +96,6 @@ struct RecordingAndHomeKit: ServiceRunning {
         // Hourly (the main thread waits on the recorder, so not a run loop timer).
         let pruning = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.health.prune"))
         pruning.schedule(deadline: .now() + 3600, repeating: 3600)
-        pruning.setEventHandler { health?.prune() }
         pruning.resume()
         defer { pruning.cancel() }
         // Which cameras are private, kept beside the settings; applied by everything below as it changes.
@@ -113,6 +114,25 @@ struct RecordingAndHomeKit: ServiceRunning {
         let recording = RecordingService(config: config, passwords: passwords, log: log)
         let cameras = CameraSupervisor(config: config, passwords: passwords, configPath: configPath, log: log,
                                        recording: recording, host: host, privacySync: privacySync)
+        // Detection: the model (the built-in one, or one added to the Models folder), shared by every camera's
+        // watcher; their events kept beside the camera health.
+        let events = EventStore(path: config.storage.databasePath)
+        events?.endOngoing()
+        events?.prune(days: config.retention.events.days)
+        if let model = ModelStore.choose(nil) {
+            let detector = SharedDetector { line in log.log("pond", line) }
+            do {
+                try detector.detector.use(model)
+                cameras.detector = detector
+                cameras.events = events
+                log.log("pond", "detection: \(model.manifest.name) [\(model.manifest.license)]")
+            } catch {
+                log.log("pond", "! detection is off: \(error.description)")
+            }
+        } else {
+            log.log("pond", "! detection is off: no model in \(ModelStore.userFolder.path) or the app")
+        }
+        pruning.setEventHandler { health?.prune(); events?.prune(days: config.retention.events.days) }
         cameras.startAll()
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")
@@ -324,6 +344,38 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// `pond detect …`: a detection model run over recordings (see DetectCommand).
 #if canImport(NVRMac)
 if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()))) }
+
+/// `pond events [CAMERA] [--hours N]`: the events the service made from what it saw (the last 24 hours), oldest
+/// first: when, how long, what, and its picture.
+if args.first == "events" {
+    var rest = Array(args.dropFirst())
+    var hours = 24.0
+    if let i = rest.firstIndex(of: "--hours"), i + 1 < rest.count, let n = Double(rest[i + 1]) {
+        hours = n
+        rest.removeSubrange(i ... i + 1)
+    }
+    guard let config = try? ConfigStore(path: configPath).load() else {
+        FileHandle.standardError.write(Data("✗ The settings can\u{2019}t be read (\(configPath)).\n".utf8))
+        exit(1)
+    }
+    guard let store = EventStore(path: config.storage.databasePath, readOnly: true) else {
+        print("No events yet (\(config.storage.databasePath)).")
+        exit(0)
+    }
+    let kept = store.events(since: Date().addingTimeInterval(-hours * 3600), camera: rest.first)
+    if kept.isEmpty { print("No events in the last \(hours.formatted()) hours.") }
+    let format = DateFormatter()
+    format.dateFormat = "MMM d HH:mm:ss"
+    for k in kept {
+        let e = k.event
+        let seen = e.labels.sorted { $0.key < $1.key }.map { $0.value > 1 ? "\($0.value) \($0.key)s" : $0.key }.joined(separator: ", ")
+        let zones = e.zones.isEmpty ? "" : "  in " + e.zones.joined(separator: ", ")
+        let picture = e.snapshot.map { "  " + (config.storage.eventsPath as NSString).appendingPathComponent($0) } ?? ""
+        print("\(format.string(from: e.start))  \(e.camera)  \(e.category.rawValue) \(Int((e.confidence * 100).rounded()))%  "
+            + "\(k.ongoing ? "ongoing" : "\(Int(e.seconds.rounded())) s")  \(seen)\(zones)\(picture)")
+    }
+    exit(0)
+}
 #endif
 
 /// `pond service reload`: the running service reads the settings and passwords again, and starts, stops or starts

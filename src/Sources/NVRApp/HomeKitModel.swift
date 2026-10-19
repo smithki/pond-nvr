@@ -133,6 +133,16 @@ extension AppModel {
 
     /// Whether the service keeps the camera's sub-stream open for live views that start at once; it starts
     /// again to apply it.
+    /// Whether the camera is watched for detection, and its zones. (The running service takes them up with the
+    /// settings' reload: only the camera's watcher starts again.)
+    func setDetection(_ id: String, _ on: Bool, zones: [Config.Zone]) {
+        update(affectsRecorder: false) { config in
+            guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
+            config.cameras[i].detection = on ? nil : false
+            config.cameras[i].zones = zones
+        }
+    }
+
     func setInstantLive(_ id: String, _ on: Bool) {
         guard update(affectsRecorder: false, { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }

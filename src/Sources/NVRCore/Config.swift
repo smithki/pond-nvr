@@ -128,6 +128,10 @@ public struct Config: Codable, Equatable, Sendable {
         public var reencodesForHomeKit: Bool { homekitVideo == .reencoded }
         /// Offered to HomeKit Secure Video (the home hub records its events to iCloud); off until chosen.
         public var homekitRecording: Bool?
+        /// Watched for people, vehicles, animals and packages (its sub-stream, by the detection model), making
+        /// events; nil for the default: on.
+        public var detection: Bool?
+        public var watches: Bool { detection ?? true }
 
         public enum HomeKitVideo: String, Codable, Sendable, CaseIterable {
             /// The camera's sub-stream (or main, for a viewer with the bandwidth), as it is: no work for the Mac.
@@ -153,7 +157,7 @@ public struct Config: Codable, Equatable, Sendable {
 
         public init(id: String, name: String, main: String, sub: String, username: String, zones: [Zone] = [],
                     kind: Kind = .camera, homekit: Bool = false, device: Device? = nil, homekitViewers: Int? = nil,
-                    instantLive: Bool? = nil, homekitVideo: HomeKitVideo? = nil, homekitRecording: Bool? = nil) {
+                    instantLive: Bool? = nil, homekitVideo: HomeKitVideo? = nil, homekitRecording: Bool? = nil, detection: Bool? = nil) {
             self.id = id
             self.name = name
             self.main = main
@@ -167,6 +171,7 @@ public struct Config: Codable, Equatable, Sendable {
             self.instantLive = instantLive
             self.homekitVideo = homekitVideo
             self.homekitRecording = homekitRecording
+            self.detection = detection
         }
 
         /// The host in the main stream's address.
@@ -190,6 +195,7 @@ public struct Config: Codable, Equatable, Sendable {
             instantLive = try c.decodeIfPresent(Bool.self, forKey: .instantLive)
             homekitVideo = try c.decodeIfPresent(HomeKitVideo.self, forKey: .homekitVideo)
             homekitRecording = try c.decodeIfPresent(Bool.self, forKey: .homekitRecording)
+            detection = try c.decodeIfPresent(Bool.self, forKey: .detection)
         }
 
         /// Reolink's stream addresses for a camera at this host.
@@ -356,15 +362,51 @@ public struct Config: Codable, Equatable, Sendable {
     }
 
     /// An area of the picture, as a polygon in fractions of the frame: (0, 0) is top left, (1, 1) bottom right.
+    /// A part of a camera's picture, a polygon in fractions of it. A watched zone (the default): once a camera has
+    /// any, events are made only from what's in one, by where it stands (the bottom middle of its box), and only
+    /// of the kinds the zone takes. An ignored zone: nothing there counts, and nothing moving there (a tree in the
+    /// wind, a busy road) starts the model.
     public struct Zone: Codable, Equatable, Sendable, Identifiable {
         public var id: String
         public var name: String
         public var points: [[Double]]
+        /// Watched (nil) or ignored.
+        public var kind: Kind?
+        /// What a watched zone takes ("person", "vehicle", "animal", "package"); nil for all of them.
+        public var categories: [String]?
 
-        public init(id: String, name: String, points: [[Double]]) {
+        public enum Kind: String, Codable, Sendable, CaseIterable {
+            case watch
+            case ignore
+        }
+
+        public static let allCategories = ["person", "vehicle", "animal", "package"]
+
+        public init(id: String, name: String, points: [[Double]], kind: Kind? = nil, categories: [String]? = nil) {
             self.id = id
             self.name = name
             self.points = points
+            self.kind = kind
+            self.categories = categories
+        }
+
+        public var isIgnored: Bool { kind == .ignore }
+
+        /// Whether a watched zone takes this kind of thing.
+        public func takes(_ category: String) -> Bool { categories?.contains(category) ?? true }
+
+        /// Whether a point (fractions of the picture) is inside (even–odd, so any polygon will do).
+        public func contains(x: Double, y: Double) -> Bool {
+            let p = points.filter { $0.count == 2 }
+            guard p.count >= 3 else { return false }
+            var inside = false
+            var j = p.count - 1
+            for i in p.indices {
+                let (xi, yi, xj, yj) = (p[i][0], p[i][1], p[j][0], p[j][1])
+                if (yi > y) != (yj > y), x < (xj - xi) * (y - yi) / (yj - yi) + xi { inside.toggle() }
+                j = i
+            }
+            return inside
         }
     }
 }
@@ -433,6 +475,13 @@ extension Config {
                     out.append("\(zlabel): each point must be [x, y].")
                 } else if zone.points.flatMap({ $0 }).contains(where: { !(0 ... 1).contains($0) }) {
                     out.append("\(zlabel): points must be between 0 and 1 (fractions of the frame).")
+                }
+                if let categories = zone.categories {
+                    if let unknown = categories.first(where: { !Zone.allCategories.contains($0) }) {
+                        out.append("\(zlabel): \u{201C}\(unknown)\u{201D} isn\u{2019}t a kind of thing it can take (person, vehicle, animal, package).")
+                    } else if categories.isEmpty, !zone.isIgnored {
+                        out.append("\(zlabel): a watched zone needs at least one kind of thing to take.")
+                    }
                 }
             }
         }

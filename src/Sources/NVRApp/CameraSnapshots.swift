@@ -28,7 +28,7 @@ final class CameraSnapshots {
         }
     }
 
-    nonisolated static func latest(base: String, camera: String) async -> Snapshot? {
+    nonisolated static func latest(base: String, camera: String, size: CGSize = CGSize(width: 640, height: 360)) async -> Snapshot? {
         let now = Date()
         // Look back a little first, to avoid listing the whole week; further for a camera that has gone
         // quiet, whose old snapshot (and its age) then says so.
@@ -40,7 +40,7 @@ final class CameraSnapshots {
         let asset = AVURLAsset(url: URL(fileURLWithPath: span.path))
         guard let duration = try? await asset.load(.duration), duration.seconds > 0 else { return nil }
         let generator = AVAssetImageGenerator(asset: asset)
-        generator.maximumSize = CGSize(width: 640, height: 360)
+        generator.maximumSize = size
         generator.appliesPreferredTrackTransform = true
         let at = CMTime(seconds: max(0, duration.seconds - 0.5), preferredTimescale: 600)
         guard let (image, actual) = try? await generator.image(at: at) else { return nil }

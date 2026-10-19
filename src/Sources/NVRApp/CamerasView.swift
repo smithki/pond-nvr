@@ -696,6 +696,9 @@ struct EditCameraSheet: View {
     @State private var instantLive = false
     @State private var homeKitVideo = Config.Camera.HomeKitVideo.camera
     @State private var homeKitRecording = false
+    @State private var detection = true
+    @State private var zones: [Config.Zone] = []
+    @State private var editingZones = false
     @State private var confirmForget = false
     @State private var identifying = false
     /// The camera's recordings, for the remove prompt.
@@ -744,6 +747,7 @@ struct EditCameraSheet: View {
 
                 homeKitSection
 
+                detectionSection
 
                 moreSection
             }
@@ -775,6 +779,8 @@ struct EditCameraSheet: View {
             instantLive = camera.keepsLiveReady
             homeKitVideo = camera.homekitVideo ?? .camera
             homeKitRecording = camera.homekitRecording == true
+            detection = camera.watches
+            zones = camera.zones
             // Opened to fix the password: show the login.
             if focus == .password { showLogin = true }
         }
@@ -790,6 +796,9 @@ struct EditCameraSheet: View {
             // Opened to fix a check: put the cursor where the fix goes.
             try? await Task.sleep(for: .seconds(0.3))
             focused = focus
+        }
+        .sheet(isPresented: $editingZones) {
+            ZoneEditorSheet(camera: saved, zones: $zones)
         }
         .sheet(isPresented: $showingCheck) {
             CheckSheet(camera: edited, initial: checkResult, runCheck: { await check() }) { field in
@@ -1078,6 +1087,31 @@ struct EditCameraSheet: View {
         }
     }
 
+    var detectionSection: some View {
+        Section {
+            Toggle(isOn: $detection) {
+                Text("Watch for people, vehicles and animals")
+                Text("Pond looks at the sub-stream while something moves and makes events of what it sees, on this Mac.")
+            }
+            LabeledContent {
+                Button("Edit Zones\u{2026}") { editingZones = true }
+                    .disabled(!detection)
+            } label: {
+                Text("Zones")
+                Text(zonesSummary)
+            }
+        } header: {
+            Text("Detection")
+        }
+    }
+
+    var zonesSummary: String {
+        let watched = zones.filter { !$0.isIgnored }.count, ignored = zones.count - watched
+        if zones.isEmpty { return "None: everything in the picture counts." }
+        let parts = [watched > 0 ? "\(watched) watched" : nil, ignored > 0 ? "\(ignored) ignored" : nil].compactMap { $0 }
+        return parts.joined(separator: ", ") + (watched > 0 ? ": events come only from what\u{2019}s in a watched zone." : ".")
+    }
+
     var removeMessage: String {
         let size = recordingsSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "…"
         return "Its settings and password are removed. Its recordings and event clips (\(size)) can stay until retention deletes them, or be deleted now, which cannot be undone."
@@ -1157,6 +1191,7 @@ struct EditCameraSheet: View {
         if instantLive != saved.keepsLiveReady { model.setInstantLive(camera.id, instantLive) }
         if homeKitVideo != (saved.homekitVideo ?? .camera) { model.setHomeKitVideo(camera.id, homeKitVideo) }
         if homeKitRecording != (saved.homekitRecording == true) { model.setHomeKitRecording(camera.id, homeKitRecording) }
+        if detection != saved.watches || zones != saved.zones { model.setDetection(camera.id, detection, zones: zones) }
         // The new way of talking to it, if it answers that way; else it stays as it was, and says so.
         if provider == Config.Device.videoOnly, !saved.isVideoOnly {
             model.setVideoOnly(camera.id)

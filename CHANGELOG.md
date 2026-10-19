@@ -12,6 +12,8 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 
 ### Detection
 - **Detection models, pluggable**: any Core ML (or, from macOS 27, Core AI) detection model with a small manifest, built in or added to the Models folder, swapped while running. Four output formats are read (end-to-end like YOLO26, raw YOLO with Pond's own suppression, Vision pipelines, DETR-style), and labels put in Pond's terms (person, vehicle, animal, package). Built in: **Ultralytics YOLO26 small**, compiled into the app, 5–11 ms a frame on the Neural Engine. `pond detect` tries a model on recordings ([docs/detection.md](docs/detection.md)).
+- **Events from what the cameras see**: the service watches every camera's sub-stream (motion first, then the model while something moves), follows what it finds from picture to picture, and makes events: a person walking past is one event, with its start and end, everything seen in it, and a picture of its surest sighting. Something that never moves (a parked car) starts none. Kept in Pond's database and the events folder for the event retention; `pond events` lists them. `cameras[].detection: false` turns it off for a camera.
+- **Zones**, drawn on a camera's latest picture in its settings (Detection › Edit Zones): a watched zone limits events to what stands in it, of the kinds it takes (people, vehicles, animals, packages); an ignored zone is left out, its motion too (a road, a tree in the wind). Events list the zones they were in.
 
 The first version: recording, the app and HomeKit.
 
