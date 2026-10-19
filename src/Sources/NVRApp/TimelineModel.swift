@@ -270,7 +270,8 @@ final class TimelineModel {
         // only what can be played, and ends where the video did. (Finished files' lengths kept: they don't change.)
         var trimmed = found
         for (c, list) in found {
-            for (i, span) in list.enumerated() where i == list.count - 1 || list[i + 1].start > span.end.addingTimeInterval(-0.5) {
+            // (One the next follows on from was given the next one's start as its end: it runs on, nothing to trim.)
+            for (i, span) in list.enumerated() where i == list.count - 1 || list[i + 1].start > span.end.addingTimeInterval(0.5) {
                 let seconds: Double?
                 if let known = measured[span.path] {
                     seconds = known
