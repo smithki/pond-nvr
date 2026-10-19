@@ -2,8 +2,10 @@
 // what was recorded that day. Click or drag on the lanes to move through the day; click a lane to switch
 // camera.
 import AVFoundation
+import ImageIO
 import NVRCore
 import SwiftUI
+import Synchronization
 import Watch
 
 struct TimelineView: View {
@@ -1555,16 +1557,45 @@ struct EventCallout: View {
     }
 }
 
-/// Events' pictures, read once and kept (small JPEGs; a few hundred at most in a session).
-@MainActor
+/// Events' pictures, read once and kept (small JPEGs; a few hundred at most in a session), decoded as they're read
+/// (not when first drawn, mid-scroll). The grid reads ahead of its scroll, off the main thread, so a card coming
+/// into view finds its picture ready.
 enum EventPictures {
-    private static let cache = NSCache<NSURL, NSImage>()
+    nonisolated(unsafe) private static let cache = NSCache<NSURL, NSImage>()
+    private static let reading = Mutex<Set<URL>>([])
+    private static let queue = DispatchQueue(label: "pond.event-pictures", qos: .userInitiated)
 
-    static func image(_ url: URL) -> NSImage? {
+    /// Read now, if it isn't kept.
+    nonisolated static func image(_ url: URL) -> NSImage? {
         if let kept = cache.object(forKey: url as NSURL) { return kept }
-        guard let image = NSImage(contentsOf: url) else { return nil }
+        guard let image = read(url) else { return nil }
         cache.setObject(image, forKey: url as NSURL)
         return image
+    }
+
+    /// Read ahead, in the background, those not kept.
+    nonisolated static func prefetch(_ urls: [URL]) {
+        let wanted = urls.filter { cache.object(forKey: $0 as NSURL) == nil }
+        let fresh = reading.withLock { reading in
+            let fresh = wanted.filter { !reading.contains($0) }
+            reading.formUnion(fresh)
+            return fresh
+        }
+        guard !fresh.isEmpty else { return }
+        queue.async {
+            for url in fresh {
+                if cache.object(forKey: url as NSURL) == nil, let image = read(url) { cache.setObject(image, forKey: url as NSURL) }
+                _ = reading.withLock { $0.remove(url) }
+            }
+        }
+    }
+
+    /// Read and decoded (a plain NSImage(contentsOf:) decodes on its first draw, on the main thread).
+    private nonisolated static func read(_ url: URL) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
 

@@ -171,6 +171,8 @@ final class AppModel {
     var cameraToEdit: String?
     /// A moment to show on the timeline (set from the live view), taken by the timeline when it appears.
     var timelineJump: TimelineJump?
+    /// The Events view as it was left (the event open in its panel, its filters): as it's come back to.
+    var eventsState = EventsState()
     var addingCamera = false
     /// Find Cameras' card, open over the top right of the main window, and how far the button it points at
     /// is (its middle) from the window's trailing edge.
@@ -627,4 +629,13 @@ struct RecorderSettings: Equatable {
         retention = config.retention
         cameras = config.cameras.map { [$0.id, $0.main, $0.sub, $0.username].joined(separator: "\n") }.sorted()
     }
+}
+
+/// What the Events view keeps across visits.
+struct EventsState: Equatable {
+    /// The event whose details are open.
+    var selected: String?
+    /// One camera's, or all.
+    var camera: String?
+    var hidden: Set<TimelineEvent.Kind> = []
 }
