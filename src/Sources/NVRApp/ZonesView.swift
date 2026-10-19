@@ -15,6 +15,8 @@ struct ZoneEditorSheet: View {
     @State private var draft: [Config.Zone] = []
     @State private var selected: String?
     @State private var picture: CGImage?
+    /// The picture's shape: as last seen, until the picture comes (16:9 for a camera never seen).
+    @State private var aspect: Double?
     @State private var loaded = false
 
     var body: some View {
@@ -42,14 +44,14 @@ struct ZoneEditorSheet: View {
             .padding(.bottom, 12)
 
             HStack(alignment: .top, spacing: 16) {
-                ZoneCanvas(picture: picture, loaded: loaded, zones: $draft, selected: $selected)
+                ZoneCanvas(picture: picture, aspect: aspect ?? 16.0 / 9.0, loaded: loaded, zones: $draft, selected: $selected)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 panel.frame(width: 260)
             }
             .padding(.horizontal, 20)
 
             HStack {
-                Text(problem ?? "Things count by where they stand: the bottom middle of what\u{2019}s found.")
+                Text(problem ?? "Something is in a zone when its feet (or wheels) are.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -73,10 +75,15 @@ struct ZoneEditorSheet: View {
         .onAppear {
             draft = zones
             selected = zones.first?.id
+            aspect = CameraAspect.known(camera.id)
         }
         .task {
             let base = model.config?.storage.recordingsPath ?? ""
             picture = await CameraSnapshots.latest(base: base, camera: camera.id, size: CGSize(width: 1280, height: 960))?.image
+            if let picture {
+                CameraAspect.remember(camera.id, picture)
+                aspect = Double(picture.width) / Double(picture.height)
+            }
             loaded = true
         }
     }
@@ -89,7 +96,7 @@ struct ZoneEditorSheet: View {
 
     var height: Double {
         let pictureWidth = Self.width - 40 - 16 - 260
-        let aspect = picture.map { Double($0.width) / Double($0.height) } ?? 16.0 / 9.0
+        let aspect = self.aspect ?? 16.0 / 9.0
         return Self.above + max(Self.panelHeight, min(480, pictureWidth / aspect)) + Self.below
     }
 
@@ -198,6 +205,8 @@ struct ZoneEditorSheet: View {
 /// The picture with the zones on it, the chosen one with its corners to drag.
 struct ZoneCanvas: View {
     let picture: CGImage?
+    /// Its shape, known before it comes: the placeholder has it.
+    let aspect: Double
     let loaded: Bool
     @Binding var zones: [Config.Zone]
     @Binding var selected: String?
@@ -208,7 +217,6 @@ struct ZoneCanvas: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let aspect = picture.map { Double($0.width) / Double($0.height) } ?? 16.0 / 9.0
             let frame = Self.fit(aspect: aspect, in: geometry.size)
             ZStack(alignment: .topLeading) {
                 Group {

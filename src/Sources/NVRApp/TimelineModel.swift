@@ -107,8 +107,27 @@ final class TimelineModel {
     var source: EventSource?
     /// The events in `loaded`, all kinds; `shown` filters them.
     private(set) var events: [TimelineEvent] = []
-    /// When each camera was private, in `loaded`.
+    /// When each camera was private, in `loaded`, as read (up to when it was read).
     private(set) var privateSpans: [String: [ClosedRange<Date>]] = [:]
+    private var privacyRead = Date.distantPast
+    /// Finished segments' real lengths, as measured.
+    private var measured: [String: Double] = [:]
+    /// The cameras private now, and since when this app saw each become so (set from the app's privacy state):
+    /// a stretch going on now is drawn up to the present, and one just begun at once, not at the next read.
+    var privateNow: [String: Date] = [:]
+
+    /// A camera's private stretches as they are now.
+    func privateSpans(of camera: String, now: Date = Date()) -> [ClosedRange<Date>] {
+        var spans = privateSpans[camera] ?? []
+        guard let since = privateNow[camera] else { return spans }
+        if let last = spans.last, abs(last.upperBound.timeIntervalSince(privacyRead)) < 2 || last.upperBound >= since {
+            // Still going: on to now.
+            spans[spans.count - 1] = last.lowerBound ... max(last.upperBound, now)
+        } else if since < now {
+            spans.append(since ... now)
+        }
+        return spans
+    }
     /// The kinds of event there are in `loaded` (the filters offered).
     var kindsPresent: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { k in events.contains { $0.kind == k } } }
     /// The events of the day in the middle of the view.
@@ -246,14 +265,22 @@ final class TimelineModel {
             return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:])
         }.value
         let first = starts.values.min()
-        // Each camera's newest segment is listed as a nominal minute; its file may be shorter (cut at a
-        // keyframe, or still being written). Its real length, so the bar shows only what can be played.
+        // A segment with no other right after it (the newest, or one before a gap: the camera went private, or
+        // dropped) is listed as a nominal minute; its file may be much shorter. Its real length, so the bar shows
+        // only what can be played, and ends where the video did. (Finished files' lengths kept: they don't change.)
         var trimmed = found
         for (c, list) in found {
-            guard let last = list.last else { continue }
-            let duration = try? await Self.asset(last.path).load(.duration)
-            if let seconds = duration?.seconds, seconds > 0, last.start.addingTimeInterval(seconds) < last.end {
-                trimmed[c]![list.count - 1] = RecordedSpan(path: last.path, start: last.start, end: last.start.addingTimeInterval(seconds))
+            for (i, span) in list.enumerated() where i == list.count - 1 || list[i + 1].start > span.end.addingTimeInterval(-0.5) {
+                let seconds: Double?
+                if let known = measured[span.path] {
+                    seconds = known
+                } else {
+                    seconds = try? await Self.asset(span.path).load(.duration).seconds
+                    if let seconds, !span.isBeingWritten { measured[span.path] = seconds }
+                }
+                if let seconds, seconds > 0, span.start.addingTimeInterval(seconds) < span.end {
+                    trimmed[c]![i] = RecordedSpan(path: span.path, start: span.start, end: span.start.addingTimeInterval(seconds))
+                }
             }
         }
         spans = trimmed
@@ -262,6 +289,7 @@ final class TimelineModel {
         coverage = trimmed.mapValues { RecordingIndex.coverage($0) }
         events = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : kept
         privateSpans = privacy
+        privacyRead = min(to, Date())
         loaded = from ... to
     }
 

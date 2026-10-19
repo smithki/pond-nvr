@@ -144,6 +144,21 @@ struct TimelineView: View {
                 }
             }
         }
+        .onChange(of: cameras.map { model.isPrivate($0.id) }, initial: true) { _, _ in
+            let now = Date()
+            var next: [String: Date] = [:]
+            for camera in cameras where model.isPrivate(camera.id) { next[camera.id] = timeline.privateNow[camera.id] ?? now }
+            let changed = Set(next.keys) != Set(timeline.privateNow.keys)
+            timeline.privateNow = next
+            // The service has written the change by now (or will in a moment): read it, for its exact time.
+            if changed {
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    timeline.source = EventSource(config: model.config)
+                    await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
+                }
+            }
+        }
         .task(id: cameras.map(\.id)) {
             timeline.source = EventSource(config: model.config)
             await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
@@ -442,6 +457,8 @@ struct TimelineLanes: View, @MainActor Animatable {
     @State private var clock = Date()
     /// Each camera's recording as drawn while it grows to newly loaded minutes (see CatchUp).
     @State private var catchUps: [String: CatchUp] = [:]
+    /// Kinds of event being shown or hidden (a filter just changed): their marks fade in or out.
+    @State private var kindFades: [TimelineEvent.Kind: KindFade] = [:]
     /// Where the visible part started when a pan of the time axis began.
     @State private var panAnchor: Date?
     @State private var overTimeline = false
@@ -570,11 +587,42 @@ struct TimelineLanes: View, @MainActor Animatable {
             }
         }
         .onChange(of: timeline.coverage) { old, new in catchUp(from: old, to: new) }
+        .onChange(of: timeline.shownKinds) { old, new in fadeKinds(from: old, to: new) }
     }
 
     /// Zoomed in far enough on today that a second's growth shows: drawn every frame.
     var smoothNow: Bool { timeline.isToday && [.hour, .quarter].contains(timeline.zoom) }
-    var animating: Bool { smoothNow || !catchUps.isEmpty }
+    var animating: Bool { smoothNow || !catchUps.isEmpty || !kindFades.isEmpty }
+
+    /// A kind's marks fading from one opacity to another.
+    struct KindFade {
+        var from: Double
+        var to: Double
+        var began: Date
+        static let duration = 0.25
+
+        func value(at time: Date) -> Double {
+            let t = max(0, min(1, time.timeIntervalSince(began) / Self.duration))
+            return from + (to - from) * (t * t * (3 - 2 * t))
+        }
+    }
+
+    /// How much of a kind's marks shows now: 1 shown, 0 hidden, between while fading.
+    func visibility(_ kind: TimelineEvent.Kind, at time: Date) -> Double {
+        kindFades[kind]?.value(at: time) ?? (timeline.shownKinds.contains(kind) ? 1 : 0)
+    }
+
+    func fadeKinds(from old: Set<TimelineEvent.Kind>, to new: Set<TimelineEvent.Kind>) {
+        let now = Date()
+        for kind in old.symmetricDifference(new) {
+            kindFades[kind] = KindFade(from: kindFades[kind]?.value(at: now) ?? (old.contains(kind) ? 1 : 0),
+                                       to: new.contains(kind) ? 1 : 0, began: now)
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(KindFade.duration + 0.05))
+            kindFades = kindFades.filter { Date().timeIntervalSince($0.value.began) < KindFade.duration }
+        }
+    }
 
     /// Newly loaded recording, drawn growing from where the bar ended to where it ends now. A few seconds more
     /// (the minute being written, read again as it's written): at the clock's pace, evenly, so step after step
@@ -724,7 +772,7 @@ struct TimelineLanes: View, @MainActor Animatable {
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let slack = 4 / width * length
         let t = time(at: point.x, width: width, visible: visible)
-        let spans = Self.joined(timeline.privateSpans[camera] ?? [], to: timeline.coverage[camera] ?? [])
+        let spans = Self.joined(timeline.privateSpans(of: camera), to: timeline.coverage[camera] ?? [])
         guard let span = spans.first(where: { t >= $0.lowerBound.addingTimeInterval(-slack) && t <= $0.upperBound.addingTimeInterval(slack) })
         else { return nil }
         return TimelineEvent(id: "private-\(camera)-\(span.lowerBound.timeIntervalSince1970)", camera: camera, kind: .privacy,
@@ -908,16 +956,17 @@ struct TimelineLanes: View, @MainActor Animatable {
         if midX - box.width / 2 >= lane.minX + 2 { context.draw(label, at: CGPoint(x: midX, y: lane.midY)) }
     }
 
-    /// Private stretches with their ends moved onto the recording beside them, where it stops or starts again
-    /// within a minute and a half of the change.
+    /// Private stretches reaching out to the recording beside them, where it stopped a little before the change
+    /// or started again a little after (within a minute and a half): never pulled in, so a stretch always covers
+    /// the whole time it was private (recording that seems to run into it lies under it).
     static func joined(_ spans: [ClosedRange<Date>], to coverage: [ClosedRange<Date>]) -> [ClosedRange<Date>] {
         let near: TimeInterval = 90
         return spans.map { span in
-            let start = coverage.map(\.upperBound).filter { abs($0.timeIntervalSince(span.lowerBound)) <= near }
-                .min { abs($0.timeIntervalSince(span.lowerBound)) < abs($1.timeIntervalSince(span.lowerBound)) } ?? span.lowerBound
-            let end = coverage.map(\.lowerBound).filter { abs($0.timeIntervalSince(span.upperBound)) <= near }
-                .min { abs($0.timeIntervalSince(span.upperBound)) < abs($1.timeIntervalSince(span.upperBound)) } ?? span.upperBound
-            return start < end ? start ... end : span
+            let start = coverage.map(\.upperBound).filter { $0 <= span.lowerBound && span.lowerBound.timeIntervalSince($0) <= near }.max()
+                ?? span.lowerBound
+            let end = coverage.map(\.lowerBound).filter { $0 >= span.upperBound && $0.timeIntervalSince(span.upperBound) <= near }.min()
+                ?? span.upperBound
+            return start ... end
         }
     }
 
@@ -952,17 +1001,22 @@ struct TimelineLanes: View, @MainActor Animatable {
             let coverage = drawnCoverage(camera.id, at: frame)
             // Private stretches, reaching to the recording on either side (recording stops and starts again a
             // moment apart from the change), so the lane runs on through them without a break.
-            let privateSpans = Self.joined(timeline.privateSpans[camera.id] ?? [], to: coverage)
+            let privateSpans = Self.joined(timeline.privateSpans(of: camera.id, now: clockNow), to: coverage)
             // While the bar catches up, the part being recorded starts where the bar has reached.
             let recordingNow = timeline.recordingNow(of: camera.id, now: timeline.isLive ? (head ?? clockNow) : clockNow)
                 .map { now in (coverage.last.map { min($0.upperBound, now.lowerBound) } ?? now.lowerBound) ... now.upperBound }
             for range in coverage where range.upperBound > visible.lowerBound && range.lowerBound < visible.upperBound {
-                let x0 = max(0, x(range.lowerBound, width: size.width, visible: visible))
-                let x1 = min(size.width, x(range.upperBound, width: size.width, visible: visible))
+                // Running on under a private stretch beside it by a corner's width, so the bar shows in the
+                // stretch's rounded corners (it sits on top).
+                let underRight = privateSpans.contains { $0.lowerBound == range.upperBound } ? 6.0 : 0
+                let underLeft = privateSpans.contains { $0.upperBound == range.lowerBound } ? 6.0 : 0
+                let x0 = max(0, x(range.lowerBound, width: size.width, visible: visible) - underLeft)
+                let x1 = min(size.width, x(range.upperBound, width: size.width, visible: visible) + underRight)
                 let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
                 let strength = withEvents ? (selected ? 0.65 : 0.38) : (selected ? 0.85 : 0.45)
                 // Square on the right where the part being recorded carries on from it; square on the left where
                 // it begins the camera's recording, against the line that marks it ("Recording starts", "… added").
+                // Square under a private stretch's ends too: it sits on top, its rounded corners over the bar.
                 let joined = recordingNow?.lowerBound == range.upperBound || privateSpans.contains { $0.lowerBound == range.upperBound }
                 let opens = timeline.cameraStarts[camera.id].map { abs(range.lowerBound.timeIntervalSince($0)) < 1 } ?? false
                     || privateSpans.contains { $0.upperBound == range.lowerBound }
@@ -1001,20 +1055,14 @@ struct TimelineLanes: View, @MainActor Animatable {
             for span in privateSpans where span.upperBound > visible.lowerBound && span.lowerBound < visible.upperBound {
                 let x0 = max(0, x(span.lowerBound, width: size.width, visible: visible))
                 let x1 = min(size.width, x(span.upperBound, width: size.width, visible: visible))
-                let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
-                // Square where it joins recording, rounded where it's the lane's end (still private now).
-                let after = coverage.contains { $0.upperBound == span.lowerBound }
-                let before = coverage.contains { $0.lowerBound == span.upperBound }
-                let r = min(6, bar.width / 2)
-                let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
-                    topLeading: after ? 0 : r, bottomLeading: after ? 0 : r, bottomTrailing: before ? 0 : r, topTrailing: before ? 0 : r))
-                // Over the lane, not the recording that may show beside it within a segment's seconds: alike
-                // however short.
+                // On top of the bar, the lane's full height, with its own rounded corners: the bar's square ends
+                // show at them, under it.
+                let bar = CGRect(x: x0, y: lane.minY, width: max(3, x1 - x0), height: lane.height)
+                let shape = Path(roundedRect: bar, cornerRadius: min(6, bar.width / 2))
                 context.fill(shape, with: .style(.background))
-                context.fill(shape, with: .style(.quaternary.opacity(selected ? 1 : 0.6)))
-                context.fill(shape, with: .color(.indigo.opacity(selected ? 0.18 : 0.12)))
+                context.fill(shape, with: .color(.indigo.opacity(selected ? 0.3 : 0.2)))
                 if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
-                    context.stroke(Path(roundedRect: bar.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5), with: .color(.primary), lineWidth: 1.5)
+                    context.stroke(Path(roundedRect: bar.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
                 }
                 // The stripes keep to the time axis, so they don't slide as the view pans.
                 var hatch = Path()
@@ -1039,10 +1087,14 @@ struct TimelineLanes: View, @MainActor Animatable {
                 }
             }
             // The hovered one last, on top of any it overlaps, so its outline is whole.
-            let marks = timeline.shownEvents.filter { $0.camera == camera.id && $0.end > visible.lowerBound && $0.start < visible.upperBound }
+            // Shown, or fading in or out with its filter.
+            let marks = timeline.events.filter { $0.camera == camera.id && $0.end > visible.lowerBound && $0.start < visible.upperBound
+                && visibility($0.kind, at: frame) > 0 }
             for event in marks.filter({ $0.id != highlighted }) + marks.filter({ $0.id == highlighted }) {
                 let mark = markRect(event, width: size.width, visible: visible)
                 let isHovered = highlighted == event.id
+                var context = context
+                context.opacity = visibility(event.kind, at: frame)
                 context.fill(Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2)),
                              with: .color(event.kind.color.opacity(isHovered ? 1 : selected ? 0.9 : 0.6)))
                 if isHovered {
@@ -1225,6 +1277,8 @@ struct EventFilters: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .opacity(on ? 1 : 0.55)
+            // The whole chip, not just its words.
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .glassEffect(on ? .regular.tint(kind.color.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)

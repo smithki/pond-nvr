@@ -22,6 +22,8 @@ public final class CameraWatcher: @unchecked Sendable {
     let eventsFolder: String
     let say: @Sendable (String) -> Void
     let rules: ZoneRules
+    /// The main stream, for a closer look at what moves (nil: closer looks at the sub-stream's own picture).
+    let tap: StreamTap?
     /// Told as events begin and end (for HomeKit's motion sensor, later).
     public var changed: (@Sendable (EventBuilder.Change) -> Void)?
 
@@ -38,7 +40,7 @@ public final class CameraWatcher: @unchecked Sendable {
     private var stopped = false
 
     public init(camera: String, url: String, username: String, password: String, detector: SharedDetector, store: EventStore?,
-                eventsFolder: String, zones: [Config.Zone] = [], say: @escaping @Sendable (String) -> Void) {
+                eventsFolder: String, zones: [Config.Zone] = [], main: String? = nil, say: @escaping @Sendable (String) -> Void) {
         self.camera = camera
         self.url = url
         self.username = username
@@ -48,6 +50,7 @@ public final class CameraWatcher: @unchecked Sendable {
         self.eventsFolder = eventsFolder
         self.say = say
         rules = ZoneRules(zones)
+        tap = main.map { StreamTap(url: $0, username: username, password: password) }
     }
 
     var isStopped: Bool { lock.withLock { stopped } }
@@ -59,7 +62,10 @@ public final class CameraWatcher: @unchecked Sendable {
         thread.start()
     }
 
-    public func stop() { lock.withLock { stopped = true } }
+    public func stop() {
+        lock.withLock { stopped = true }
+        tap?.stop()
+    }
 
     // MARK: A doorbell's press
 
@@ -179,7 +185,11 @@ public final class CameraWatcher: @unchecked Sendable {
                 }
                 guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { continue }
                 lastDetect = now
-                guard let found = detector.detect(picture).map(Duplicates.merged) else { continue }
+                // The whole picture, and a closer look at what moves (at the main stream's resolution, once it's
+                // decoding: it starts with the motion).
+                let closer = mask.isMoving ? tap?.picture() : nil
+                guard let found = CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask, context: Self.context)
+                else { continue }
                 // What counts by the zones, with the zones it's in.
                 let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
                 let sightings = tracker.update(counted.map(\.0), mask: mask, at: now) { d in

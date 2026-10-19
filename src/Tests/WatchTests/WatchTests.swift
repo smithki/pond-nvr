@@ -444,3 +444,32 @@ import Testing
         #expect(builder.current?.labels == ["bicycle": 1, "person": 1])
     }
 }
+
+@Suite struct CloserLookTests {
+    @Test func aSmallMovingThingGetsACloseUp() {
+        // A cat at the left edge, low down: three cells of a 32×24 grid.
+        let mask = MotionMask(columns: 32, rows: 24, cells: [20 * 32 + 1, 20 * 32 + 2, 21 * 32 + 1])
+        let areas = CloserLook.areas(mask)
+        #expect(areas.count == 1)
+        // In a 2560×1440 picture: a 640×640 crop around it, inside the picture.
+        let crop = CloserLook.crop(areas[0], width: 2560, height: 1440)!
+        #expect(crop.width == 640 && crop.height == 640 && crop.minX == 0 && crop.maxY <= 1440)
+        // Found at the crop's middle: back in the whole picture's terms.
+        let found = Detection(label: "cat", category: .animal, confidence: 0.8, box: .init(x: 0.45, y: 0.45, width: 0.1, height: 0.1))
+        let mapped = CloserLook.mapped([found], from: crop, width: 2560, height: 1440)[0]
+        #expect(abs(mapped.box.x - (crop.minX + 0.45 * 640) / 2560) < 1e-9 && abs(mapped.box.width - 64.0 / 2560) < 1e-9)
+    }
+
+    @Test func somethingLargeIsSeenWhole() {
+        // Half the grid moving: no closer look.
+        let mask = MotionMask(columns: 4, rows: 4, cells: [0, 1, 2, 4, 5, 6, 8, 9, 10])
+        #expect(CloserLook.areas(mask).isEmpty)
+        // A small picture: a 640 crop would be most of it.
+        #expect(CloserLook.crop(CGRect(x: 0.4, y: 0.4, width: 0.05, height: 0.05), width: 896, height: 512) == nil)
+    }
+
+    @Test func twoThingsApartAreTwoAreas() {
+        let mask = MotionMask(columns: 32, rows: 24, cells: [5 * 32 + 2, 5 * 32 + 3, 18 * 32 + 25, 18 * 32 + 26, 19 * 32 + 25])
+        #expect(CloserLook.areas(mask).count == 2)
+    }
+}

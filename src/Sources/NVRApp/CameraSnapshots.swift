@@ -24,7 +24,10 @@ final class CameraSnapshots {
     func refresh(base: String, cameras: [String]) async {
         for camera in cameras {
             guard !Task.isCancelled else { return }
-            if let shot = await Self.latest(base: base, camera: camera) { snapshots[camera] = shot }
+            if let shot = await Self.latest(base: base, camera: camera) {
+                snapshots[camera] = shot
+                CameraAspect.remember(camera, shot.image)
+            }
         }
     }
 
@@ -45,5 +48,19 @@ final class CameraSnapshots {
         let at = CMTime(seconds: max(0, duration.seconds - 0.5), preferredTimescale: 600)
         guard let (image, actual) = try? await generator.image(at: at) else { return nil }
         return Snapshot(image: image, time: span.start.addingTimeInterval(actual.seconds))
+    }
+}
+
+/// Each camera's picture shape (width over height), as last seen: for a place to show its picture at the right
+/// shape before the picture itself has loaded. Kept per Mac (a convenience, not a setting).
+enum CameraAspect {
+    static func known(_ camera: String) -> Double? {
+        let value = UserDefaults.standard.double(forKey: "cameraAspect.\(camera)")
+        return value > 0 ? value : nil
+    }
+
+    static func remember(_ camera: String, _ image: CGImage) {
+        guard image.height > 0 else { return }
+        UserDefaults.standard.set(Double(image.width) / Double(image.height), forKey: "cameraAspect.\(camera)")
     }
 }

@@ -3,7 +3,8 @@
 // and the model's own); with --pictures, a few of the frames it found something in, boxes drawn. For trying a model
 // (the one built in, or one added to the Models folder) on a camera's own footage. `pond detect models` lists them.
 // With --camera ID, that camera's zones are applied as the service applies them: only people, vehicles, animals,
-// packages and items are listed, each with where it stands and whether it counts (its zones) or is ignored.
+// packages and items are listed, each with where it stands and whether it counts (its zones) or is ignored; and
+// as the service looks (motion first, and a closer look at what moves), `--closer` adds the closer looks.
 #if canImport(NVRMac)
 import AVFoundation
 import CoreGraphics
@@ -36,6 +37,10 @@ enum DetectCommand {
         let every = option("--every").flatMap(Double.init) ?? 1
         let picturesFolder = option("--pictures")
         var rules: ZoneRules?
+        let closer = args.contains("--closer")
+        args.removeAll { $0 == "--closer" }
+        var gate = MotionGate()
+        let context = CIContext()
         if let id = option("--camera") {
             guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == id }) else {
                 FileHandle.standardError.write(Data("✗ No camera \(id).\n".utf8))
@@ -50,7 +55,7 @@ enum DetectCommand {
         default: .all
         }
         guard !args.isEmpty else {
-            FileHandle.standardError.write(Data("✗ pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--camera ID] [--compute all|ane|gpu|cpu]; pond detect models\n".utf8))
+            FileHandle.standardError.write(Data("✗ pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--camera ID [--closer]] [--compute all|ane|gpu|cpu]; pond detect models\n".utf8))
             return 2
         }
         guard let model = ModelStore.choose(modelID) else {
@@ -77,11 +82,30 @@ enum DetectCommand {
             for (time, picture) in frames {
                 let started = Date()
                 let found: [Detection]
-                do {
-                    found = try detector.detect(picture)
-                } catch {
-                    FileHandle.standardError.write(Data("✗ \(error.description)\n".utf8))
-                    return 1
+                if closer {
+                    // As the service: what moves (on the motion grid), and the model on the whole and closer up.
+                    gate.ignored = rules?.ignoredCells(columns: gate.columns, rows: gate.rows) ?? []
+                    CVPixelBufferLockBaseAddress(picture, .readOnly)
+                    let cells = CVPixelBufferGetBaseAddress(picture).map {
+                        MotionGate.cells(bgra: $0.assumingMemoryBound(to: UInt8.self), width: CVPixelBufferGetWidth(picture),
+                                         height: CVPixelBufferGetHeight(picture), stride: CVPixelBufferGetBytesPerRow(picture),
+                                         columns: gate.columns, rows: gate.rows)
+                    } ?? []
+                    CVPixelBufferUnlockBaseAddress(picture, .readOnly)
+                    let mask = gate.moving(cells)
+                    guard let looked = CloserLook.look({ try? detector.detect($0) }, whole: picture, closer: nil, mask: mask, context: context)
+                    else {
+                        FileHandle.standardError.write(Data("✗ the model failed\n".utf8))
+                        return 1
+                    }
+                    found = looked
+                } else {
+                    do {
+                        found = try detector.detect(picture)
+                    } catch {
+                        FileHandle.standardError.write(Data("✗ \(error.description)\n".utf8))
+                        return 1
+                    }
                 }
                 times.append(Date().timeIntervalSince(started))
                 guard !found.isEmpty else { continue }

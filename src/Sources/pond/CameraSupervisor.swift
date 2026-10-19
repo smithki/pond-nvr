@@ -175,7 +175,7 @@ final class CameraSupervisor: @unchecked Sendable {
                      homekit: camera.homekit ? "\(whole)\n\(login)" : nil,
                      keeper: camera.keepsLiveReady ? "\(camera.sub)\n\(login)" : nil,
                      baichuan: reolink && password != nil ? "\(camera.host)\n\(login)" : nil,
-                     watch: camera.watches ? "\(camera.sub)\n\(login)\n\(zones)" : nil,
+                     watch: camera.watches ? "\(camera.sub)\n\(camera.main)\n\(login)\n\(zones)" : nil,
                      doorbell: camera.kind == .doorbell && !camera.homekit && !camera.isVideoOnly
                          ? "\(camera.host)\n\(camera.device?.provider ?? "")\n\(login)" : nil)
     }
@@ -229,7 +229,7 @@ final class CameraSupervisor: @unchecked Sendable {
         let log = log, id = camera.id
         let watcher = CameraWatcher(camera: id, url: camera.sub, username: camera.username, password: password, detector: detector,
                                     store: events, eventsFolder: lock.withLock { config.storage.eventsPath },
-                                    zones: camera.zones) { line in log.log(id, line) }
+                                    zones: camera.zones, main: camera.main) { line in log.log(id, line) }
         lock.withLock { watchers[id] = watcher }
         watcher.start()
     }

@@ -67,6 +67,10 @@ Without zones, the whole picture counts. A camera's zones, drawn on its picture 
 
 Something is in a watched zone by where it stands: the bottom middle of its box (someone's feet, a car's wheels), so a person on the pavement whose head is in front of the steps isn't on the steps. An ignored zone also leaves out what's nearly all inside it (three quarters of its box), whatever it stands on: a person on a TV is cut off at the screen's edge, where the zone drawn round the screen may stop just short. Zones apply from when they're saved; events already made stay as they were. Changing a camera's zones starts only its watcher again.
 
+### A closer look
+
+The model sees the whole picture squeezed to 640×640, so something small in it (a cat across the room, someone at the end of the drive) is a few dozen pixels. Where something moves, the watcher also gives the model a close-up: the moving area with room around it, at least 640 pixels square, cut from the main stream at full resolution. The main stream is decoded only while something moves (through the recorder's own connection, from its latest keyframe, so a picture is at hand at once) and let go a few seconds after. What the close-up finds is put back in the whole picture's terms and merged with the rest. One more run of the model (about 10 ms) for each of up to two moving areas, only while something moves. `pond detect FILE --camera ID --closer` replays a recording this way.
+
 The watchers share one model, and the camera connection that recording and live view already use. Decoding is done by the media engine, so watching costs little until something moves.
 
 ## Trying a model
