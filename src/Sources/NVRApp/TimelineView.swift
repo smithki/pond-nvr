@@ -98,11 +98,13 @@ struct TimelineView: View {
             }
 
             TimelineControls(timeline: timeline)
+                // Above what's below it: the filters' row, fading in or out as the layout moves, passes under it.
+                .zIndex(1)
 
             VStack(alignment: .leading, spacing: 8) {
                 if !timeline.dayEvents.isEmpty {
                     EventFilters(timeline: timeline)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(.opacity)
                 }
                 let visible = timeline.visible
                 TimelineLanes(timeline: timeline, cameras: cameras,
@@ -123,9 +125,10 @@ struct TimelineView: View {
                     .animation(settled ? .easeInOut(duration: 0.25) : nil, value: timeline.jumps)
                     .frame(height: lanes)
             }
-            // The filters' row coming or going: the lanes move up or down with it, rather than jump.
-            .animation(settled ? EventFilters.animation : nil, value: timeline.dayEvents.isEmpty)
         }
+        // The filters' row coming or going takes its room from the video: the picture's edge and the controls
+        // under it move together, smoothly, and the row fades in (or out) in the room made.
+        .animation(settled ? EventFilters.animation : nil, value: timeline.dayEvents.isEmpty)
         .padding(16)
         .coordinateSpace(.named(Self.space))
         .overlay(alignment: .topLeading) { callout }
@@ -1145,10 +1148,8 @@ struct PlayerLayerView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = PlayerHost()
-        view.wantsLayer = true
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
-        view.layer?.addSublayer(view.playerLayer)
         return view
     }
 
@@ -1156,16 +1157,19 @@ struct PlayerLayerView: NSViewRepresentable {
         (view as? PlayerHost)?.playerLayer.player = player
     }
 
+    /// The player's layer is the view's own: it's the view's size at every moment, as the view's frame animates
+    /// (the picture's edge moving with the layout), with no frame of its own to set after.
     final class PlayerHost: NSView {
         let playerLayer = AVPlayerLayer()
 
-        override func layout() {
-            super.layout()
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            playerLayer.frame = bounds
-            CATransaction.commit()
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
         }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func makeBackingLayer() -> CALayer { playerLayer }
     }
 }
 
@@ -1188,7 +1192,7 @@ struct EventFilters: View {
                     ForEach(kinds) { kind in
                         chip(kind)
                             .glassEffectID(kind, in: glass)
-                            .transition(.blur.combined(with: .scale(scale: 0.85)).combined(with: .opacity))
+                            .transition(.opacity)
                     }
                 }
             }
