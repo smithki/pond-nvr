@@ -45,6 +45,9 @@ public final class StreamRecorder {
     /// The current segment's start on the recording's timeline (90 kHz) and in wall time.
     private var segmentStart: Int64 = 0
     private var segmentWall: Double = 0
+    /// The last video frame's place in the recording (seconds since 1970), as it's placed: for detection's boxes to
+    /// be put on the same clock.
+    public private(set) var lastPlaced: Double?
     private var finishedSeconds = 0.0
     private var finishedVideo = 0
     private var finishedAudio = 0
@@ -136,6 +139,7 @@ public final class StreamRecorder {
             return out
         }
         let time = videoUnwrap.unwrap(unit.timestamp) - videoStart
+        lastPlaced = startWall + Double(time) / Double(VideoTrack.timescale)
         if unit.isKeyframe, let length = segmentLength, writer != nil, time - segmentStart >= length {
             out += closeSegment(until: time)
         }

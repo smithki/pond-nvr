@@ -54,9 +54,12 @@ struct TimelineView: View {
                 Color.black
                 PlayerLayerView(player: timeline.player)
                 // What was found, boxed (the recording only: live has no kept sightings yet).
+                // Drawn every frame while playing, at the player's exact time (the playhead updates five times a second).
                 if timeline.showBoxes, !timeline.isLive, let id = timeline.camera, let at = timeline.playhead {
-                    DetectionBoxes(boxes: timeline.boxes(at: at), aspect: CameraAspect.known(id) ?? 16.0 / 9.0)
-                        .allowsHitTesting(false)
+                    SwiftUI.TimelineView(.animation(minimumInterval: 1 / 60, paused: !timeline.playing)) { _ in
+                        DetectionBoxes(boxes: timeline.boxes(at: timeline.exactPlayhead() ?? at), aspect: CameraAspect.known(id) ?? 16.0 / 9.0)
+                    }
+                    .allowsHitTesting(false)
                 }
                 if timeline.isLive, let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
                     TimelineLive(camera: camera).id(camera.id)

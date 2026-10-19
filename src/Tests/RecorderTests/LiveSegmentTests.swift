@@ -55,3 +55,21 @@ import Testing
         #expect(RecordingIndex.beingWritten(base: root, camera: "porch", known: now.path, now: next.addingTimeInterval(5)) == nil)
     }
 }
+
+@Suite struct SegmentNameTests {
+    @Test func aNameToTheMillisecondIsReadToIt() throws {
+        let second = try #require(RecordingIndex.start(folder: "2026-10-19", name: "16-33-00.mp4"))
+        #expect(RecordingIndex.start(folder: "2026-10-19", name: "16-33-00.417.mp4") == second.addingTimeInterval(0.417))
+        #expect(RecordingIndex.start(folder: "2026-10-19", name: "16-33-00.417-1.mp4") == second.addingTimeInterval(0.417))
+        #expect(RecordingIndex.start(folder: "2026-10-19", name: "16-33-00.417.mp4.partial") == second.addingTimeInterval(0.417))
+        #expect(RecordingIndex.start(folder: "2026-10-19", name: "16-33-00-2.mp4") == second)
+    }
+
+    @Test func aSegmentIsNamedToTheMillisecond() throws {
+        let root = NSTemporaryDirectory() + "pond-names-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let files = SegmentFiles(root: root, camera: "porch", log: MemoryLog())
+        let path = files.path(for: 1_800_000_000.417)
+        #expect(path.hasSuffix(".417.mp4"))
+    }
+}

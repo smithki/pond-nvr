@@ -179,4 +179,17 @@ extension Date {
         #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(2)).isEmpty)
         #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(-1)).isEmpty)
     }
+
+    @Test func aTrackedBoxGlidesBetweenLooks() {
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = Sighting(camera: "porch", time: t, label: "person", category: .person, confidence: 0.9,
+                             box: .init(x: 0.1, y: 0.2, width: 0.2, height: 0.4), track: 7)
+        let second = Sighting(camera: "porch", time: t.addingTimeInterval(0.25), label: "person", category: .person, confidence: 0.9,
+                              box: .init(x: 0.3, y: 0.2, width: 0.2, height: 0.4), track: 7)
+        // A quarter of the way: a quarter of the way there.
+        let midway = TimelineModel.glide(in: [first, second], at: t.addingTimeInterval(0.0625))
+        #expect(abs((midway.first?.box.x ?? 0) - 0.15) < 1e-9)
+        // After the last look: where it was last seen.
+        #expect(TimelineModel.glide(in: [first, second], at: t.addingTimeInterval(0.3)).first?.box.x == 0.3)
+    }
 }

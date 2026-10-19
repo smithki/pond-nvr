@@ -43,7 +43,7 @@ targets.append(.target(name: "Detection"))
 targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
 // Watching the cameras: their pictures decoded, motion, the model, tracks, and events kept.
 targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
-targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore"]))
+targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore", "Recorder"]))
 commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",

@@ -15,6 +15,7 @@
 // Live: the selected camera as it is now, with the playhead at the present; only ever chosen (LIVE, or L).
 // Seeking anywhere leaves it.
 import AVFoundation
+import Detection
 import NVRCore
 import Observation
 import Recorder
@@ -139,23 +140,63 @@ final class TimelineModel {
         loadingSightings = false
     }
 
-    /// The boxes to draw at `time`: those of the model's last look at or just before it (within half a second).
+    /// The boxes to draw at `time`: the model's last look at or before it, each tracked thing glided towards
+    /// where the next look found it (looks are a few a second; the picture, thirty), so a box moves with what it's
+    /// round instead of stepping after it.
     func boxes(at time: Date) -> [Sighting] {
         guard showBoxes, let camera, sightingsCover?.camera == camera else { return [] }
-        return Self.look(in: sightings, at: time)
+        return Self.glide(in: sightings, at: time)
     }
 
-    /// Of sightings in time order, those of the last look at or just before `time` (within half a second).
+    /// Where the player is exactly (between the playhead's five-a-second updates), for drawing on the picture.
+    func exactPlayhead() -> Date? {
+        guard let window, !isLive, let item = player.currentItem, seeks == 0, !loading else { return playhead }
+        let origin = queued.first { $0.item === item }?.origin ?? window.origin
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? origin.addingTimeInterval(seconds) : playhead
+    }
+
+    /// A look more than this after the one before isn't its continuation (nothing to glide between).
+    nonisolated static let lookGap = 0.6
+
+    /// Of sightings in time order, those of the last look at or before `time` (within `lookGap`).
     nonisolated static func look(in sightings: [Sighting], at time: Date) -> [Sighting] {
+        let end = firstAfter(sightings, time)
+        guard end > 0 else { return [] }
+        let look = sightings[end - 1].time
+        guard time.timeIntervalSince(look) < lookGap else { return [] }
+        return sightings[..<end].reversed().prefix { $0.time == look }.reversed()
+    }
+
+    /// The last look's boxes, each tracked one moved part way to where the next look (if it follows closely)
+    /// found the same track, by how far `time` is between the two.
+    nonisolated static func glide(in sightings: [Sighting], at time: Date) -> [Sighting] {
+        let before = look(in: sightings, at: time)
+        guard let t0 = before.first?.time else { return [] }
+        let after = firstAfter(sightings, time)
+        guard after < sightings.count else { return before }
+        let t1 = sightings[after].time
+        guard t1.timeIntervalSince(t0) < lookGap, t1 > t0 else { return before }
+        let next = sightings[after...].prefix { $0.time == t1 }
+        let f = time.timeIntervalSince(t0) / t1.timeIntervalSince(t0)
+        return before.map { s in
+            guard let track = s.track, let to = next.first(where: { $0.track == track }) else { return s }
+            var moved = s
+            moved.box = Detection.Box(x: s.box.x + (to.box.x - s.box.x) * f, y: s.box.y + (to.box.y - s.box.y) * f,
+                                      width: s.box.width + (to.box.width - s.box.width) * f,
+                                      height: s.box.height + (to.box.height - s.box.height) * f)
+            return moved
+        }
+    }
+
+    /// The index of the first sighting after `time` (they're in time order).
+    nonisolated static func firstAfter(_ sightings: [Sighting], _ time: Date) -> Int {
         var low = 0, high = sightings.count
         while low < high {
             let mid = (low + high) / 2
-            if sightings[mid].time <= time.addingTimeInterval(0.1) { low = mid + 1 } else { high = mid }
+            if sightings[mid].time <= time { low = mid + 1 } else { high = mid }
         }
-        guard low > 0 else { return [] }
-        let look = sightings[low - 1].time
-        guard time.timeIntervalSince(look) < 0.6 else { return [] }
-        return sightings[..<low].reversed().prefix { $0.time == look }.reversed()
+        return low
     }
     /// The events in `loaded`, all kinds; `shown` filters them. What's worked out from them (each camera's index,
     /// the shown ones, the day's) is worked out once as they change, not each time they're drawn.

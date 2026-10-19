@@ -174,6 +174,9 @@ public final class CameraWorker: @unchecked Sendable {
                             senderPackets = RTCP.senderPacketCount(packet.data) ?? senderPackets
                         }
                         let outputs = r.handle(packet, now: now.timeIntervalSince1970)
+                        if packet.channel == CameraSession.videoChannel, let placed = r.lastPlaced {
+                            StreamLatency.shared.noteRecorded(camera.id, placed: placed, arrived: now.timeIntervalSince1970)
+                        }
                         files.handle(outputs)
                         if !announced, outputs.contains(where: { if case .start = $0 { true } else { false } }) {
                             announced = true

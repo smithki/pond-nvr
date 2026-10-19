@@ -161,6 +161,7 @@ public final class CameraWatcher: @unchecked Sendable {
         // the network's and the decoder's second or so later. (The Mac's clock until the first report.)
         var clock = RTPClock(rate: source.video.clockRate > 0 ? source.video.clockRate : 90000)
         var toldDelay = false
+        var arrivalLag: Double?
         while !isStopped, !PrivacyState.shared.isPrivate(camera) {
             guard let packet = try source.next(timeout: 1) else {
                 apply(builder.quiet(at: Date()))
@@ -180,9 +181,20 @@ public final class CameraWatcher: @unchecked Sendable {
                     say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")
                     told = true
                 }
-                let now = clock.wallTime(unit.timestamp).map { Date(timeIntervalSince1970: $0) } ?? Date()
-                if !toldDelay, clock.isSynchronized {
-                    say(String(format: "pictures reach detection %.2f s after the camera takes them", Date().timeIntervalSince(now)))
+                // On the recording's clock: when the picture arrived (smoothed, by the sub-stream's own times, so the
+                // watcher's own pauses don't show), less how long after their place in the recording the recorder's
+                // pictures arrive. Before the recorder has said: the sub-stream's own reports; before those, now.
+                let arrived = Date()
+                let taken = clock.wallTime(unit.timestamp).map { Date(timeIntervalSince1970: $0) }
+                if let taken { arrivalLag = arrivalLag.map { $0 * 0.95 + arrived.timeIntervalSince(taken) * 0.05 } ?? arrived.timeIntervalSince(taken) }
+                let now: Date
+                if let taken, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
+                    now = taken.addingTimeInterval(lag - recorded)
+                } else {
+                    now = taken ?? arrived
+                }
+                if !toldDelay, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
+                    say(String(format: "on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
                     toldDelay = true
                 }
                 guard now.timeIntervalSince(lastLook) >= Self.lookEvery else { continue }

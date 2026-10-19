@@ -62,8 +62,7 @@ public enum RecordingIndex {
         for folder in folders {
             for name in (try? fm.contentsOfDirectory(atPath: "\(top)/\(folder)")) ?? []
                 where name.hasSuffix(".mp4") || (writing && name.hasSuffix(".mp4.partial")) {
-                let stem = String(name.dropLast(4).prefix(8))   // HH-MM-SS, without any -n suffix
-                guard let start = RetentionSweeper.nameFormatter.date(from: "\(folder)/\(stem)") else { continue }
+                guard let start = Self.start(folder: folder, name: name) else { continue }
                 starts.append((start, "\(top)/\(folder)/\(name)"))
             }
         }
@@ -110,9 +109,18 @@ public enum RecordingIndex {
               let modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
         let parts = path.split(separator: "/")
         guard parts.count >= 2,
-              let start = RetentionSweeper.nameFormatter.date(from: "\(parts[parts.count - 2])/\(parts[parts.count - 1].prefix(8))")
+              let start = start(folder: String(parts[parts.count - 2]), name: String(parts[parts.count - 1]))
         else { return nil }
         return LiveSegment(path: path, start: start, through: max(start, modified))
+    }
+
+    /// When a segment starts, from its day folder and its name: "HH-MM-SS.mmm.mp4" (to the millisecond), or
+    /// "HH-MM-SS.mp4" from before; either with a "-n" clash suffix, or ".partial" while it's written.
+    public static func start(folder: String, name: String) -> Date? {
+        guard let whole = RetentionSweeper.nameFormatter.date(from: "\(folder)/\(name.prefix(8))") else { return nil }
+        let rest = name.dropFirst(8)
+        guard rest.first == ".", let digits = Int(rest.dropFirst().prefix(3)), rest.dropFirst().prefix(3).count == 3 else { return whole }
+        return whole.addingTimeInterval(Double(digits) / 1000)
     }
 
     /// When a camera's earliest recording starts: its first day folder's first segment. Cheap, whatever the
@@ -124,7 +132,7 @@ public enum RecordingIndex {
         for folder in days {
             let starts = ((try? fm.contentsOfDirectory(atPath: "\(top)/\(folder)")) ?? [])
                 .filter { $0.hasSuffix(".mp4") }
-                .compactMap { RetentionSweeper.nameFormatter.date(from: "\(folder)/\(String($0.dropLast(4).prefix(8)))") }
+                .compactMap { start(folder: folder, name: $0) }
             if let first = starts.min() { return first }
         }
         return nil

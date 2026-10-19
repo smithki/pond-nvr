@@ -36,7 +36,9 @@ public final class SegmentFiles {
         formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd/HH-mm-ss"
+        // To the millisecond: the recording is placed on the timeline by its name, so a picture's place is its time
+        // (and a box over it, found at that time, lands on it). Names to the second, from before, are read too.
+        formatter.dateFormat = "yyyy-MM-dd/HH-mm-ss.SSS"
     }
 
     public static func cameraFolder(root: String, camera: String) -> String {

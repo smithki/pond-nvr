@@ -21,7 +21,7 @@ final class TempFolder {
         let log = MemoryLog()
         let files = SegmentFiles(root: dir.path, camera: "porch", log: log)
         files.handle([.start(initSegment: [1, 2], wallTime: Self.wall + 3723), .fragment([3, 4])])
-        let final = "\(dir.path)/continuous/porch/2026-01-01/01-02-03.mp4"
+        let final = "\(dir.path)/continuous/porch/2026-01-01/01-02-03.000.mp4"
         #expect(files.state == .writing(path: final))
         #expect(FileManager.default.fileExists(atPath: final + ".partial"))
         #expect(!FileManager.default.fileExists(atPath: final))
