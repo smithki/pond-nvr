@@ -75,14 +75,40 @@ import Testing
         let started = Date()
         let marks = index.overlapping(whole).map { e in
             (kind: e.kind, rect: CGRect(x: e.start.timeIntervalSince(day) / 86400 * 1400, y: 0,
-                                        width: max(3, e.seconds / 86400 * 1400), height: 20))
+                                        width: max(3, e.seconds / 86400 * 1400), height: 20), weight: 1.0)
         }
-        let runs = TimelineLanes.runs(marks)
+        let runs = TimelineLanes.clusters(marks)
         let took = Date().timeIntervalSince(started)
         // Three kinds, about one shape a kind for each few points: a few hundred, not 20,000.
         #expect(runs.count < 3 * 1400 / 2)
         // Well within a frame, even in a debug build (a release build is several times faster).
         #expect(took < 0.25, "took \(took) s")
         print("busy day: \(marks.count) events in view, \(runs.count) shapes, \(Int(took * 1000)) ms")
+    }
+}
+
+
+@MainActor
+@Suite struct ClusterTests {
+    @Test func touchingMarksOfAnyKindAreOneChipLedByTheMostTelling() {
+        func mark(_ kind: TimelineEvent.Kind, _ x: Double) -> (kind: TimelineEvent.Kind, rect: CGRect, weight: Double) {
+            (kind, CGRect(x: x, y: 0, width: 4, height: 20), 1)
+        }
+        let clusters = TimelineLanes.clusters([mark(.animal, 0), mark(.person, 3), mark(.animal, 6), mark(.vehicle, 40)])
+        #expect(clusters.count == 2)
+        #expect(clusters[0].lead == .person && clusters[0].kinds.map(\.kind) == [.person, .animal])
+        #expect(clusters[0].kinds.first { $0.kind == .animal }?.count == 2)
+        #expect(clusters[0].rect == CGRect(x: 0, y: 0, width: 10, height: 20))
+    }
+}
+
+@MainActor
+@Suite struct ClusterIDTests {
+    @Test func aChipKnowsItsEvents() {
+        let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
+            (.animal, CGRect(x: 10, y: 0, width: 4, height: 20), 1), (.person, CGRect(x: 0, y: 0, width: 4, height: 20), 1),
+            (.person, CGRect(x: 3, y: 0, width: 4, height: 20), 1), (.vehicle, CGRect(x: 50, y: 0, width: 4, height: 20), 1)]
+        let clusters = TimelineLanes.clusters(marks, ids: ["a", "b", "c", "d"])
+        #expect(clusters.map(\.ids) == [["b", "c"], ["a"], ["d"]])
     }
 }

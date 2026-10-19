@@ -16,6 +16,11 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
 
         var id: String { rawValue }
 
+        /// Which leads where several kinds are together (its colour and symbol first): a ring, someone, then
+        /// what they came in, animals, and what was left.
+        static let prominence: [Kind] = [.ring, .person, .bike, .vehicle, .animal, .package, .item, .motion, .privacy]
+        var prominence: Int { Self.prominence.firstIndex(of: self) ?? Self.prominence.count }
+
         init(_ category: DetectedCategory) {
             switch category {
             case .person: self = .person

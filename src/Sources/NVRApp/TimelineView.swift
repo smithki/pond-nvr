@@ -111,7 +111,8 @@ struct TimelineView: View {
                               start: visible.lowerBound.timeIntervalSinceReferenceDate,
                               length: visible.upperBound.timeIntervalSince(visible.lowerBound),
                               playhead: timeline.playhead?.timeIntervalSinceReferenceDate ?? .nan,
-                              hovered: $hovered, highlighted: shown?.event.id,
+                              hovered: $hovered, highlighted: shown.flatMap { $0.group.isEmpty ? $0.event.id : nil },
+                              highlightedGroup: Set(shown?.group.map(\.id) ?? []),
                               reorder: { model.moveCamera($0, onto: $1) })
                     // A jump out of view (another day, live from long ago) cross-fades: the lanes are drawn
                     // afresh at the new place as the old ones fade.
@@ -197,16 +198,22 @@ struct TimelineView: View {
                 let margin = 12.0
                 let left = min(max(margin, shown.anchor.x - calloutSize.width / 2),
                                geo.size.width - calloutSize.width - margin)
-                EventCallout(event: shown.event, camera: cameraName, arrowX: shown.anchor.x - left)
-                    .fixedSize()
-                    .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                        // A new event's text changes the card's size; it resizes with the slide.
-                        if calloutSize == .zero { calloutSize = size } else { withAnimation(Self.slide) { calloutSize = size } }
-                    }
-                    .offset(x: left, y: shown.anchor.y - calloutSize.height - 4)
-                    .opacity(calloutSize == .zero ? 0 : 1)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                let canZoom = timeline.zoom.rawValue > (TimelineModel.Zoom.allCases.map(\.rawValue).min() ?? 0)
+                ZStack(alignment: .topLeading) {
+                    // Measured as it would be, unseen: the card below takes that size, animated, so what's in it never
+                    // spills out, and it grows up from its arrow (its foot stays on the mark).
+                    EventCallout(event: shown.event, camera: cameraName, arrowX: 0, group: shown.group, canZoom: canZoom)
+                        .hidden()
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                            if calloutSize == .zero { calloutSize = size } else { withAnimation(Self.slide) { calloutSize = size } }
+                        }
+                    EventCallout(event: shown.event, camera: cameraName, arrowX: shown.anchor.x - left, group: shown.group,
+                                 canZoom: canZoom, size: calloutSize)
+                        .offset(x: left, y: shown.anchor.y - calloutSize.height - 4)
+                        .opacity(calloutSize == .zero ? 0 : 1)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
     }
@@ -451,6 +458,8 @@ struct TimelineLanes: View, @MainActor Animatable {
     @Binding var hovered: EventHover?
     /// The event whose callout is showing, outlined.
     let highlighted: String?
+    /// The events of a hovered chip of several (outlined whole).
+    var highlightedGroup: Set<String> = []
     @State private var dragging: Date?
     /// Advanced every second while the timeline shows today, so what is being recorded (drawn up to the
     /// present) keeps growing when nothing else changes.
@@ -541,7 +550,13 @@ struct TimelineLanes: View, @MainActor Animatable {
                                     switch phase {
                                     case let .active(point):
                                         let origin = geo.frame(in: .named(TimelineView.space)).origin
-                                        if let event = event(at: point, width: geo.size.width, visible: visible) {
+                                        if let group = group(at: point, width: geo.size.width, visible: visible) {
+                                            // Several too close to tell apart: all of them, in one card.
+                                            let lead = group.events.min { ($0.kind.prominence, $0.start) < ($1.kind.prominence, $1.start) }!
+                                            hovered = EventHover(event: lead, anchor: CGPoint(x: origin.x + group.rect.midX,
+                                                                                             y: origin.y + group.rect.minY),
+                                                                 group: group.events)
+                                        } else if let event = event(at: point, width: geo.size.width, visible: visible) {
                                             let mark = markRect(event, width: geo.size.width, visible: visible)
                                             hovered = EventHover(event: event,
                                                                  anchor: CGPoint(x: origin.x + mark.midX, y: origin.y + mark.minY))
@@ -728,8 +743,26 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let click = value.translation == .zero
                 timeline.scrubbing = nil
                 let lane = Int(value.location.y / laneHeight)
-                let clicked = click && inLanes ? event(at: value.location, width: width, visible: visible) : nil
+                let group = click && inLanes ? self.group(at: value.location, width: width, visible: visible) : nil
+                let clicked = click && inLanes && group == nil ? event(at: value.location, width: width, visible: visible) : nil
                 Task {
+                    // Several together: closer, to where they come apart (centred on them, the playhead there).
+                    if let group, let first = group.events.first {
+                        hovered = nil
+                        let zoom = zoomApart(group.events, width: width)
+                        // Already as close as it goes (events at the same moment: a press during someone's visit):
+                        // the most telling of them, played.
+                        if zoom == timeline.zoom {
+                            let lead = group.events.min { ($0.kind.prominence, $0.start) < ($1.kind.prominence, $1.start) }!
+                            await timeline.play(lead)
+                            return
+                        }
+                        let last = group.events.map(\.end).max() ?? first.end
+                        timeline.zoom = zoom
+                        await timeline.select(camera: first.camera)
+                        await timeline.seek(to: first.start.addingTimeInterval(last.timeIntervalSince(first.start) / 2))
+                        return
+                    }
                     if let clicked {
                         await timeline.play(clicked)
                         return
@@ -956,19 +989,62 @@ struct TimelineLanes: View, @MainActor Animatable {
         if midX - box.width / 2 >= lane.minX + 2 { context.draw(label, at: CGPoint(x: midX, y: lane.midY)) }
     }
 
-    /// Marks of a kind that touch or nearly (within a point) as one: what's drawn for a lane.
-    static func runs(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect)]) -> [(kind: TimelineEvent.Kind, rect: CGRect)] {
-        var out: [(kind: TimelineEvent.Kind, rect: CGRect)] = []
-        for (kind, group) in Dictionary(grouping: marks, by: \.kind).sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            for mark in group.sorted(by: { $0.rect.minX < $1.rect.minX }) {
-                if let last = out.last, last.kind == kind, mark.rect.minX <= last.rect.maxX + 1 {
-                    out[out.count - 1].rect = last.rect.union(mark.rect)
-                } else {
-                    out.append(mark)
-                }
+    /// Marks that touch or nearly (within a point), whatever their kinds, as one chip.
+    struct Cluster {
+        var rect: CGRect
+        /// The kinds in it, the leading first, with how many of each.
+        var kinds: [(kind: TimelineEvent.Kind, count: Int)]
+        /// How much it shows (its kinds' filters fading).
+        var weight: Double
+        /// Its events, in time order.
+        var ids: [String] = []
+
+        var lead: TimelineEvent.Kind { kinds.first?.kind ?? .motion }
+    }
+
+    /// What's drawn for a lane: its marks (each with how much it shows) joined where they touch.
+    static func clusters(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)], ids: [String] = []) -> [Cluster] {
+        var out: [(rect: CGRect, counts: [TimelineEvent.Kind: Int], weight: Double, ids: [String])] = []
+        for i in marks.indices.sorted(by: { marks[$0].rect.minX < marks[$1].rect.minX }) {
+            let mark = marks[i], id = ids.indices.contains(i) ? [ids[i]] : []
+            if let last = out.last, mark.rect.minX <= last.rect.maxX + 1 {
+                out[out.count - 1].rect = last.rect.union(mark.rect)
+                out[out.count - 1].counts[mark.kind, default: 0] += 1
+                out[out.count - 1].weight = max(last.weight, mark.weight)
+                out[out.count - 1].ids += id
+            } else {
+                out.append((mark.rect, [mark.kind: 1], mark.weight, id))
             }
         }
-        return out
+        return out.map { c in
+            Cluster(rect: c.rect, kinds: c.counts.sorted { $0.key.prominence < $1.key.prominence }.map { ($0.key, $0.value) },
+                    weight: c.weight, ids: c.ids)
+        }
+    }
+
+    /// The chip of several events under a point (within a few points), with its events in time order; nil for a
+    /// chip of one, or none.
+    func group(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> (events: [TimelineEvent], rect: CGRect)? {
+        // The event the pointer is nearest (as for one event), then its chip: wherever an event of a group would be
+        // picked, the group is.
+        guard let nearest = event(at: point, width: width, visible: visible) else { return nil }
+        let shown = (timeline.index[nearest.camera]?.overlapping(visible) ?? []).filter { timeline.shownKinds.contains($0.kind) }
+        let clusters = Self.clusters(shown.map { (kind: $0.kind, rect: markRect($0, width: width, visible: visible), weight: 1.0) },
+                                     ids: shown.map(\.id))
+        guard let hit = clusters.first(where: { $0.ids.contains(nearest.id) }), hit.ids.count > 1 else { return nil }
+        let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return (hit.ids.compactMap { byID[$0] }.sorted { $0.start < $1.start }, hit.rect)
+    }
+
+    /// The zoom at which these events come apart (each a few points from the next), and still all fit; the closest
+    /// zoom if none does.
+    func zoomApart(_ events: [TimelineEvent], width: Double) -> TimelineModel.Zoom {
+        let starts = events.map(\.start).sorted()
+        let gaps = zip(starts, starts.dropFirst()).map { $1.timeIntervalSince($0) }.filter { $0 > 0 }
+        let closest = gaps.min() ?? 60
+        let span = (events.map(\.end).max() ?? starts.last!).timeIntervalSince(starts.first!)
+        let closer = TimelineModel.Zoom.allCases.filter { $0.rawValue < timeline.zoom.rawValue }.sorted { $0.rawValue > $1.rawValue }
+        return closer.first { closest / $0.rawValue * width >= 8 && $0.rawValue >= span * 1.2 } ?? closer.last ?? timeline.zoom
     }
 
     /// Private stretches reaching out to the recording beside them, where it stopped a little before the change
@@ -1107,26 +1183,57 @@ struct TimelineLanes: View, @MainActor Animatable {
             // shapes a lane at most, however many events), the hovered one on its own, on top.
             let marks = (timeline.index[camera.id]?.overlapping(visible) ?? []).filter { visibility($0.kind, at: frame) > 0 }
             let hovered = marks.first { $0.id == highlighted }
-            let runs = Self.runs(marks.filter { $0.id != highlighted }.map { ($0.kind, markRect($0, width: size.width, visible: visible)) })
+            let drawn = marks.filter { $0.id != highlighted }
+            let clusters = Self.clusters(drawn.map {
+                (kind: $0.kind, rect: markRect($0, width: size.width, visible: visible), weight: visibility($0.kind, at: frame))
+            }, ids: drawn.map(\.id))
             var symbols: [TimelineEvent.Kind: GraphicsContext.ResolvedText] = [:]
-            for (kind, mark, isHovered) in runs.map({ ($0.kind, $0.rect, false) })
-                + (hovered.map { [($0.kind, markRect($0, width: size.width, visible: visible), true)] } ?? []) {
+            func symbol(_ kind: TimelineEvent.Kind, height: Double) -> GraphicsContext.ResolvedText {
+                // As text, so the symbol keeps its own shape (a walking figure is taller than wide); each kind's made
+                // once a frame.
+                if let made = symbols[kind] { return made }
+                let made = context.resolve(Text(Image(systemName: kind.symbol))
+                    .font(.system(size: min(11, height - 2), weight: .semibold)).foregroundStyle(.white))
+                symbols[kind] = made
+                return made
+            }
+            let hoveredCluster = hovered.map { Cluster(rect: markRect($0, width: size.width, visible: visible),
+                                                         kinds: [($0.kind, 1)], weight: visibility($0.kind, at: frame)) }
+            for (cluster, isHovered) in clusters.map({ ($0, !highlightedGroup.isEmpty && !highlightedGroup.isDisjoint(with: $0.ids)) })
+                + (hoveredCluster.map { [($0, true)] } ?? []) {
+                let mark = cluster.rect
+                let lead = cluster.lead
                 var context = context
-                context.opacity = visibility(kind, at: frame)
-                context.fill(Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2)),
-                             with: .color(kind.color.opacity(isHovered ? 1 : selected ? 0.9 : 0.6)))
+                context.opacity = cluster.weight
+                let shape = Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2))
+                // One chip: in the colour of what leads it, a thin band along its foot for the others with it (in
+                // proportion), and their symbols, the leading one first, where there's room.
+                context.fill(shape, with: .color(lead.color.opacity(isHovered ? 1 : selected ? 0.9 : 0.6)))
+                if cluster.kinds.count > 1 {
+                    let total = Double(cluster.kinds.reduce(0) { $0 + $1.count })
+                    var bx = mark.minX
+                    context.drawLayer { layer in
+                        layer.clip(to: shape)
+                        for (kind, count) in cluster.kinds {
+                            let w = mark.width * Double(count) / total
+                            layer.fill(Path(CGRect(x: bx, y: mark.maxY - 3, width: w, height: 3)), with: .color(kind.color))
+                            bx += w
+                        }
+                    }
+                }
                 if isHovered {
                     context.stroke(Path(roundedRect: mark.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5),
                                    with: .color(.primary), lineWidth: 1.5)
                 }
-                // Room for the symbol when zoomed in far enough (each kind's made once a frame).
                 if mark.width > 22, mark.height >= 10 {
-                    // As text, so the symbol keeps its own shape (a walking figure is taller than wide).
-                    let symbol = symbols[kind] ?? context.resolve(Text(Image(systemName: kind.symbol))
-                        .font(.system(size: min(11, mark.height - 2), weight: .semibold)).foregroundStyle(.white))
-                    symbols[kind] = symbol
-                    let box = symbol.measure(in: mark.size)
-                    context.draw(symbol, at: CGPoint(x: mark.minX + 4 + box.width / 2, y: mark.midY))
+                    var sx = mark.minX + 4
+                    for (kind, _) in cluster.kinds {
+                        let made = symbol(kind, height: mark.height)
+                        let box = made.measure(in: mark.size)
+                        guard sx + box.width <= mark.maxX - 4 else { break }
+                        context.draw(made, at: CGPoint(x: sx + box.width / 2, y: mark.midY - (cluster.kinds.count > 1 ? 1 : 0)))
+                        sx += box.width + 4
+                    }
                 }
             }
         }
@@ -1309,6 +1416,9 @@ struct EventFilters: View {
 struct EventHover: Equatable {
     var event: TimelineEvent
     var anchor: CGPoint
+    /// Several events too close to tell apart where they're drawn (one chip): all of them, in time order; empty
+    /// for one event.
+    var group: [TimelineEvent] = []
 }
 
 /// What happened, shown above an event's mark when hovering over it: a glass card with an arrow at `arrowX`.
@@ -1316,6 +1426,16 @@ struct EventCallout: View {
     let event: TimelineEvent
     let camera: String
     let arrowX: Double
+    /// Several, too close to tell apart: listed (the most telling one's picture above), and a click zooms in.
+    var group: [TimelineEvent] = []
+
+    /// At most this many listed; the rest counted.
+    static let listed = 5
+    /// A closer zoom would part them (else a click plays the first).
+    var canZoom = true
+    /// The card's size (animated by its owner): what's in it is held to that, clipped; nil, its own size, bare (to
+    /// be measured).
+    var size: CGSize?
 
     static let arrowSize = CGSize(width: 26, height: 10)
 
@@ -1329,10 +1449,36 @@ struct EventCallout: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let content = layout
+        // Another event's (or group's) words and picture at once, in the same card (a new card each time would
+        // blink as its glass is made again): what changes in it changes without animating, and what comes or goes
+        // in it (a picture, a row) does so at once, with no fade of its own carried off by the card's resize. The
+        // card around it glides to its new place and size, its arrow with it.
+        .transaction { $0.animation = nil }
+        .padding(12)
+        .padding(.bottom, Self.arrowSize.height)
+        .fixedSize()
+        let shape = CalloutShape(arrowX: arrowX, arrow: Self.arrowSize, radius: 14)
+        if let size {
+            content
+                .frame(width: size.width, height: size.height, alignment: .top)
+                .clipShape(shape)
+                .glassEffect(.regular, in: shape)
+        } else {
+            content
+        }
+    }
+
+    /// One layout for one event and for several (two would be two views, and going from one to the other would
+    /// make the card anew, its glass blinking): the same pieces, each shown or not, filled in for what's hovered.
+    var layout: some View {
+        let isGroup = group.count > 1
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: event.kind.symbol).foregroundStyle(event.kind.color)
-                Text(event.kind.title).font(.headline)
+                if !isGroup {
+                    Image(systemName: event.kind.symbol).foregroundStyle(event.kind.color).transition(.identity)
+                }
+                Text(isGroup ? "\(group.count) events" : event.kind.title).font(.headline)
                 Text("· \(camera)").foregroundStyle(.secondary)
             }
             // Read at once (and kept), not loaded after: the card has its final size from the first frame, so
@@ -1343,23 +1489,47 @@ struct EventCallout: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .transition(.identity)
             }
-            Text(event.summary).font(.callout).frame(maxWidth: 260, alignment: .leading)
+            if isGroup {
+                ForEach(group.prefix(Self.listed)) { e in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: e.kind.symbol).foregroundStyle(e.kind.color).frame(width: 16)
+                        Text(e.start.formatted(date: .omitted, time: .shortened)).monospacedDigit().foregroundStyle(.secondary)
+                        Text(e.summary).lineLimit(1)
+                    }
+                    .font(.callout)
+                    .frame(maxWidth: 260, alignment: .leading)
+                    .transition(.identity)
+                }
+                if group.count > Self.listed {
+                    Text("and \(group.count - Self.listed) more").font(.callout).foregroundStyle(.secondary)
+                        .transition(.identity)
+                }
+            } else {
+                Text(event.summary).font(.callout).frame(maxWidth: 260, alignment: .leading).transition(.identity)
+            }
             HStack(spacing: 4) {
-                if event.kind == .privacy {
-                    Text("\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened)) · \(Self.length(event.seconds))")
-                } else {
-                    Text("\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s")
+                Text(when)
+                if event.kind != .privacy {
                     Spacer(minLength: 16)
-                    Text("Click to play")
+                    Text(isGroup && canZoom ? "Click to zoom in" : "Click to play")
                 }
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
         }
-        .padding(12)
-        .padding(.bottom, Self.arrowSize.height)
-        .glassEffect(.regular, in: CalloutShape(arrowX: arrowX, arrow: Self.arrowSize, radius: 14))
+    }
+
+    /// When: a group's span, a private stretch's span and length, an event's moment and length.
+    var when: String {
+        if group.count > 1, let first = group.first, let last = group.map(\.end).max() {
+            return "\(first.start.formatted(date: .omitted, time: .shortened)) – \(last.formatted(date: .omitted, time: .shortened))"
+        }
+        if event.kind == .privacy {
+            return "\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened)) · \(Self.length(event.seconds))"
+        }
+        return "\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s"
     }
 }
 
