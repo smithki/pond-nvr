@@ -56,6 +56,13 @@ app: build
 	  --app-icon AppIcon --output-partial-info-plist $(APP)/Contents/Resources/.icon-info.plist \
 	  --output-format human-readable-text >/dev/null
 	@rm -f $(APP)/Contents/Resources/.icon-info.plist
+	@# The detection models built in (models/: a Core ML package and its manifest each), compiled now so they load
+	@# at once.
+	@rm -rf $(APP)/Contents/Resources/Models && mkdir -p $(APP)/Contents/Resources/Models
+	@for m in models/*.mlpackage; do \
+	  xcrun coremlcompiler compile "$$m" $(APP)/Contents/Resources/Models >/dev/null && \
+	  cp "$${m%.mlpackage}.json" $(APP)/Contents/Resources/Models/; \
+	done
 	@codesign --force --sign "$(SIGN)" --identifier pond $(APP)/Contents/MacOS/pond
 	@codesign --force --sign "$(SIGN)" $(APP)
 	@echo "✓ $(APP)"

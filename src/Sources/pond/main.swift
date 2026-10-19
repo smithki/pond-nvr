@@ -321,6 +321,11 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// `pond camera privacy ID [on|off]`: whether Pond keeps the camera private (not recorded, shown live or served to
 /// HomeKit), or makes it so. Through the service, which applies it at once (and has the camera itself follow,
 /// where its provider can); without the service running, kept for when it starts.
+/// `pond detect …`: a detection model run over recordings (see DetectCommand).
+#if canImport(NVRMac)
+if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()))) }
+#endif
+
 /// `pond service reload`: the running service reads the settings and passwords again, and starts, stops or starts
 /// again only the cameras that changed (the others go on recording, and stay in HomeKit). A change of storage
 /// restarts it instead.

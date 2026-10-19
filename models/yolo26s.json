@@ -1,0 +1,8 @@
+{
+  "name": "YOLO26 small",
+  "license": "AGPL-3.0",
+  "source": "Ultralytics YOLO26s (COCO), exported to Core ML at 640×640, FP16: https://docs.ultralytics.com",
+  "inputSize": [640, 640],
+  "output": "end-to-end",
+  "minimumConfidence": 0.35
+}

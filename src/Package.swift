@@ -38,7 +38,10 @@ targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCor
 // What cameras say they are and what they offer, brand by brand (Reolink, ONVIF).
 targets.append(.target(name: "Devices", dependencies: ["NVRCore", "Ingest"]))
 targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRCore"]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health"]
+// Detection: a model (built in, or added) run on the Neural Engine, its answers in Pond's terms.
+targets.append(.target(name: "Detection"))
+targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health"]))
