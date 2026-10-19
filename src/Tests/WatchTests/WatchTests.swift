@@ -89,7 +89,7 @@ import Testing
         #expect(changes.filter { if case .began = $0 { true } else { false } }.count == 1)
         #expect(changes.contains { if case let .better(e) = $0 { e.confidence == 0.97 } else { false } })
         // Quiet for longer than it waits: ended.
-        let ended = builder.quiet(at: t0.addingTimeInterval(4 + 7))
+        let ended = builder.quiet(at: t0.addingTimeInterval(4 + 11))
         guard case let .ended(event)? = ended.first else {
             Issue.record("no end")
             return
@@ -299,5 +299,148 @@ import Testing
 
     @Test func labelsInWords() {
         #expect(CameraEvent.words(["person": 3]) == "3 people")
+    }
+}
+
+@Suite struct OnePersonTwiceTests {
+    // From the living room: one person found whole, and again from the waist up (over a lamp).
+    static let whole = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.47, y: 0.3, width: 0.12, height: 0.39))
+    static let topHalf = Detection(label: "person", category: .person, confidence: 0.5, box: .init(x: 0.48, y: 0.3, width: 0.1, height: 0.25))
+
+    @Test func foundWholeAndInPartIsOne() {
+        #expect(Duplicates.merged([Self.topHalf, Self.whole]) == [Self.whole])
+        // Two people side by side stay two.
+        let beside = Detection(label: "person", category: .person, confidence: 0.8, box: .init(x: 0.62, y: 0.3, width: 0.12, height: 0.39))
+        #expect(Duplicates.merged([Self.whole, beside]).count == 2)
+    }
+
+    @Test func anEventCountsThoseSeenAtOnceNotTracks() {
+        var tracker = Tracker()
+        var builder = EventBuilder(camera: "living-room")
+        let t0 = Date()
+        let moving = MotionMask(columns: 1, rows: 1, cells: [0])
+        // One person, whose box jumps (a new track) halfway.
+        for step in 0 ..< 6 {
+            let time = t0.addingTimeInterval(Double(step) * 0.25)
+            let x = step < 3 ? 0.1 : 0.6
+            let d = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: x, y: 0.2, width: 0.1, height: 0.5))
+            _ = builder.update(tracker.update([d], mask: moving, at: time), at: time)
+        }
+        #expect(builder.current?.labels == ["person": 1])
+    }
+}
+
+
+@Suite struct StayingTests {
+    static let moving = MotionMask(columns: 1, rows: 1, cells: [0])
+    static let still = MotionMask(columns: 1, rows: 1, cells: [])
+    static func dog(_ x: Double) -> Detection {
+        Detection(label: "dog", category: .animal, confidence: 0.8, box: .init(x: x, y: 0.5, width: 0.2, height: 0.2))
+    }
+
+    /// A picture every `step` seconds from `from` to `to`, the dog at x, moving or not.
+    static func run(_ tracker: inout Tracker, _ builder: inout EventBuilder, from: Double, to: Double, step: Double = 2,
+                    x: (Double) -> Double, moving: Bool, t0: Date) -> [EventBuilder.Change] {
+        var changes: [EventBuilder.Change] = []
+        var s = from
+        while s <= to {
+            let time = t0.addingTimeInterval(s)
+            changes += builder.update(tracker.update([dog(x(s))], mask: moving ? Self.moving : Self.still, at: time), at: time)
+            s += step
+        }
+        return changes
+    }
+
+    @Test func aDogThatWalksInAndLiesDownIsOneEvent() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "living-room")
+        let t0 = Date()
+        var changes = Self.run(&tracker, &builder, from: 0, to: 4, step: 0.5, x: { 0.1 + $0 * 0.05 }, moving: true, t0: t0)
+        // Lying there a minute: still in view, looked at every 2 s.
+        changes += Self.run(&tracker, &builder, from: 6, to: 66, x: { _ in 0.3 }, moving: false, t0: t0)
+        // Gets up and moves about.
+        changes += Self.run(&tracker, &builder, from: 68, to: 72, step: 0.5, x: { 0.3 + ($0 - 68) * 0.02 }, moving: true, t0: t0)
+        let began = changes.filter { if case .began = $0 { true } else { false } }.count
+        let ended = changes.filter { if case .ended = $0 { true } else { false } }.count
+        #expect(began == 1 && ended == 0)
+        #expect(builder.current?.seconds ?? 0 > 70)
+    }
+
+    @Test func stillTooLongEndsAndMovingAgainTakesItUp() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "drive")
+        let t0 = Date()
+        var changes = Self.run(&tracker, &builder, from: 0, to: 3, step: 0.5, x: { 0.1 + $0 * 0.05 }, moving: true, t0: t0)
+        // Still for over two minutes: ended, though in view.
+        changes += Self.run(&tracker, &builder, from: 5, to: 135, x: { _ in 0.25 }, moving: false, t0: t0)
+        #expect(changes.contains { if case .ended = $0 { true } else { false } })
+        #expect(builder.current == nil)
+        // The same dog (its track never lost) moves again: the same event, taken up.
+        let first = changes.compactMap { if case let .began(e) = $0 { e.id } else { nil } }.first
+        changes = Self.run(&tracker, &builder, from: 137, to: 140, step: 0.5, x: { 0.25 + ($0 - 137) * 0.02 }, moving: true, t0: t0)
+        #expect(changes.contains { if case let .resumed(e) = $0 { e.id == first } else { false } })
+    }
+
+    @Test func goneAWhileThenBackIsANewEvent() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "yard")
+        let t0 = Date()
+        _ = Self.run(&tracker, &builder, from: 0, to: 3, step: 0.5, x: { 0.1 + $0 * 0.05 }, moving: true, t0: t0)
+        _ = builder.quiet(at: t0.addingTimeInterval(20))
+        _ = tracker.update([], mask: Self.still, at: t0.addingTimeInterval(20))
+        // Back after a few minutes: a new one.
+        let changes = Self.run(&tracker, &builder, from: 300, to: 303, step: 0.5, x: { 0.6 + ($0 - 300) * 0.02 }, moving: true, t0: t0)
+        #expect(changes.contains { if case .began = $0 { true } else { false } })
+    }
+}
+
+@Suite struct OneCatTests {
+    @Test func aCatSometimesCalledADogIsACat() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "living-room")
+        let t0 = Date()
+        let moving = MotionMask(columns: 1, rows: 1, cells: [0])
+        for step in 0 ..< 10 {
+            let time = t0.addingTimeInterval(Double(step) * 0.25)
+            let word = step % 4 == 3 ? "dog" : "cat"
+            let d = Detection(label: word, category: .animal, confidence: word == "cat" ? 0.8 : 0.5,
+                              box: .init(x: 0.3 + Double(step) * 0.01, y: 0.6, width: 0.1, height: 0.1))
+            _ = builder.update(tracker.update([d], mask: moving, at: time), at: time)
+        }
+        #expect(builder.current?.labels == ["cat": 1])
+    }
+
+    @Test func aCatAndADogTogetherAreBoth() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "living-room")
+        let t0 = Date()
+        let moving = MotionMask(columns: 1, rows: 1, cells: [0])
+        for step in 0 ..< 6 {
+            let time = t0.addingTimeInterval(Double(step) * 0.25)
+            let cat = Detection(label: "cat", category: .animal, confidence: 0.8, box: .init(x: 0.1, y: 0.6, width: 0.1, height: 0.1))
+            let dog = Detection(label: "dog", category: .animal, confidence: 0.8, box: .init(x: 0.6, y: 0.6, width: 0.15, height: 0.15))
+            _ = builder.update(tracker.update([cat, dog], mask: moving, at: time), at: time)
+        }
+        #expect(builder.current?.labels == ["cat": 1, "dog": 1])
+    }
+}
+
+@Suite struct BikeTests {
+    @Test func aCyclistIsABikeEventAndAVehicleZoneTakesIt() {
+        #expect(DetectedCategory.forLabel("bicycle") == .bike && DetectedCategory.forLabel("motorcycle") == .bike)
+        var path = Config.Zone(id: "path", name: "Path", points: [[0, 0], [1, 0], [1, 1], [0, 1]])
+        path.categories = ["vehicle"]
+        let bike = Detection(label: "bicycle", category: .bike, confidence: 0.8, box: .init(x: 0.4, y: 0.5, width: 0.2, height: 0.2))
+        #expect(ZoneRules([path]).zones(for: bike) == ["path"])
+        path.categories = ["person"]
+        #expect(ZoneRules([path]).zones(for: bike) == nil)
+
+        var tracker = Tracker(), builder = EventBuilder(camera: "street")
+        let t0 = Date()
+        let moving = MotionMask(columns: 1, rows: 1, cells: [0])
+        for step in 0 ..< 4 {
+            let time = t0.addingTimeInterval(Double(step) * 0.25)
+            let dx = Double(step) * 0.03
+            let rider = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.4 + dx, y: 0.3, width: 0.15, height: 0.4))
+            let cycle = Detection(label: "bicycle", category: .bike, confidence: 0.7, box: .init(x: 0.38 + dx, y: 0.5, width: 0.2, height: 0.2))
+            _ = builder.update(tracker.update([rider, cycle], mask: moving, at: time), at: time)
+        }
+        #expect(builder.current?.category == .bike)
+        #expect(builder.current?.labels == ["bicycle": 1, "person": 1])
     }
 }

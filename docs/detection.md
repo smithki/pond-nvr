@@ -1,6 +1,6 @@
 # Detection models
 
-Pond finds people, vehicles, animals and packages in what its cameras see with a detection model, run on the Mac's Neural Engine. One is built in: **Ultralytics YOLO26 small** (COCO's 80 classes, 640×640, FP16; AGPL-3.0). Any other Core ML detection model can be used instead, added beside it and swapped while Pond runs.
+Pond finds people, vehicles, bikes, animals and packages in what its cameras see with a detection model, run on the Mac's Neural Engine. One is built in: **Ultralytics YOLO26 small** (COCO's 80 classes, 640×640, FP16; AGPL-3.0). Any other Core ML detection model can be used instead, added beside it and swapped while Pond runs.
 
 ## Adding a model
 
@@ -41,7 +41,7 @@ Pictures are letterboxed into the model's input (scaled to fit, centred), and it
 
 The service watches every camera (unless its `detection` is `false`): it decodes the sub-stream, looks for motion five times a second (brightness on a coarse grid against a slowly changing background), and while something moves, and for 2 s after, runs the model up to four times a second. What the model finds is followed from picture to picture, so someone walking past is one sighting, not forty. Only something seen moving counts, so a car parked in view never starts an event; a person walking past it does.
 
-An event begins once a person, vehicle, animal or package has been seen moving twice, and ends after 6 s with none. It's named for the most important thing in it (a person before a vehicle before an animal, then a package), lists everything else seen, and keeps the surest sighting as its picture: `<events>/events/<camera>/<YYYY-MM-DD>/<HH-MM-SS>-<id>.jpg` (UTC), with the event itself in Pond's database. Both are kept for `retention.events.days`. Nothing is watched while a camera is private.
+An event begins once a person, vehicle, bike, animal or package has been seen moving twice. It goes on while that's in view, moving or not: while something is followed, the model looks every 2 s though nothing moves, so a dog that walks in and lies down is one event. It ends when nothing has been seen for 10 s, or when what's there has been still for 2 minutes (a car that parked). If the same thing moves again later (followed all along), or the same kind of thing moves within 30 s of the end, the event takes up again instead of a new one beginning. It counts what was seen at once (the most people in any one picture: one person who walks past is "a person", even if the model found them twice in a frame, whole and from the waist up, or lost and found them again), each by the word the model gave it most surely (a cat it called a dog for a moment is "a cat"). It's named for the most important thing in it (a bike before a person, as a moving bike has a rider; then a vehicle, an animal, a package), lists everything else seen, and keeps the surest sighting as its picture: `<events>/events/<camera>/<YYYY-MM-DD>/<HH-MM-SS>-<id>.jpg` (UTC), with the event itself in Pond's database. Both are kept for `retention.events.days`. Nothing is watched while a camera is private.
 
 ```sh
 pond events                 # the last 24 hours, every camera
@@ -77,6 +77,7 @@ The watchers share one model, and the camera connection that recording and live 
 pond detect models                                   # the models there are
 pond detect /Volumes/NVR/recordings/continuous/doorbell/2026-10-18/18-55-38.mp4 --pictures ~/Desktop/found
 pond detect clip.mp4 --model my-model --compute ane  # all (default), ane, gpu or cpu
+pond detect clip.mp4 --camera living-room           # with that camera's zones: where each thing stands, and whether it counts
 ```
 
 On an M-series Mac the built-in model takes 5–11 ms a frame, so a few frames a second from every camera costs little.

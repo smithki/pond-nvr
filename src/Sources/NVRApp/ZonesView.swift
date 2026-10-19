@@ -171,7 +171,7 @@ struct ZoneEditorSheet: View {
     static func title(_ category: String) -> String {
         switch category {
         case "person": "People"
-        case "vehicle": "Vehicles"
+        case "vehicle": "Vehicles and bikes"
         case "animal": "Animals"
         case "package": "Packages"
         case "item": "Left items"

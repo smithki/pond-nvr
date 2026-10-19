@@ -29,8 +29,10 @@ public final class CameraWatcher: @unchecked Sendable {
     static let lookEvery: TimeInterval = 0.2
     /// The model run at most this often, while something moves.
     static let detectEvery: TimeInterval = 0.25
-    /// And for this long after it stops (someone standing still at the door is still there).
+    /// And for this long after it stops.
     static let detectAfterMotion: TimeInterval = 2
+    /// While something is followed but nothing moves, the model looks this often (to know it's still there).
+    static let presenceLookEvery: TimeInterval = 2
 
     private let lock = NSLock()
     private var stopped = false
@@ -166,15 +168,18 @@ public final class CameraWatcher: @unchecked Sendable {
                 let mask = motion(in: picture)
                 if mask.isMoving { lastMotion = now }
                 let moving = now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion
-                // While something put down waits to be seen again, the model looks now and then though nothing moves.
-                let checking = leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery
+                // While something is followed (a dog lying down), or put down and waiting to be seen again, the model
+                // looks now and then though nothing moves: so it's known to be still there.
+                let present = tracker.following(EventBuilder.important) || builder.current != nil
+                let checking = (present && now.timeIntervalSince(lastDetect) >= Self.presenceLookEvery)
+                    || (leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery)
                 guard moving || checking else {
                     apply(builder.quiet(at: now))
                     continue
                 }
                 guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { continue }
                 lastDetect = now
-                guard let found = detector.detect(picture) else { continue }
+                guard let found = detector.detect(picture).map(Duplicates.merged) else { continue }
                 // What counts by the zones, with the zones it's in.
                 let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
                 let sightings = tracker.update(counted.map(\.0), mask: mask, at: now) { d in
@@ -215,9 +220,15 @@ public final class CameraWatcher: @unchecked Sendable {
                 if let picture { event.snapshot = savePicture(picture, for: event) } else { event.snapshot = snapshots[event.id] }
                 store?.save(event, ongoing: true)
             case var .ended(event):
-                event.snapshot = snapshots.removeValue(forKey: event.id) ?? event.snapshot
+                // (Its picture's path kept a while: the event may be taken up again.)
+                event.snapshot = snapshots[event.id] ?? event.snapshot
+                if snapshots.count > 20 { snapshots = snapshots.filter { $0.key == event.id } }
                 store?.save(event, ongoing: false)
                 say("event over after \(Int(event.seconds.rounded())) s: \(CameraEvent.words(event.labels))")
+            case var .resumed(event):
+                event.snapshot = snapshots[event.id] ?? event.snapshot
+                store?.save(event, ongoing: true)
+                say("\(event.category.rawValue) moving again: the event goes on")
             }
             changed?(change)
         }

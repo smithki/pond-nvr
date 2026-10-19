@@ -16,6 +16,9 @@ public struct RecordedSpan: Equatable, Sendable {
     }
 
     public var seconds: Double { end.timeIntervalSince(start) }
+
+    /// Still being written (".mp4.partial"): playable as far as it's written, a 2-second fragment at a time.
+    public var isBeingWritten: Bool { path.hasSuffix(".partial") }
 }
 
 public enum RecordingIndex {
@@ -26,8 +29,8 @@ public enum RecordingIndex {
     static let joinSlack = 8.0
 
     /// One camera's segments overlapping `from ..< to`, oldest first. Only the day folders that can hold
-    /// them are read.
-    public static func spans(base: String, camera: String, from: Date, to: Date) -> [RecordedSpan] {
+    /// them are read. `writing`: with the segment being written (and any a crash left), as far as they go.
+    public static func spans(base: String, camera: String, from: Date, to: Date, writing: Bool = false) -> [RecordedSpan] {
         let top = SegmentFiles.cameraFolder(root: base, camera: camera)
         let days = DateFormatter()
         days.locale = Locale(identifier: "en_US_POSIX")
@@ -44,7 +47,8 @@ public enum RecordingIndex {
         let fm = FileManager.default
         var starts: [(Date, String)] = []
         for folder in folders {
-            for name in (try? fm.contentsOfDirectory(atPath: "\(top)/\(folder)")) ?? [] where name.hasSuffix(".mp4") {
+            for name in (try? fm.contentsOfDirectory(atPath: "\(top)/\(folder)")) ?? []
+                where name.hasSuffix(".mp4") || (writing && name.hasSuffix(".mp4.partial")) {
                 let stem = String(name.dropLast(4).prefix(8))   // HH-MM-SS, without any -n suffix
                 guard let start = RetentionSweeper.nameFormatter.date(from: "\(folder)/\(stem)") else { continue }
                 starts.append((start, "\(top)/\(folder)/\(name)"))

@@ -100,7 +100,10 @@ struct TimelineView: View {
             TimelineControls(timeline: timeline)
 
             VStack(alignment: .leading, spacing: 8) {
-                if !timeline.events.isEmpty { EventFilters(timeline: timeline) }
+                if !timeline.dayEvents.isEmpty {
+                    EventFilters(timeline: timeline)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 let visible = timeline.visible
                 TimelineLanes(timeline: timeline, cameras: cameras,
                               start: visible.lowerBound.timeIntervalSinceReferenceDate,
@@ -120,6 +123,8 @@ struct TimelineView: View {
                     .animation(settled ? .easeInOut(duration: 0.25) : nil, value: timeline.jumps)
                     .frame(height: lanes)
             }
+            // The filters' row coming or going: the lanes move up or down with it, rather than jump.
+            .animation(settled ? EventFilters.animation : nil, value: timeline.dayEvents.isEmpty)
         }
         .padding(16)
         .coordinateSpace(.named(Self.space))
@@ -150,12 +155,12 @@ struct TimelineView: View {
                 if timeline.camera == nil { timeline.camera = cameras.first?.id }
                 timeline.goLive()
             }
-            // Today, new minutes keep arriving: every 30 s, or every 5 s while paused at the end (to say when more
-            // is ready to watch).
+            // Today, new minutes keep arriving (and the one being written grows): every 10 s, or every 5 s while
+            // paused at the end (to say when more is ready to watch).
             var since = Date()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard timeline.isToday, timeline.atEnd || Date().timeIntervalSince(since) >= 30 else { continue }
+                guard timeline.isToday, timeline.atEnd || Date().timeIntervalSince(since) >= 10 else { continue }
                 since = Date()
                 timeline.source = EventSource(config: model.config)
                 await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
@@ -516,10 +521,18 @@ struct TimelineLanes: View, @MainActor Animatable {
                                     switch phase {
                                     case let .active(point):
                                         let origin = geo.frame(in: .named(TimelineView.space)).origin
-                                        hovered = event(at: point, width: geo.size.width, visible: visible).map { event in
+                                        if let event = event(at: point, width: geo.size.width, visible: visible) {
                                             let mark = markRect(event, width: geo.size.width, visible: visible)
-                                            return EventHover(event: event,
-                                                              anchor: CGPoint(x: origin.x + mark.midX, y: origin.y + mark.minY))
+                                            hovered = EventHover(event: event,
+                                                                 anchor: CGPoint(x: origin.x + mark.midX, y: origin.y + mark.minY))
+                                        } else if let stretch = privateStretch(at: point, width: geo.size.width, visible: visible) {
+                                            // Too narrow for its word: what it is, on hover.
+                                            let lane = laneRect(cameras.firstIndex { $0.id == stretch.camera } ?? 0, width: geo.size.width)
+                                            let mid = x(stretch.start.addingTimeInterval(stretch.seconds / 2), width: geo.size.width, visible: visible)
+                                            hovered = EventHover(event: stretch, anchor: CGPoint(x: origin.x + min(max(mid, 0), geo.size.width),
+                                                                                                y: origin.y + lane.minY + 3))
+                                        } else {
+                                            hovered = nil
                                         }
                                     case .ended:
                                         hovered = nil
@@ -560,16 +573,23 @@ struct TimelineLanes: View, @MainActor Animatable {
     var smoothNow: Bool { timeline.isToday && [.hour, .quarter].contains(timeline.zoom) }
     var animating: Bool { smoothNow || !catchUps.isEmpty }
 
-    /// Newly loaded recording, drawn growing from where the bar ended to where it ends now.
+    /// Newly loaded recording, drawn growing from where the bar ended to where it ends now. A few seconds more
+    /// (the minute being written, read again as it's written): at the clock's pace, evenly, so step after step
+    /// is one steady growth rather than a start and stop each time; more (a reload after a while): quickly.
     struct CatchUp {
         var from: Date
         var to: Date
         var began: Date
         static let duration = 0.8
+        /// Steps up to this long grow at the clock's pace.
+        static let steady = 15.0
+
+        var isSteady: Bool { to.timeIntervalSince(from) <= Self.steady }
+        var length: Double { isSteady ? max(Self.duration, to.timeIntervalSince(from)) : Self.duration }
 
         func end(at time: Date) -> Date {
-            let t = max(0, min(1, time.timeIntervalSince(began) / Self.duration))
-            let eased = t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+            let t = max(0, min(1, time.timeIntervalSince(began) / length))
+            let eased = isSteady ? t : t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
             return from.addingTimeInterval(to.timeIntervalSince(from) * eased)
         }
     }
@@ -581,14 +601,15 @@ struct TimelineLanes: View, @MainActor Animatable {
         let time = Date()
         for (camera, ranges) in new {
             guard let last = ranges.last, let before = old[camera]?.last?.upperBound,
-                  last.upperBound.timeIntervalSince(before) > 2, last.upperBound.timeIntervalSince(before) < 600,
+                  last.upperBound.timeIntervalSince(before) > 0.5, last.upperBound.timeIntervalSince(before) < 600,
                   last.lowerBound <= before.addingTimeInterval(5) else { continue }
             let from = catchUps[camera].map { $0.end(at: time) } ?? before
             catchUps[camera] = CatchUp(from: from, to: last.upperBound, began: time)
         }
+        let longest = catchUps.values.map(\.length).max() ?? CatchUp.duration
         Task {
-            try? await Task.sleep(for: .seconds(CatchUp.duration + 0.1))
-            catchUps = catchUps.filter { Date().timeIntervalSince($0.value.began) < CatchUp.duration }
+            try? await Task.sleep(for: .seconds(longest + 0.1))
+            catchUps = catchUps.filter { Date().timeIntervalSince($0.value.began) < $0.value.length }
         }
     }
 
@@ -596,7 +617,9 @@ struct TimelineLanes: View, @MainActor Animatable {
     func drawnCoverage(_ camera: String, at time: Date) -> [ClosedRange<Date>] {
         var ranges = timeline.coverage[camera] ?? []
         guard let catchUp = catchUps[camera], let last = ranges.last else { return ranges }
-        let end = min(last.upperBound, catchUp.end(at: time))
+        var end = min(last.upperBound, catchUp.end(at: time))
+        // Never short of what's playing (it's recorded).
+        if camera == timeline.camera, let head, head > end { end = min(last.upperBound, head) }
         if end < last.upperBound { ranges[ranges.count - 1] = last.lowerBound ... max(last.lowerBound, end) }
         return ranges
     }
@@ -688,6 +711,22 @@ struct TimelineLanes: View, @MainActor Animatable {
         return timeline.shownEvents
             .filter { $0.camera == cameras[lane].id && distance($0) <= slack }
             .min { distance($0) < distance($1) }
+    }
+
+    /// The private stretch under a point (within a few points of a narrow one), as a hover card's "event".
+    func privateStretch(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> TimelineEvent? {
+        let lane = Int(point.y / laneHeight)
+        guard point.y >= 0, cameras.indices.contains(lane) else { return nil }
+        let camera = cameras[lane].id
+        let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
+        let slack = 4 / width * length
+        let t = time(at: point.x, width: width, visible: visible)
+        let spans = Self.joined(timeline.privateSpans[camera] ?? [], to: timeline.coverage[camera] ?? [])
+        guard let span = spans.first(where: { t >= $0.lowerBound.addingTimeInterval(-slack) && t <= $0.upperBound.addingTimeInterval(slack) })
+        else { return nil }
+        return TimelineEvent(id: "private-\(camera)-\(span.lowerBound.timeIntervalSince1970)", camera: camera, kind: .privacy,
+                             start: span.lowerBound, end: span.upperBound,
+                             summary: "Not recorded, shown live or in the Home app.")
     }
 
     /// A lane's bar, and an event's mark inside it, in the lanes canvas.
@@ -966,7 +1005,14 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let r = min(6, bar.width / 2)
                 let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
                     topLeading: after ? 0 : r, bottomLeading: after ? 0 : r, bottomTrailing: before ? 0 : r, topTrailing: before ? 0 : r))
+                // Over the lane, not the recording that may show beside it within a segment's seconds: alike
+                // however short.
+                context.fill(shape, with: .style(.background))
+                context.fill(shape, with: .style(.quaternary.opacity(selected ? 1 : 0.6)))
                 context.fill(shape, with: .color(.indigo.opacity(selected ? 0.18 : 0.12)))
+                if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
+                    context.stroke(Path(roundedRect: bar.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5), with: .color(.primary), lineWidth: 1.5)
+                }
                 // The stripes keep to the time axis, so they don't slide as the view pans.
                 var hatch = Path()
                 let origin = x(timeline.day, width: size.width, visible: visible)
@@ -989,7 +1035,9 @@ struct TimelineLanes: View, @MainActor Animatable {
                     context.draw(label, at: CGPoint(x: plate.midX, y: plate.midY))
                 }
             }
-            for event in timeline.shownEvents where event.camera == camera.id && event.end > visible.lowerBound && event.start < visible.upperBound {
+            // The hovered one last, on top of any it overlaps, so its outline is whole.
+            let marks = timeline.shownEvents.filter { $0.camera == camera.id && $0.end > visible.lowerBound && $0.start < visible.upperBound }
+            for event in marks.filter({ $0.id != highlighted }) + marks.filter({ $0.id == highlighted }) {
                 let mark = markRect(event, width: size.width, visible: visible)
                 let isHovered = highlighted == event.id
                 context.fill(Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2)),
@@ -1124,28 +1172,25 @@ struct PlayerLayerView: NSViewRepresentable {
 /// Show or hide each kind of event, with how many there are that day.
 struct EventFilters: View {
     @Bindable var timeline: TimelineModel
+    @Namespace private var glass
+
+    /// Only kinds with events that day (a filter for nothing is noise).
+    var kinds: [TimelineEvent.Kind] { timeline.kindsPresent.filter { k in timeline.dayEvents.contains { $0.kind == k } } }
+
+    static let animation = Animation.snappy(duration: 0.35)
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(timeline.kindsPresent) { kind in
-                let count = timeline.dayEvents.count { $0.kind == kind }
-                let on = timeline.shownKinds.contains(kind)
-                Button {
-                    if on { timeline.shownKinds.remove(kind) } else { timeline.shownKinds.insert(kind) }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: kind.symbol).foregroundStyle(on ? kind.color : .secondary)
-                        Text(kind.title)
-                        Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+            // One glass surface: a chip coming or going grows out of (or into) its neighbours, which slide over
+            // to make room or close the gap.
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(kinds) { kind in
+                        chip(kind)
+                            .glassEffectID(kind, in: glass)
+                            .transition(.blur.combined(with: .scale(scale: 0.85)).combined(with: .opacity))
                     }
-                    .font(.callout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .opacity(on ? 1 : 0.55)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(on ? .regular.tint(kind.color.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
-                .help(on ? "Hide \(kind.title.lowercased()) events" : "Show \(kind.title.lowercased()) events")
             }
             Spacer()
             Text("Click an event to play it · [ and ] jump between them")
@@ -1153,6 +1198,33 @@ struct EventFilters: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
+        .animation(Self.animation, value: kinds)
+        .animation(Self.animation, value: timeline.dayEvents.count)
+    }
+
+    func chip(_ kind: TimelineEvent.Kind) -> some View {
+        let count = timeline.dayEvents.count { $0.kind == kind }
+        let on = timeline.shownKinds.contains(kind)
+        return Button {
+            withAnimation(Self.animation) {
+                if on { timeline.shownKinds.remove(kind) } else { timeline.shownKinds.insert(kind) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: kind.symbol).foregroundStyle(on ? kind.color : .secondary)
+                Text(kind.title)
+                // A count that changes rolls to its new number, the chip's width following.
+                Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: Double(count)))
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .opacity(on ? 1 : 0.55)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(on ? .regular.tint(kind.color.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
+        .help(on ? "Hide \(kind.title.lowercased()) events" : "Show \(kind.title.lowercased()) events")
     }
 }
 
@@ -1169,6 +1241,15 @@ struct EventCallout: View {
     let arrowX: Double
 
     static let arrowSize = CGSize(width: 26, height: 10)
+
+    /// "13 s", "12 min", "2 h 5 min".
+    static func length(_ seconds: Double) -> String {
+        switch seconds {
+        case ..<90: "\(Int(seconds.rounded())) s"
+        case ..<5400: "\(Int((seconds / 60).rounded())) min"
+        default: "\(Int(seconds / 3600)) h \(Int(seconds.truncatingRemainder(dividingBy: 3600) / 60)) min"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1188,9 +1269,13 @@ struct EventCallout: View {
             }
             Text(event.summary).font(.callout).frame(maxWidth: 260, alignment: .leading)
             HStack(spacing: 4) {
-                Text("\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s")
-                Spacer(minLength: 16)
-                Text("Click to play")
+                if event.kind == .privacy {
+                    Text("\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened)) · \(Self.length(event.seconds))")
+                } else {
+                    Text("\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s")
+                    Spacer(minLength: 16)
+                    Text("Click to play")
+                }
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)

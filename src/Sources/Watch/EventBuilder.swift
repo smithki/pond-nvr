@@ -1,7 +1,11 @@
-// A camera's events, from its tracks: an event begins when something that matters (a person, vehicle, animal or
-// package) has been seen moving, more than once; it goes on while any such track is seen; it ends when none has
-// been for a few seconds. What it was is its surest category (a person before a vehicle before an animal, then a
-// package), what else was seen with it, and its best picture: the surest sighting of that.
+// A camera's events, from its tracks. An event begins when something that matters (a person, vehicle, animal or
+// package) has been seen moving, more than once. It goes on while that's in view, moving or not (the watcher
+// keeps looking every few seconds while something is followed): a dog that walks in and lies down is one event.
+// It ends when nothing has been seen for a while, or when what's there has been still for a couple of minutes
+// (a car that parked). If the same thing (its track, never lost) moves again later, or the same kind of thing
+// moves again soon after, the event takes up again rather than a new one beginning. What it was is its surest
+// category (a person before a vehicle before an animal, then a package), what else was seen with it (the most
+// at once), and its best picture: the surest sighting of that.
 import Detection
 import Foundation
 
@@ -13,7 +17,7 @@ public struct CameraEvent: Sendable, Equatable, Codable, Identifiable {
     public var end: Date
     /// What it was (its most important category seen).
     public var category: DetectedCategory
-    /// Everything seen in it, by the model's labels: how many tracks of each.
+    /// Everything seen in it, by the model's labels: the most of each in one picture.
     public var labels: [String: Int]
     public var confidence: Double
     /// Its picture, relative to the events folder ("events/<camera>/<date>/<time>-<id>.jpg"); nil until saved.
@@ -73,18 +77,31 @@ extension CameraEvent {
 
 public struct EventBuilder: Sendable {
     public let camera: String
-    /// Quiet this long, an event ends.
-    public var endAfter: TimeInterval = 6
+    /// Nothing seen this long, an event ends.
+    public var endAfter: TimeInterval = 10
+    /// Everything still this long (in view, not moving), an event ends.
+    public var stillEnd: TimeInterval = 120
+    /// The same kind of thing moving again this soon after an event ended takes it up again.
+    public var resumeWithin: TimeInterval = 30
     /// Seen this many times (moving) before an event begins: one sighting may be a mistake.
     public var minimumSightings = 2
-    /// The categories that make events.
-    public static let important: [DetectedCategory] = [.person, .vehicle, .animal, .package]
+    /// The categories that make events, the first the most telling: a bike moving has someone on it, so an
+    /// event with both is a bike's (a cyclist), not just a person's.
+    public static let important: [DetectedCategory] = [.bike, .person, .vehicle, .animal, .package]
 
     public private(set) var current: CameraEvent?
-    /// The tracks in the current event.
+    /// The most of each label seen at once in the current event, and of each category (the model's words can
+    /// change for one thing; the category's count is what's true).
+    private var peak: [String: Int] = [:]
+    private var peakByCategory: [DetectedCategory: Int] = [:]
+    /// Each label's confidence summed over the event, and its category.
+    private var votes: [String: (category: DetectedCategory, weight: Double)] = [:]
+    /// The tracks in the current event (or the last, once ended).
     private var tracks: Set<Int> = []
-    private var labelsByTrack: [Int: String] = [:]
     private var lastSeen: Date?
+    private var lastMoved: Date?
+    /// The last event, after it ended, while it may be taken up again.
+    private var ended: (event: CameraEvent, kept: ([String: Int], [DetectedCategory: Int], [String: (category: DetectedCategory, weight: Double)]))?
 
     public init(camera: String) { self.camera = camera }
 
@@ -93,31 +110,52 @@ public struct EventBuilder: Sendable {
         /// Its best picture so far is this sighting (the caller keeps the frame).
         case better(CameraEvent)
         case ended(CameraEvent)
+        /// An event that had ended, taken up again (the same thing moving again): it's ongoing once more.
+        case resumed(CameraEvent)
     }
 
     /// A picture's tracks taken in (from the tracker); what changed.
     public mutating func update(_ sightings: [(track: Track, best: Bool)], at time: Date) -> [Change] {
         var changes: [Change] = []
         let counting = sightings.filter { Self.important.contains($0.track.category) && $0.track.moved && $0.track.seen >= minimumSightings }
-        if let last = lastSeen, current != nil, counting.isEmpty, time.timeIntervalSince(last) > endAfter {
-            changes.append(contentsOf: finish())
-        }
+        let moving = counting.filter { $0.track.lastMoved == time }
+        if !counting.isEmpty { lastSeen = time }
+        if !moving.isEmpty { lastMoved = time }
+        changes += quiet(at: time)
         guard !counting.isEmpty else { return changes }
-        lastSeen = time
         if current == nil {
-            let first = counting.max { Self.rank($0.track.category) > Self.rank($1.track.category) }!
-            current = CameraEvent(camera: camera, start: first.track.firstSeen, end: time, category: first.track.category,
-                                  confidence: first.track.bestConfidence, box: first.track.box)
-            tracks = []
-            labelsByTrack = [:]
-            changes.append(.began(current!))
+            // Only something moving begins (or takes up) an event; what's merely still in view doesn't.
+            guard !moving.isEmpty else { return changes }
+            if let (event, kept) = ended, Self.resumes(event, tracks: tracks, by: moving, at: time, within: resumeWithin) {
+                current = event
+                (peak, peakByCategory, votes) = kept
+                ended = nil
+                changes.append(.resumed(event))
+            } else {
+                let first = moving.max { Self.rank($0.track.category) > Self.rank($1.track.category) }!
+                current = CameraEvent(camera: camera, start: first.track.firstSeen, end: time, category: first.track.category,
+                                      confidence: first.track.bestConfidence, box: first.track.box)
+                peak = [:]
+                peakByCategory = [:]
+                votes = [:]
+                tracks = []
+                ended = nil
+                changes.append(.began(current!))
+            }
         }
         guard var event = current else { return changes }
         event.end = time
         var better = false
+        // How many of each at once (one person found as two tracks for a moment counts once at most moments).
+        for (label, n) in counting.reduce(into: [String: Int](), { $0[$1.track.label, default: 0] += 1 }) {
+            peak[label] = max(peak[label] ?? 0, n)
+        }
+        for (category, n) in counting.reduce(into: [DetectedCategory: Int](), { $0[$1.track.category, default: 0] += 1 }) {
+            peakByCategory[category] = max(peakByCategory[category] ?? 0, n)
+        }
         for s in counting {
+            votes[s.track.label, default: (s.track.category, 0)].weight += s.track.bestConfidence
             tracks.insert(s.track.id)
-            labelsByTrack[s.track.id] = s.track.label
             // A more important category takes over; within one, a surer sighting is the better picture.
             if Self.rank(s.track.category) < Self.rank(event.category)
                 || (s.track.category == event.category && s.best && s.track.bestConfidence >= event.confidence) {
@@ -127,16 +165,28 @@ public struct EventBuilder: Sendable {
                 better = true
             }
         }
-        event.labels = labelsByTrack.values.reduce(into: [:]) { $0[$1, default: 0] += 1 }
+        event.labels = Self.labels(peak: peak, peakByCategory: peakByCategory, votes: votes)
         event.zones = Array(Set(event.zones).union(counting.flatMap(\.track.zones))).sorted()
         current = event
         if better { changes.append(.better(event)) }
         return changes
     }
 
-    /// No picture this time (nothing moved): the current event ends if it's been quiet long enough.
+    /// Whether something moving takes up the event that ended: one of its own tracks (followed all along), or
+    /// the same kind of thing soon after it ended.
+    static func resumes(_ event: CameraEvent, tracks: Set<Int>, by moving: [(track: Track, best: Bool)], at time: Date,
+                        within: TimeInterval) -> Bool {
+        if moving.contains(where: { tracks.contains($0.track.id) }) { return true }
+        return time.timeIntervalSince(event.end) <= within && moving.contains { $0.track.category == event.category }
+    }
+
+    /// Time passing (a picture with nothing in it, or none looked at): the current event ends if nothing has been
+    /// seen for a while, or nothing has moved for longer.
     public mutating func quiet(at time: Date) -> [Change] {
-        guard current != nil, let last = lastSeen, time.timeIntervalSince(last) > endAfter else { return [] }
+        guard current != nil else { return [] }
+        let unseen = lastSeen.map { time.timeIntervalSince($0) > endAfter } ?? true
+        let still = lastMoved.map { time.timeIntervalSince($0) > stillEnd } ?? false
+        guard unseen || still else { return [] }
         return finish()
     }
 
@@ -144,9 +194,26 @@ public struct EventBuilder: Sendable {
     public mutating func finish() -> [Change] {
         guard let event = current else { return [] }
         current = nil
-        tracks = []
-        labelsByTrack = [:]
+        ended = (event, (peak, peakByCategory, votes))
+        peak = [:]
         return [.ended(event)]
+    }
+
+    /// What was seen, by the model's words, never more of a category than were seen at once: one cat, called
+    /// a dog for a moment, is "a cat" (the word it was given most surely), not "a cat and a dog".
+    static func labels(peak: [String: Int], peakByCategory: [DetectedCategory: Int],
+                       votes: [String: (category: DetectedCategory, weight: Double)]) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for (category, most) in peakByCategory {
+            var left = most
+            let words = peak.keys.filter { votes[$0]?.category == category }.sorted { (votes[$0]?.weight ?? 0) > (votes[$1]?.weight ?? 0) }
+            for word in words where left > 0 {
+                let n = min(peak[word] ?? 0, left)
+                if n > 0 { out[word] = n }
+                left -= n
+            }
+        }
+        return out
     }
 
     static func rank(_ category: DetectedCategory) -> Int { important.firstIndex(of: category) ?? important.count }

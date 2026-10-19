@@ -8,7 +8,10 @@ import Foundation
 /// suitcase): an event when it's put down and stays. A ring isn't seen by a model: it's a doorbell's button
 /// pressed, an event of its own (with the picture at that moment).
 public enum DetectedCategory: String, Codable, Sendable, CaseIterable, Comparable {
-    case person, vehicle, animal, package, item, ring, other
+    case person, vehicle, bike, animal, package, item, ring, other
+
+    /// The kind a zone takes it as: a bike is one of the vehicles there (its settings are a vehicle's).
+    public var zoneCategory: String { self == .bike ? DetectedCategory.vehicle.rawValue : rawValue }
 
     public static func < (a: Self, b: Self) -> Bool { allCases.firstIndex(of: a)! < allCases.firstIndex(of: b)! }
 }
@@ -104,7 +107,8 @@ extension DetectedCategory {
     public static func forLabel(_ label: String) -> DetectedCategory {
         switch label.lowercased() {
         case "person", "people", "pedestrian", "face": .person
-        case "car", "truck", "bus", "motorcycle", "motorbike", "bicycle", "bike", "van", "vehicle", "train", "boat": .vehicle
+        case "car", "truck", "bus", "van", "vehicle", "train", "boat": .vehicle
+        case "bicycle", "bike", "motorcycle", "motorbike", "scooter": .bike
         case "dog", "cat", "bird", "horse", "sheep", "cow", "bear", "deer", "animal", "fox", "raccoon", "squirrel": .animal
         case "package", "parcel", "box": .package
         case "backpack", "handbag", "suitcase", "umbrella", "bag", "luggage": .item

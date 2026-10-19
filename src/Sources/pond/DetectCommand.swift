@@ -2,6 +2,8 @@
 // model over recordings, a frame every S seconds (1), and says how fast it ran and what it found (in Pond's terms,
 // and the model's own); with --pictures, a few of the frames it found something in, boxes drawn. For trying a model
 // (the one built in, or one added to the Models folder) on a camera's own footage. `pond detect models` lists them.
+// With --camera ID, that camera's zones are applied as the service applies them: only people, vehicles, animals,
+// packages and items are listed, each with where it stands and whether it counts (its zones) or is ignored.
 #if canImport(NVRMac)
 import AVFoundation
 import CoreGraphics
@@ -10,10 +12,12 @@ import CoreML
 import Detection
 import Foundation
 import ImageIO
+import NVRCore
 import UniformTypeIdentifiers
+import Watch
 
 enum DetectCommand {
-    static func run(_ args: [String]) -> Int32 {
+    static func run(_ args: [String], configPath: String) -> Int32 {
         var args = args
         func option(_ name: String) -> String? {
             guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
@@ -31,6 +35,14 @@ enum DetectCommand {
         let modelID = option("--model")
         let every = option("--every").flatMap(Double.init) ?? 1
         let picturesFolder = option("--pictures")
+        var rules: ZoneRules?
+        if let id = option("--camera") {
+            guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == id }) else {
+                FileHandle.standardError.write(Data("✗ No camera \(id).\n".utf8))
+                return 1
+            }
+            rules = ZoneRules(camera.zones)
+        }
         let compute: Detector.Compute = switch option("--compute") {
         case "cpu": .cpu
         case "gpu": .gpu
@@ -38,7 +50,7 @@ enum DetectCommand {
         default: .all
         }
         guard !args.isEmpty else {
-            FileHandle.standardError.write(Data("✗ pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--compute all|ane|gpu|cpu]; pond detect models\n".utf8))
+            FileHandle.standardError.write(Data("✗ pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--camera ID] [--compute all|ane|gpu|cpu]; pond detect models\n".utf8))
             return 2
         }
         guard let model = ModelStore.choose(modelID) else {
@@ -78,7 +90,16 @@ enum DetectCommand {
                     categories[d.category, default: 0] += 1
                     labels[d.label, default: 0] += 1
                 }
-                let words = found.map { "\($0.label) \(Int(($0.confidence * 100).rounded()))%" }.joined(separator: ", ")
+                var words = found.map { "\($0.label) \(Int(($0.confidence * 100).rounded()))%" }.joined(separator: ", ")
+                if let rules {
+                    let important: [DetectedCategory] = [.person, .vehicle, .bike, .animal, .package, .item]
+                    words = Duplicates.merged(found).filter { important.contains($0.category) }.map { d in
+                        let at = ZoneRules.anchor(d.box)
+                        let verdict = rules.zones(for: d).map { $0.isEmpty ? "counts" : "in " + $0.sorted().joined(separator: ", ") } ?? "ignored"
+                        return String(format: "%@ %d%% at (%.2f, %.2f) %@", d.label, Int((d.confidence * 100).rounded()), at.x, at.y, verdict)
+                    }.joined(separator: "; ")
+                    if words.isEmpty { continue }
+                }
                 print(String(format: "  %@ %6.1f s  ", (path as NSString).lastPathComponent, time) + words)
                 if let picturesFolder, saved < 12 {
                     let name = "\((path as NSString).lastPathComponent.replacingOccurrences(of: ".mp4", with: ""))-\(Int(time)).jpg"
@@ -152,6 +173,7 @@ enum DetectCommand {
             let colour: CGColor = switch d.category {
             case .person: CGColor(red: 1, green: 0.3, blue: 0.5, alpha: 1)
             case .vehicle: CGColor(red: 0.3, green: 0.6, blue: 1, alpha: 1)
+            case .bike: CGColor(red: 0.3, green: 0.85, blue: 0.85, alpha: 1)
             case .animal: CGColor(red: 1, green: 0.7, blue: 0.2, alpha: 1)
             case .package: CGColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 1)
             case .item: CGColor(red: 0.7, green: 0.5, blue: 1, alpha: 1)

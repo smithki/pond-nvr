@@ -344,7 +344,7 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// where its provider can); without the service running, kept for when it starts.
 /// `pond detect …`: a detection model run over recordings (see DetectCommand).
 #if canImport(NVRMac)
-if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()))) }
+if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 
 /// `pond events [CAMERA] [--hours N]`: the events the service made from what it saw (the last 24 hours), oldest
 /// first: when, how long, what, and its picture.

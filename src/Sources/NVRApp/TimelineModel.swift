@@ -4,8 +4,12 @@
 // their recorded times, so gaps stay gaps and the player's clock maps straight back to wall time. Playing
 // past the end of that window loads the next one.
 //
+// The minute being written is played too, as far as it's written (its 2-second fragments are on disk as they
+// come): playing into it, what's written since is queued after what's playing (an AVQueuePlayer, so it runs on
+// without a stop), a few seconds behind the present.
+//
 // Live: the selected camera as it is now, with the playhead at the present; only ever chosen (LIVE, or L).
-// Seeking anywhere leaves it. Playing recording stops at its end, however close to the present.
+// Seeking anywhere leaves it.
 import AVFoundation
 import NVRCore
 import Observation
@@ -39,12 +43,16 @@ final class TimelineModel {
         }
     }
 
-    let player = AVPlayer()
+    let player = AVQueuePlayer()
     /// Midnight, local time, of the day in the middle of the view.
     private(set) var day = Calendar.current.startOfDay(for: Date())
     var camera: String?
-    var zoom = Zoom.day {
-        didSet { if zoom != oldValue { panStart = nil } }
+    /// How much of the day shows; remembered.
+    var zoom = UserDefaults.standard.object(forKey: "timelineZoom").flatMap { ($0 as? Double).flatMap(Zoom.init) } ?? .day {
+        didSet {
+            if zoom != oldValue { panStart = nil }
+            UserDefaults.standard.set(zoom.rawValue, forKey: "timelineZoom")
+        }
     }
     /// Where the visible part starts when panned by hand; nil follows the playhead.
     var panStart: Date?
@@ -122,8 +130,15 @@ final class TimelineModel {
     /// Player seeks under way: the playhead is where it was sent, not where the player last said it was.
     private var seeks = 0
 
-    /// The composition loaded in the player: the camera, the wall time of its zero, and its extent.
+    /// What's loaded in the player: the camera, the wall time of its first item's zero, and the end of its last.
     private var window: (camera: String, origin: Date, end: Date)?
+    /// The player's items, in order: each one's wall time at its zero, and its end. One, unless the minute
+    /// being written has been followed (each later item is what was written since the one before).
+    private var queued: [(item: AVPlayerItem, origin: Date, end: Date)] = []
+    /// Adds what's written since to the queue while playing into the minute being written.
+    private var follower: Task<Void, Never>?
+    /// Played to the end of what's written, waiting for the next fragment.
+    private var waitingForMore = false
     private var generation = 0
     private var observer: Any?
     private var base = ""
@@ -143,8 +158,27 @@ final class TimelineModel {
                                                queue: .main) { [weak self] note in
             let ended = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated {
-                guard let self, let item = self.player.currentItem, ended == ObjectIdentifier(item) else { return }
+                guard let self, let i = self.queued.firstIndex(where: { ObjectIdentifier($0.item) == ended }) else { return }
+                // One of several queued: the player goes on to the next by itself.
+                if i < self.queued.count - 1 {
+                    self.queued.removeFirst(i + 1)
+                    return
+                }
                 self.continueAfterWindow()
+            }
+        }
+        // An item that can't be read on (its file gone from under it): built again from where it stopped.
+        NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil,
+                                               queue: .main) { [weak self] note in
+            let failed = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                guard let self, self.queued.contains(where: { ObjectIdentifier($0.item) == failed }),
+                      let at = self.playhead else { return }
+                let wasPlaying = self.playing
+                Task {
+                    await self.seek(to: at)
+                    if wasPlaying { self.play() }
+                }
             }
         }
     }
@@ -205,7 +239,7 @@ final class TimelineModel {
             var out: [String: [RecordedSpan]] = [:]
             var starts: [String: Date] = [:]
             for c in cameras {
-                out[c] = RecordingIndex.spans(base: base, camera: c, from: from, to: to)
+                out[c] = RecordingIndex.spans(base: base, camera: c, from: from, to: to, writing: true)
                 starts[c] = RecordingIndex.earliest(base: base, camera: c)
             }
             let events = (source?.events(from: from, to: to) ?? []).filter { cameras.contains($0.camera) }
@@ -217,7 +251,7 @@ final class TimelineModel {
         var trimmed = found
         for (c, list) in found {
             guard let last = list.last else { continue }
-            let duration = try? await AVURLAsset(url: URL(fileURLWithPath: last.path)).load(.duration)
+            let duration = try? await Self.asset(last.path).load(.duration)
             if let seconds = duration?.seconds, seconds > 0, last.start.addingTimeInterval(seconds) < last.end {
                 trimmed[c]![list.count - 1] = RecordedSpan(path: last.path, start: last.start, end: last.start.addingTimeInterval(seconds))
             }
@@ -294,7 +328,7 @@ final class TimelineModel {
         panStart = nil
         playhead = nil
         window = nil
-        player.replaceCurrentItem(with: nil)
+        clearQueue()
         await load(base: base, cameras: cameras)
         await showLatest()
     }
@@ -316,7 +350,7 @@ final class TimelineModel {
         pause()
         generation += 1
         window = nil
-        player.replaceCurrentItem(with: nil)
+        clearQueue()
         loading = false
         nothingRecorded = false
         panStart = nil
@@ -346,14 +380,13 @@ final class TimelineModel {
         liveClock = nil
     }
 
-    /// How long after its last recorded minute a camera still counts as recording: the minute being written
-    /// is not in the index until it is finished, and the index is read again every 30 s.
-    /// The newest indexed segment ends where the one being written (".partial", not indexed) began: at most
-    /// about 68 s ago, plus up to 30 s until the index is read again. 150 s covers that with room to spare.
+    /// How long after its last recorded moment a camera still counts as recording: the minute being written is
+    /// listed as far as it was written when the index was last read (every 10 s), and a camera that reconnects
+    /// starts its next minute a little later. 150 s covers that with room to spare.
     static let recordingLag = 150.0
 
-    /// What the camera is recording now and cannot be played yet: from the end of its latest recording to
-    /// `now`, if that ended less than `recordingLag` ago (the minute being written is not in the index yet).
+    /// What the camera is recording now and can't be played yet: from the end of what's written (as last read)
+    /// to `now`, if that ended less than `recordingLag` ago. A few seconds, mostly.
     func recordingNow(of id: String, now: Date = Date()) -> ClosedRange<Date>? {
         guard let last = coverage[id]?.last, last.upperBound < now,
               now.timeIntervalSince(last.upperBound) < Self.recordingLag else { return nil }
@@ -391,10 +424,11 @@ final class TimelineModel {
         leaveLive()
         atEnd = false
         let time = min(time, Date())
-        if let window, window.camera == camera, time >= window.origin, time < window.end {
+        if let window, window.camera == camera, let current = queued.first(where: { $0.item === player.currentItem }),
+           time >= current.origin, time < current.end {
             playhead = time
             seeks += 1
-            await player.seek(to: CMTime(seconds: time.timeIntervalSince(window.origin), preferredTimescale: 600),
+            await player.seek(to: CMTime(seconds: time.timeIntervalSince(current.origin), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
             seeks -= 1
             return
@@ -412,7 +446,7 @@ final class TimelineModel {
             playhead = time
             nothingRecorded = true
             window = nil
-            player.replaceCurrentItem(with: nil)
+            clearQueue()
             pause()
             return
         }
@@ -446,7 +480,11 @@ final class TimelineModel {
         }
         window = (camera, chunk[0].start, built.end)
         seeks += 1
-        player.replaceCurrentItem(with: AVPlayerItem(asset: built.composition))
+        clearQueue()
+        let item = AVPlayerItem(asset: built.composition)
+        player.insert(item, after: nil)
+        queued = [(item, chunk[0].start, built.end)]
+        follow()
         recordingHasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
         await player.seek(to: CMTime(seconds: start.timeIntervalSince(chunk[0].start), preferredTimescale: 600),
                           toleranceBefore: .zero, toleranceAfter: .zero)
@@ -508,14 +546,19 @@ final class TimelineModel {
         // Not while a seek is under way: the player still reports where it was (or the new clip's start), which
         // would pull the playhead back before it jumps on to where it was sent.
         guard let window, !loading, seeks == 0, time.isNumeric else { return }
-        playhead = window.origin.addingTimeInterval(time.seconds)
+        let origin = queued.first { $0.item === player.currentItem }?.origin ?? window.origin
+        let before = playhead
+        playhead = origin.addingTimeInterval(time.seconds)
         // Playing into what was being recorded when the bar was measured (the newest file has grown since):
         // what plays is recorded, so the bar keeps up with the playhead.
         if let playhead { reachedEnd(of: window.camera, at: playhead) }
         // Catching up to the present at more than 1×: real time from here.
         if playing, rate != 1, nearPresent { rate = 1 }
-        // Playing past the edge of a panned view: follow the playhead again.
-        if let playhead, panStart != nil, playing, !visible.contains(playhead) { panStart = nil }
+        // Playing past the edge of a panned view: follow the playhead again. Only as it crosses the edge (it was
+        // in view a moment ago): a view panned away from it by hand stays where it was put.
+        if let playhead, let before, panStart != nil, playing, visible.contains(before), playhead > visible.upperBound {
+            panStart = nil
+        }
         if let playhead, Calendar.current.startOfDay(for: playhead) != day, panStart == nil {
             day = Calendar.current.startOfDay(for: playhead)
             loadMoreIfNeeded()
@@ -524,6 +567,12 @@ final class TimelineModel {
 
     private func continueAfterWindow() {
         guard let window, playing else { return }
+        // Played up to what's written of the minute being written: on as soon as the next fragment is (the
+        // follower adds it), unless none comes.
+        if spans[window.camera]?.last?.isBeingWritten == true, follower != nil {
+            waitingForMore = true
+            return
+        }
         // The end of the recording (no later recording to play on into): paused on its last frame, where it is.
         // (The newest segment's listed end can be later than its file's: only a segment starting after counts.)
         guard spans[window.camera]?.contains(where: { $0.start >= window.end.addingTimeInterval(-1) }) == true else {
@@ -535,26 +584,116 @@ final class TimelineModel {
         Task { await seek(to: window.end.addingTimeInterval(0.01)) }
     }
 
+    // MARK: - Following the minute being written
+
+    private func clearQueue() {
+        follower?.cancel()
+        follower = nil
+        waitingForMore = false
+        player.removeAllItems()
+        queued = []
+    }
+
+    /// While playing into the minute being written, keeps a few seconds of it queued ahead of the playhead: what
+    /// was written after the window's end, as an item of its own after the last. Stops when the window leaves it.
+    private func follow() {
+        follower?.cancel()
+        guard let window, spans[window.camera]?.last.map({ $0.isBeingWritten && $0.start < window.end.addingTimeInterval(1) }) == true
+        else { follower = nil; return }
+        let camera = window.camera, base = self.base
+        follower = Task { [weak self] in
+            var idle = 0.0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled, let window = self.window, window.camera == camera else { return }
+                // Enough queued ahead (or paused, with nothing used up): later.
+                let ahead = window.end.timeIntervalSince(self.playhead ?? window.end)
+                guard self.waitingForMore || (self.playing && ahead < Self.followAhead) else { continue }
+                let found = await Task.detached {
+                    RecordingIndex.spans(base: base, camera: camera, from: window.end.addingTimeInterval(-120),
+                                         to: Date().addingTimeInterval(60), writing: true)
+                }.value.filter { $0.end > window.end }
+                guard !Task.isCancelled, let built = await Self.composition(found, from: window.end),
+                      built.end.timeIntervalSince(window.end) >= 0.5, self.window?.end == window.end else {
+                    // Nothing new: after a while waiting at the end, it's the end (the camera stopped).
+                    if self.waitingForMore {
+                        idle += 1
+                        if idle >= Self.followPatience {
+                            self.waitingForMore = false
+                            self.pause()
+                            self.atEnd = true
+                            self.reachedEnd(of: camera, at: window.end)
+                            return
+                        }
+                    }
+                    continue
+                }
+                idle = 0
+                let item = AVPlayerItem(asset: built.composition)
+                self.player.insert(item, after: self.queued.last?.item)
+                self.queued.append((item, window.end, built.end))
+                self.window = (camera, window.origin, built.end)
+                // As far as it's written (listed as a nominal minute, which would run past the present).
+                self.merge(found.map { span in
+                    span.isBeingWritten ? RecordedSpan(path: span.path, start: span.start, end: min(span.end, built.end)) : span
+                }, of: camera)
+                if self.waitingForMore {
+                    // The last item had ended: on into this one.
+                    self.waitingForMore = false
+                    self.queued.removeAll { $0.item !== item }
+                    self.player.advanceToNextItem()
+                    if self.player.currentItem !== item { self.player.replaceCurrentItem(with: item) }
+                    if self.playing { self.player.rate = self.rate }
+                }
+                // The minute being written finished and the next began: follow on into it.
+                if found.last?.isBeingWritten != true { return }
+            }
+        }
+    }
+
+    /// Kept this far ahead of the playhead while following.
+    static let followAhead = 6.0
+    /// Seconds waited at the end of what's written for the next fragment before stopping there.
+    static let followPatience = 8.0
+
+    /// Newly listed segments in place of what was known of them (the minute being written, renamed when done).
+    private func merge(_ found: [RecordedSpan], of camera: String) {
+        guard var list = spans[camera], let first = found.first else { return }
+        list.removeAll { $0.start >= first.start.addingTimeInterval(-0.5) }
+        list += found
+        spans[camera] = list
+        coverage[camera] = RecordingIndex.coverage(list)
+    }
+
     // MARK: - Composition
 
-    /// The segments at their recorded offsets from the first one's start; a segment longer than the gap to
-    /// the next is trimmed to it.
-    nonisolated static func composition(_ spans: [RecordedSpan]) async -> (composition: AVComposition, end: Date)? {
-        guard let origin = spans.first?.start else { return nil }
+    /// A segment's file, readable while it's still being written (".mp4.partial" said to be MP4).
+    nonisolated static func asset(_ path: String) -> AVURLAsset {
+        AVURLAsset(url: URL(fileURLWithPath: path),
+                   options: path.hasSuffix(".partial") ? [AVURLAssetOverrideMIMETypeKey: "video/mp4"] : nil)
+    }
+
+    /// The segments at their recorded offsets from the first one's start (or from `from`, what's before it
+    /// left out); a segment longer than the gap to the next is trimmed to it.
+    nonisolated static func composition(_ spans: [RecordedSpan], from: Date? = nil) async -> (composition: AVComposition, end: Date)? {
+        guard let origin = from ?? spans.first?.start else { return nil }
         let composition = AVMutableComposition()
         guard let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
         else { return nil }
         var audio: AVMutableCompositionTrack?
         var end = origin
         for (i, span) in spans.enumerated() {
-            let asset = AVURLAsset(url: URL(fileURLWithPath: span.path))
+            let asset = Self.asset(span.path)
             guard let sourceVideo = try? await asset.loadTracks(withMediaType: .video).first,
                   let duration = try? await asset.load(.duration), duration.seconds > 0 else { continue }
             var length = duration.seconds
             if i + 1 < spans.count { length = min(length, spans[i + 1].start.timeIntervalSince(span.start)) }
-            guard length > 0 else { continue }
-            let range = CMTimeRange(start: .zero, duration: CMTime(seconds: length, preferredTimescale: 90000))
-            let offset = CMTime(seconds: span.start.timeIntervalSince(origin), preferredTimescale: 90000)
+            // What's before the origin left out.
+            let skip = max(0, origin.timeIntervalSince(span.start))
+            guard length - skip > 0.05 else { continue }
+            let range = CMTimeRange(start: CMTime(seconds: skip, preferredTimescale: 90000),
+                                    duration: CMTime(seconds: length - skip, preferredTimescale: 90000))
+            let offset = CMTime(seconds: max(0, span.start.timeIntervalSince(origin)), preferredTimescale: 90000)
             insert(range, of: sourceVideo, into: video, at: offset)
             if let sourceAudio = try? await asset.loadTracks(withMediaType: .audio).first {
                 if audio == nil {

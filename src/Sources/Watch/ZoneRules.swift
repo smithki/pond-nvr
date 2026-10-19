@@ -30,7 +30,7 @@ public struct ZoneRules: Sendable {
         let (x, y) = Self.anchor(detection.box)
         if ignored.contains(where: { $0.contains(x: x, y: y) || Self.share(of: detection.box, in: $0) >= Self.mostly }) { return nil }
         guard !watched.isEmpty else { return [] }
-        let inside = watched.filter { $0.contains(x: x, y: y) && $0.takes(detection.category.rawValue) }
+        let inside = watched.filter { $0.contains(x: x, y: y) && $0.takes(detection.category.zoneCategory) }
         return inside.isEmpty ? nil : Set(inside.map(\.id))
     }
 

@@ -10,7 +10,9 @@ import Watch
 
 struct TimelineEvent: Identifiable, Equatable, Sendable {
     enum Kind: String, CaseIterable, Identifiable, Sendable {
-        case person, vehicle, animal, package, item, ring, motion
+        case person, vehicle, bike, animal, package, item, ring, motion
+        /// Not an event: a private stretch, as the hover card shows it.
+        case privacy
 
         var id: String { rawValue }
 
@@ -18,6 +20,7 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             switch category {
             case .person: self = .person
             case .vehicle: self = .vehicle
+            case .bike: self = .bike
             case .animal: self = .animal
             case .package: self = .package
             case .item: self = .item
@@ -30,11 +33,13 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             switch self {
             case .person: "Person"
             case .vehicle: "Vehicle"
+            case .bike: "Bike"
             case .animal: "Animal"
             case .package: "Package"
             case .item: "Left item"
             case .ring: "Doorbell"
             case .motion: "Motion"
+            case .privacy: "Private"
             }
         }
 
@@ -42,11 +47,13 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             switch self {
             case .person: "figure.walk"
             case .vehicle: "car.fill"
+            case .bike: "bicycle"
             case .animal: "pawprint.fill"
             case .package: "shippingbox.fill"
             case .item: "bag.fill"
             case .ring: "bell.fill"
             case .motion: "dot.radiowaves.left.and.right"
+            case .privacy: "eye.slash.fill"
             }
         }
 
@@ -54,11 +61,13 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             switch self {
             case .person: .blue
             case .vehicle: .orange
+            case .bike: .mint
             case .animal: .green
             case .package: .brown
             case .item: .teal
             case .ring: .yellow
             case .motion: .gray
+            case .privacy: .indigo
             }
         }
     }
@@ -162,7 +171,9 @@ enum MockEvents {
         case .animal: options = ["A cat crosses the lawn.", "A dog sniffs around the porch.", "A deer walks along the fence."]
         case .package: options = ["A courier leaves a box at the door.", "A package is picked up from the porch."]
         case .item: options = ["A backpack left.", "A suitcase left."]
+        case .bike: options = ["A cyclist rides past.", "A bicycle is wheeled up the path."]
         case .ring: options = ["Doorbell pressed."]
+        case .privacy: options = [""]
         case .motion: options = ["Movement in the trees.", "Headlights sweep across the frame.", "Shadows move as clouds pass."]
         }
         return options[Int(rng.next() % UInt64(options.count))]
