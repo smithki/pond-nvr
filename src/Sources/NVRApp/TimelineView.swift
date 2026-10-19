@@ -137,6 +137,7 @@ struct TimelineView: View {
             }
         }
         .task(id: cameras.map(\.id)) {
+            timeline.source = EventSource(config: model.config)
             await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
             if let jump = model.timelineJump {
                 await go(to: jump)
@@ -156,6 +157,7 @@ struct TimelineView: View {
                 try? await Task.sleep(for: .seconds(5))
                 guard timeline.isToday, timeline.atEnd || Date().timeIntervalSince(since) >= 30 else { continue }
                 since = Date()
+                timeline.source = EventSource(config: model.config)
                 await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
             }
         }
@@ -425,7 +427,7 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// The event under the pointer, shared with TimelineView, which draws its callout.
     @Binding var hovered: EventHover?
     /// The event whose callout is showing, outlined.
-    let highlighted: Int?
+    let highlighted: String?
     @State private var dragging: Date?
     /// Advanced every second while the timeline shows today, so what is being recorded (drawn up to the
     /// present) keeps growing when nothing else changes.
@@ -864,6 +866,19 @@ struct TimelineLanes: View, @MainActor Animatable {
         if midX - box.width / 2 >= lane.minX + 2 { context.draw(label, at: CGPoint(x: midX, y: lane.midY)) }
     }
 
+    /// Private stretches with their ends moved onto the recording beside them, where it stops or starts again
+    /// within a minute and a half of the change.
+    static func joined(_ spans: [ClosedRange<Date>], to coverage: [ClosedRange<Date>]) -> [ClosedRange<Date>] {
+        let near: TimeInterval = 90
+        return spans.map { span in
+            let start = coverage.map(\.upperBound).filter { abs($0.timeIntervalSince(span.lowerBound)) <= near }
+                .min { abs($0.timeIntervalSince(span.lowerBound)) < abs($1.timeIntervalSince(span.lowerBound)) } ?? span.lowerBound
+            let end = coverage.map(\.lowerBound).filter { abs($0.timeIntervalSince(span.upperBound)) <= near }
+                .min { abs($0.timeIntervalSince(span.upperBound)) < abs($1.timeIntervalSince(span.upperBound)) } ?? span.upperBound
+            return start < end ? start ... end : span
+        }
+    }
+
     /// The lanes: what each camera recorded, its events, the future dimmed, and the playhead's line.
     /// - Parameters:
     ///   - now: the present as drawn (each frame when zoomed in, else each second).
@@ -893,6 +908,9 @@ struct TimelineLanes: View, @MainActor Animatable {
             if let added = timeline.added(camera.id) { drawAdded(context, camera: camera, at: added, lane: lane, size: size, visible: visible) }
             // Being recorded now (not playable yet): drawn after the recording it continues, joined to it.
             let coverage = drawnCoverage(camera.id, at: frame)
+            // Private stretches, reaching to the recording on either side (recording stops and starts again a
+            // moment apart from the change), so the lane runs on through them without a break.
+            let privateSpans = Self.joined(timeline.privateSpans[camera.id] ?? [], to: coverage)
             // While the bar catches up, the part being recorded starts where the bar has reached.
             let recordingNow = timeline.recordingNow(of: camera.id, now: timeline.isLive ? (head ?? clockNow) : clockNow)
                 .map { now in (coverage.last.map { min($0.upperBound, now.lowerBound) } ?? now.lowerBound) ... now.upperBound }
@@ -900,11 +918,12 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let x0 = max(0, x(range.lowerBound, width: size.width, visible: visible))
                 let x1 = min(size.width, x(range.upperBound, width: size.width, visible: visible))
                 let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
-                let strength = withEvents ? (selected ? 0.32 : 0.18) : (selected ? 0.85 : 0.45)
+                let strength = withEvents ? (selected ? 0.65 : 0.38) : (selected ? 0.85 : 0.45)
                 // Square on the right where the part being recorded carries on from it; square on the left where
                 // it begins the camera's recording, against the line that marks it ("Recording starts", "… added").
-                let joined = recordingNow?.lowerBound == range.upperBound
+                let joined = recordingNow?.lowerBound == range.upperBound || privateSpans.contains { $0.lowerBound == range.upperBound }
                 let opens = timeline.cameraStarts[camera.id].map { abs(range.lowerBound.timeIntervalSince($0)) < 1 } ?? false
+                    || privateSpans.contains { $0.upperBound == range.lowerBound }
                 let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
                     topLeading: opens ? 0 : 6, bottomLeading: opens ? 0 : 6,
                     bottomTrailing: joined ? 0 : 6, topTrailing: joined ? 0 : 6))
@@ -936,6 +955,40 @@ struct TimelineLanes: View, @MainActor Animatable {
                     layer.stroke(hatch, with: .style(.tint.opacity(selected ? 0.55 : 0.3)), lineWidth: 1.5)
                 }
             }
+            // Private: indigo, hatched (nothing recorded, by choice), with the word where there's room.
+            for span in privateSpans where span.upperBound > visible.lowerBound && span.lowerBound < visible.upperBound {
+                let x0 = max(0, x(span.lowerBound, width: size.width, visible: visible))
+                let x1 = min(size.width, x(span.upperBound, width: size.width, visible: visible))
+                let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
+                // Square where it joins recording, rounded where it's the lane's end (still private now).
+                let after = coverage.contains { $0.upperBound == span.lowerBound }
+                let before = coverage.contains { $0.lowerBound == span.upperBound }
+                let r = min(6, bar.width / 2)
+                let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
+                    topLeading: after ? 0 : r, bottomLeading: after ? 0 : r, bottomTrailing: before ? 0 : r, topTrailing: before ? 0 : r))
+                context.fill(shape, with: .color(.indigo.opacity(selected ? 0.18 : 0.12)))
+                // The stripes keep to the time axis, so they don't slide as the view pans.
+                var hatch = Path()
+                let origin = x(timeline.day, width: size.width, visible: visible)
+                var hx = bar.minX - bar.height - (bar.minX - origin).truncatingRemainder(dividingBy: 7)
+                while hx < bar.maxX {
+                    hatch.move(to: CGPoint(x: hx, y: bar.maxY))
+                    hatch.addLine(to: CGPoint(x: hx + bar.height, y: bar.minY))
+                    hx += 7
+                }
+                context.drawLayer { layer in
+                    layer.clip(to: shape)
+                    layer.stroke(hatch, with: .color(.indigo.opacity(selected ? 0.6 : 0.4)), lineWidth: 1.5)
+                }
+                let label = context.resolve(Text("\(Image(systemName: "eye.slash.fill")) Private")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.indigo))
+                let box = label.measure(in: size)
+                if box.width + 16 < bar.width, box.height < bar.height {
+                    let plate = CGRect(x: bar.minX + 6, y: bar.midY - box.height / 2 - 1, width: box.width + 8, height: box.height + 2)
+                    context.fill(Path(roundedRect: plate, cornerRadius: 4), with: .style(.background.opacity(0.85)))
+                    context.draw(label, at: CGPoint(x: plate.midX, y: plate.midY))
+                }
+            }
             for event in timeline.shownEvents where event.camera == camera.id && event.end > visible.lowerBound && event.start < visible.upperBound {
                 let mark = markRect(event, width: size.width, visible: visible)
                 let isHovered = highlighted == event.id
@@ -947,9 +1000,11 @@ struct TimelineLanes: View, @MainActor Animatable {
                 }
                 // Room for the symbol when zoomed in far enough.
                 if mark.width > 22, mark.height >= 10 {
-                    let side = min(12, mark.height)
-                    let symbol = context.resolve(Image(systemName: event.kind.symbol))
-                    context.draw(symbol, in: CGRect(x: mark.minX + 4, y: mark.midY - side / 2, width: side, height: side))
+                    // As text, so the symbol keeps its own shape (a walking figure is taller than wide).
+                    let symbol = context.resolve(Text(Image(systemName: event.kind.symbol))
+                        .font(.system(size: min(11, mark.height - 2), weight: .semibold)).foregroundStyle(.white))
+                    let box = symbol.measure(in: mark.size)
+                    context.draw(symbol, at: CGPoint(x: mark.minX + 4 + box.width / 2, y: mark.midY))
                 }
             }
         }
@@ -1072,7 +1127,7 @@ struct EventFilters: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(TimelineEvent.Kind.allCases) { kind in
+            ForEach(timeline.kindsPresent) { kind in
                 let count = timeline.dayEvents.count { $0.kind == kind }
                 let on = timeline.shownKinds.contains(kind)
                 Button {
@@ -1122,6 +1177,15 @@ struct EventCallout: View {
                 Text(event.kind.title).font(.headline)
                 Text("· \(camera)").foregroundStyle(.secondary)
             }
+            // Read at once (and kept), not loaded after: the card has its final size from the first frame, so
+            // moving between events slides it instead of flickering through a placeholder.
+            if let picture = event.snapshot.flatMap(EventPictures.image) {
+                Image(nsImage: picture)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
             Text(event.summary).font(.callout).frame(maxWidth: 260, alignment: .leading)
             HStack(spacing: 4) {
                 Text("\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s")
@@ -1134,6 +1198,19 @@ struct EventCallout: View {
         .padding(12)
         .padding(.bottom, Self.arrowSize.height)
         .glassEffect(.regular, in: CalloutShape(arrowX: arrowX, arrow: Self.arrowSize, radius: 14))
+    }
+}
+
+/// Events' pictures, read once and kept (small JPEGs; a few hundred at most in a session).
+@MainActor
+enum EventPictures {
+    private static let cache = NSCache<NSURL, NSImage>()
+
+    static func image(_ url: URL) -> NSImage? {
+        if let kept = cache.object(forKey: url as NSURL) { return kept }
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        cache.setObject(image, forKey: url as NSURL)
+        return image
     }
 }
 

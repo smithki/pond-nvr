@@ -119,12 +119,13 @@ struct RecordingAndHomeKit: ServiceRunning {
         let events = EventStore(path: config.storage.databasePath)
         events?.endOngoing()
         events?.prune(days: config.retention.events.days)
+        // (Doorbell presses are kept whether or not there's a model.)
+        cameras.events = events
         if let model = ModelStore.choose(nil) {
             let detector = SharedDetector { line in log.log("pond", line) }
             do {
                 try detector.detector.use(model)
                 cameras.detector = detector
-                cameras.events = events
                 log.log("pond", "detection: \(model.manifest.name) [\(model.manifest.license)]")
             } catch {
                 log.log("pond", "! detection is off: \(error.description)")
@@ -368,9 +369,13 @@ if args.first == "events" {
     format.dateFormat = "MMM d HH:mm:ss"
     for k in kept {
         let e = k.event
-        let seen = e.labels.sorted { $0.key < $1.key }.map { $0.value > 1 ? "\($0.value) \($0.key)s" : $0.key }.joined(separator: ", ")
+        let seen = CameraEvent.words(e.labels)
         let zones = e.zones.isEmpty ? "" : "  in " + e.zones.joined(separator: ", ")
         let picture = e.snapshot.map { "  " + (config.storage.eventsPath as NSString).appendingPathComponent($0) } ?? ""
+        if e.category == .ring {
+            print("\(format.string(from: e.start))  \(e.camera)  doorbell pressed\(picture)")
+            continue
+        }
         print("\(format.string(from: e.start))  \(e.camera)  \(e.category.rawValue) \(Int((e.confidence * 100).rounded()))%  "
             + "\(k.ongoing ? "ongoing" : "\(Int(e.seconds.rounded())) s")  \(seen)\(zones)\(picture)")
     }

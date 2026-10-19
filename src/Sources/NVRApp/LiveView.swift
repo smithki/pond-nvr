@@ -253,7 +253,7 @@ struct LiveView: View {
             let base = model.config?.storage.recordingsPath ?? ""
             while !Task.isCancelled {
                 await snapshots.refresh(base: base, cameras: cameras.map(\.id))
-                await activity.refresh(base: base, cameras: cameras.map(\.id))
+                await activity.refresh(base: base, cameras: cameras.map(\.id), source: EventSource(config: model.config))
                 try? await Task.sleep(for: .seconds(30))
             }
         }

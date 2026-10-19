@@ -85,7 +85,7 @@ struct ZoneEditorSheet: View {
     /// The header above the picture, and the footer below it with the space between.
     static let above = 76.0, below = 68.0
     /// The panel's tallest (a watched zone's settings).
-    static let panelHeight = 404.0
+    static let panelHeight = 442.0
 
     var height: Double {
         let pictureWidth = Self.width - 40 - 16 - 260
@@ -148,7 +148,7 @@ struct ZoneEditorSheet: View {
                                     draft[i].categories = taken == Config.Zone.allCategories ? nil : taken
                                 }))
                             // One at least: a zone that takes nothing would be an ignored one.
-                            .disabled(draft[i].takes(category) && (draft[i].categories?.count ?? 4) == 1)
+                            .disabled(draft[i].takes(category) && (draft[i].categories?.count ?? Config.Zone.allCategories.count) == 1)
                         }
                     }
                 }
@@ -174,6 +174,7 @@ struct ZoneEditorSheet: View {
         case "vehicle": "Vehicles"
         case "animal": "Animals"
         case "package": "Packages"
+        case "item": "Left items"
         default: category.capitalized
         }
     }

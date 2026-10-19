@@ -59,11 +59,54 @@ public final class CameraWatcher: @unchecked Sendable {
 
     public func stop() { lock.withLock { stopped = true } }
 
+    // MARK: A doorbell's press
+
+    private var ringing: [Date] = []
+
+    /// The doorbell was pressed: an event, with the next picture decoded (the watcher's own, within a frame);
+    /// without one if no picture comes in a few seconds (private, or the stream down).
+    public func rang(at time: Date = Date()) {
+        lock.withLock { ringing.append(time) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, let time = lock.withLock({ () -> Date? in
+                guard let i = ringing.firstIndex(of: time) else { return nil }
+                return ringing.remove(at: i)
+            }) else { return }
+            Self.ring(camera: camera, at: time, store: store, say: say)
+        }
+    }
+
+    /// A press kept as an event (its picture, if any, already saved).
+    @discardableResult
+    public static func ring(camera: String, at time: Date, id: String = UUID().uuidString, snapshot: String? = nil,
+                            store: EventStore?, say: @Sendable (String) -> Void) -> CameraEvent {
+        let event = CameraEvent(id: id, camera: camera, start: time, end: time, category: .ring, labels: ["doorbell": 1],
+                                confidence: 1, snapshot: snapshot)
+        store?.save(event, ongoing: false)
+        say("doorbell pressed")
+        return event
+    }
+
+    /// Any press waiting for a picture, with this one.
+    private func answerRings(_ picture: CVPixelBuffer) {
+        let waiting = lock.withLock { () -> [Date] in
+            defer { ringing = [] }
+            return ringing
+        }
+        for time in waiting {
+            let event = CameraEvent(camera: camera, start: time, end: time, category: .ring)
+            let snapshot = savePicture(picture, for: event)
+            snapshots[event.id] = nil
+            Self.ring(camera: camera, at: time, id: event.id, snapshot: snapshot, store: store, say: say)
+        }
+    }
+
     // MARK: Watching
 
     private var gate = MotionGate()
     private var tracker = Tracker()
     private lazy var builder = EventBuilder(camera: camera)
+    private lazy var leftItems = LeftItems(camera: camera)
 
     private func run() {
         var pause = 2.0
@@ -112,6 +155,7 @@ public final class CameraWatcher: @unchecked Sendable {
                 // Every picture decoded (each needs the ones before), only some looked at.
                 guard let picture = decoder.decode(unit.nalus, keyframe: unit.isKeyframe, damaged: unit.damaged,
                                                    sps: depacketizer.sps, pps: depacketizer.pps) else { continue }
+                answerRings(picture)
                 if !told {
                     say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")
                     told = true
@@ -121,11 +165,14 @@ public final class CameraWatcher: @unchecked Sendable {
                 lastLook = now
                 let mask = motion(in: picture)
                 if mask.isMoving { lastMotion = now }
-                guard now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion else {
+                let moving = now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion
+                // While something put down waits to be seen again, the model looks now and then though nothing moves.
+                let checking = leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery
+                guard moving || checking else {
                     apply(builder.quiet(at: now))
                     continue
                 }
-                guard now.timeIntervalSince(lastDetect) >= Self.detectEvery else { continue }
+                guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { continue }
                 lastDetect = now
                 guard let found = detector.detect(picture) else { continue }
                 // What counts by the zones, with the zones it's in.
@@ -134,6 +181,11 @@ public final class CameraWatcher: @unchecked Sendable {
                     counted.first { $0.0 == d }?.1 ?? []
                 }
                 apply(builder.update(sightings, at: now), picture: picture)
+                let items = counted.filter { $0.0.category == .item }
+                    .map { (detection: $0.0, zones: $0.1, moved: mask.overlaps(($0.0.box.x, $0.0.box.y, $0.0.box.width, $0.0.box.height))) }
+                for event in leftItems.update(items, people: found.filter { $0.category == .person }, at: now) {
+                    left(event, picture: picture)
+                }
             }
         }
     }
@@ -165,11 +217,21 @@ public final class CameraWatcher: @unchecked Sendable {
             case var .ended(event):
                 event.snapshot = snapshots.removeValue(forKey: event.id) ?? event.snapshot
                 store?.save(event, ongoing: false)
-                let seen = event.labels.sorted { $0.key < $1.key }.map { $0.value > 1 ? "\($0.value) \($0.key)s" : $0.key }
-                say("event over after \(Int(event.seconds.rounded())) s: \(seen.joined(separator: ", "))")
+                say("event over after \(Int(event.seconds.rounded())) s: \(CameraEvent.words(event.labels))")
             }
             changed?(change)
         }
+    }
+
+    /// Something left behind: an event of its own, begun and ended at once.
+    private func left(_ event: CameraEvent, picture: CVPixelBuffer) {
+        var event = event
+        event.snapshot = savePicture(picture, for: event)
+        snapshots[event.id] = nil
+        store?.save(event, ongoing: false)
+        say("\(event.labels.keys.sorted().joined(separator: ", ")) left (\(Self.percent(event.confidence)))")
+        changed?(.began(event))
+        changed?(.ended(event))
     }
 
     /// Each ongoing event's picture (relative path), as it was saved.

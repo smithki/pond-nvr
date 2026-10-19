@@ -25,3 +25,11 @@ import Testing
         #expect(!ZoneCanvas.fits(ZoneCanvas.centroid(l), size: label, in: l))
     }
 }
+
+@Suite struct EventSummaryTests {
+    @Test func labelsInWords() {
+        #expect(EventSource.list(["person": 2, "dog": 1]) == "2 people and a dog")
+        #expect(EventSource.list(["umbrella": 1]) == "an umbrella")
+        #expect(EventSource.list(["car": 3, "bus": 2, "cat": 1]) == "3 cars, 2 buses and a cat")
+    }
+}

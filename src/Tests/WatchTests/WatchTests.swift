@@ -220,3 +220,84 @@ import Testing
         #expect(builder.current?.zones == ["steps"])
     }
 }
+
+@Suite struct LeftItemsTests {
+    static let bag = Detection(label: "backpack", category: .item, confidence: 0.7, box: .init(x: 0.45, y: 0.8, width: 0.1, height: 0.1))
+    static let person = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.4, y: 0.3, width: 0.2, height: 0.6))
+
+    @Test func aBagPutDownAndLeftIsAnEventOnce() {
+        var items = LeftItems(camera: "porch")
+        let t0 = Date()
+        // Put down (seen where something moved), with the person over it.
+        #expect(items.update([(Self.bag, ["steps"], true)], people: [Self.person], at: t0).isEmpty)
+        #expect(items.isWaiting)
+        // Still there, the person gone; not yet long enough.
+        #expect(items.update([(Self.bag, [], false)], people: [], at: t0.addingTimeInterval(10)).isEmpty)
+        #expect(items.update([(Self.bag, [], false)], people: [], at: t0.addingTimeInterval(20)).isEmpty)
+        let left = items.update([(Self.bag, [], false)], people: [], at: t0.addingTimeInterval(31))
+        #expect(left.count == 1 && left.first?.category == .item && left.first?.labels == ["backpack": 1])
+        #expect(left.first?.zones == ["steps"] && left.first?.start == t0)
+        #expect(!items.isWaiting)
+        // Still there later: not again.
+        #expect(items.update([(Self.bag, [], true)], people: [], at: t0.addingTimeInterval(90)).isEmpty)
+    }
+
+    @Test func oneAlreadyThereOrCarriedOffIsnt() {
+        var items = LeftItems(camera: "porch")
+        let t0 = Date()
+        // There from the start (nothing moved where it is): never waited for.
+        _ = items.update([(Self.bag, [], false)], people: [], at: t0)
+        #expect(!items.isWaiting)
+        // Carried past: seen moving, then gone.
+        _ = items.update([(Self.bag, [], true)], people: [Self.person], at: t0.addingTimeInterval(1))
+        #expect(items.isWaiting)
+        _ = items.update([], people: [], at: t0.addingTimeInterval(20))
+        #expect(!items.isWaiting)
+    }
+
+    @Test func oneStillHeldIsntLeft() {
+        var items = LeftItems(camera: "porch")
+        let t0 = Date()
+        _ = items.update([(Self.bag, [], true)], people: [Self.person], at: t0)
+        // Someone standing at the door with it for a minute.
+        for s in stride(from: 5.0, through: 60, by: 5) {
+            #expect(items.update([(Self.bag, [], false)], people: [Self.person], at: t0.addingTimeInterval(s)).isEmpty)
+        }
+    }
+}
+
+@Suite struct RingTests {
+    @Test func aPressIsKeptAsAnEventOfItsOwn() throws {
+        let path = NSTemporaryDirectory() + "pond-rings-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let event = CameraWatcher.ring(camera: "doorbell", at: t0, snapshot: "events/doorbell/x.jpg", store: store) { _ in }
+        store.flush()
+        let kept = store.events(since: t0.addingTimeInterval(-1))
+        #expect(kept.map(\.event) == [event])
+        #expect(kept.first?.event.category == .ring && kept.first?.ongoing == false)
+    }
+}
+
+@Suite struct IgnoredScreenTests {
+    @Test func someoneOnATVIsIgnoredThoughTheirFeetAreJustOutside() {
+        // A TV zone drawn a little short of the screen's bottom edge.
+        let tv = Config.Zone(id: "tv", name: "TV", points: [[0.63, 0.17], [0.85, 0.23], [0.83, 0.46], [0.63, 0.38]], kind: .ignore)
+        let onScreen = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.66, y: 0.2, width: 0.1, height: 0.22))
+        #expect(!tv.contains(x: 0.71, y: 0.42))          // where it "stands": outside
+        #expect(ZoneRules([tv]).zones(for: onScreen) == nil)
+        // Someone in front of the TV, mostly below it: counts.
+        let inFront = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.66, y: 0.3, width: 0.12, height: 0.6))
+        #expect(ZoneRules([tv]).zones(for: inFront) == [])
+        // Standing right at the TV, their head and shoulders before the screen, their feet on the floor: counts.
+        let atTheTV = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: 0.68, y: 0.22, width: 0.1, height: 0.42))
+        #expect(ZoneRules([tv]).zones(for: atTheTV) == [])
+        // And in the same picture as someone on the screen, only they count.
+        #expect([onScreen, atTheTV].compactMap { ZoneRules([tv]).zones(for: $0) }.count == 1)
+    }
+
+    @Test func labelsInWords() {
+        #expect(CameraEvent.words(["person": 3]) == "3 people")
+    }
+}

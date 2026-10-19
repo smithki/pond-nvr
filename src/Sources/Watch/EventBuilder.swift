@@ -44,6 +44,33 @@ public struct CameraEvent: Sendable, Equatable, Codable, Identifiable {
     }
 }
 
+extension CameraEvent {
+    /// What was seen, counted, most first: "2 people and a dog".
+    public static func words(_ labels: [String: Int]) -> String {
+        guard !labels.isEmpty else { return "something" }
+        let parts = labels.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map { label, n in
+            n == 1 ? ("aeiou".contains(label.first ?? "x") ? "an " : "a ") + label : "\(n) \(plural(label))"
+        }
+        return join(parts)
+    }
+
+    public static func plural(_ word: String) -> String {
+        switch word {
+        case "person": "people"
+        case "sheep", "deer": word
+        default: word.hasSuffix("s") || word.hasSuffix("sh") || word.hasSuffix("ch") ? word + "es" : word + "s"
+        }
+    }
+
+    public static func join(_ parts: [String]) -> String {
+        switch parts.count {
+        case 0: ""
+        case 1: parts[0]
+        default: parts.dropLast().joined(separator: ", ") + " and " + parts.last!
+        }
+    }
+}
+
 public struct EventBuilder: Sendable {
     public let camera: String
     /// Quiet this long, an event ends.

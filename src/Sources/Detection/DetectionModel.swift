@@ -4,9 +4,11 @@
 // Pond runs. What a model finds is put in Pond's own terms: a person, a vehicle, an animal, a package.
 import Foundation
 
-/// What Pond cares that something is.
+/// What Pond cares that something is. An item is something a person carries and may leave behind (a bag, a
+/// suitcase): an event when it's put down and stays. A ring isn't seen by a model: it's a doorbell's button
+/// pressed, an event of its own (with the picture at that moment).
 public enum DetectedCategory: String, Codable, Sendable, CaseIterable, Comparable {
-    case person, vehicle, animal, package, other
+    case person, vehicle, animal, package, item, ring, other
 
     public static func < (a: Self, b: Self) -> Bool { allCases.firstIndex(of: a)! < allCases.firstIndex(of: b)! }
 }
@@ -105,6 +107,7 @@ extension DetectedCategory {
         case "car", "truck", "bus", "motorcycle", "motorbike", "bicycle", "bike", "van", "vehicle", "train", "boat": .vehicle
         case "dog", "cat", "bird", "horse", "sheep", "cow", "bear", "deer", "animal", "fox", "raccoon", "squirrel": .animal
         case "package", "parcel", "box": .package
+        case "backpack", "handbag", "suitcase", "umbrella", "bag", "luggage": .item
         default: .other
         }
     }

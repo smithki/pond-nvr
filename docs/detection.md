@@ -48,14 +48,24 @@ pond events                 # the last 24 hours, every camera
 pond events doorbell --hours 2
 ```
 
+### Doorbell presses
+
+A doorbell's press is an event of its own ("doorbell pressed"), with the picture at that moment (the next frame the watcher decodes; none while the camera is private). Kept whether the doorbell is in HomeKit (where it also rings) or not (then the service watches its button just for this), and whether or not detection is on.
+
+### Left items
+
+Something a person carries and puts down (a backpack, a handbag, a suitcase, an umbrella: COCO's carried things, which the built-in model knows) is watched from when it arrives. Still there 30 s later, in the same place, with nobody standing over it, it's an event of its own: "backpack left", with its picture. One already in view when Pond started, one carried past, and one picked up again within a few seconds make none; one left isn't told again while it stays. While one waits, the model looks every 5 s though nothing moves.
+
+Packages are a category of their own, but the built-in model doesn't know them (COCO has no box or parcel class): a model that does, added to the Models folder, finds them; Pond's own is planned ([roadmap](roadmap.md)).
+
 ### Zones
 
 Without zones, the whole picture counts. A camera's zones, drawn on its picture in its settings (Detection › Edit Zones), narrow that:
 
-- **Watched zones**: once a camera has one, events come only from what's in a watched zone, and only of the kinds it takes (people and packages on the steps, say, but not the neighbour's cat). An event lists the zones it was in.
+- **Watched zones**: once a camera has one, events come only from what's in a watched zone, and only of the kinds it takes (people and left items on the steps, say, but not the neighbour's cat). An event lists the zones it was in.
 - **Ignored zones**: nothing there counts, and nothing moving there (a busy road, a tree in the wind) starts the model.
 
-Something is in a zone by where it stands: the bottom middle of its box (someone's feet, a car's wheels), so a person on the pavement whose head is in front of the steps isn't on the steps. Changing a camera's zones starts only its watcher again.
+Something is in a watched zone by where it stands: the bottom middle of its box (someone's feet, a car's wheels), so a person on the pavement whose head is in front of the steps isn't on the steps. An ignored zone also leaves out what's nearly all inside it (three quarters of its box), whatever it stands on: a person on a TV is cut off at the screen's edge, where the zone drawn round the screen may stop just short. Zones apply from when they're saved; events already made stay as they were. Changing a camera's zones starts only its watcher again.
 
 The watchers share one model, and the camera connection that recording and live view already use. Decoding is done by the media engine, so watching costs little until something moves.
 

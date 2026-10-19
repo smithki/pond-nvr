@@ -102,6 +102,8 @@ public final class HomeKitHost: @unchecked Sendable {
     public var log: @Sendable (String) -> Void
     /// Called with the whole status whenever any of it changes (the service writes it to a file).
     public var statusChanged: (@Sendable (HomeKitStatus) -> Void)?
+    /// Called with the camera's id when a doorbell in HomeKit is pressed (the service keeps it as an event).
+    public var pressed: (@Sendable (String) -> Void)?
     private var status = HomeKitStatus()
     /// Each camera's event watcher and privacy observer, by camera (so one can be stopped alone).
     private var watchers: [String: CameraEvents] = [:]
@@ -377,6 +379,7 @@ public final class HomeKitHost: @unchecked Sendable {
             guard doorbell else { return }
             log("HomeKit: \(name) rang")
             accessory?.ring()
+            self.pressed?(id)
         }, state: { [weak self] state in
             guard doorbell else { return }
             self?.update(id) { $0.doorbell = HomeKitStatus.DoorbellState(state) }

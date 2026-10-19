@@ -60,3 +60,22 @@ import Testing
         #expect(reader.incidents(since: .distantPast).map(\.kind) == [.connected])
     }
 }
+
+@Suite struct PrivateSpanTests {
+    @Test func privateStretchesFromChanges() {
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        let changes: [(String, Date, Bool)] = [
+            ("porch", t.addingTimeInterval(-500), true),    // private before the window
+            ("porch", t.addingTimeInterval(100), false),
+            ("porch", t.addingTimeInterval(200), true),     // still private at its end
+            ("drive", t.addingTimeInterval(300), true),
+            ("drive", t.addingTimeInterval(310), true),     // told twice: one stretch
+            ("drive", t.addingTimeInterval(400), false),
+            ("yard", t.addingTimeInterval(50), false),      // public, never private
+        ]
+        let spans = HealthStore.spans(changes, from: t, to: t.addingTimeInterval(1000))
+        #expect(spans["porch"] == [t ... t.addingTimeInterval(100), t.addingTimeInterval(200) ... t.addingTimeInterval(1000)])
+        #expect(spans["drive"] == [t.addingTimeInterval(300) ... t.addingTimeInterval(400)])
+        #expect(spans["yard"] == nil)
+    }
+}

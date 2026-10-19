@@ -1,6 +1,8 @@
-// A camera's zones, applied: where motion counts (not in an ignored zone), and whether something found counts,
-// by where it stands (the bottom middle of its box: someone's feet, a car's wheels): not in an ignored zone, and,
-// once the camera has watched zones, in one of them that takes its kind. No zones: the whole picture counts.
+// A camera's zones, applied: where motion counts (not in an ignored zone), and whether something found counts:
+// not in an ignored zone (where it stands, or most of it: a person on a TV is cut off at the screen's edge, so
+// where it "stands" can be just outside the zone drawn round the screen), and, once the camera has watched zones,
+// standing in one that takes its kind (the bottom middle of its box: someone's feet, a car's wheels). No zones:
+// the whole picture counts.
 import Detection
 import Foundation
 import NVRCore
@@ -26,10 +28,27 @@ public struct ZoneRules: Sendable {
     /// The watched zones a detection is in (empty for a camera with none); nil if it doesn't count.
     public func zones(for detection: Detection) -> Set<String>? {
         let (x, y) = Self.anchor(detection.box)
-        if ignored.contains(where: { $0.contains(x: x, y: y) }) { return nil }
+        if ignored.contains(where: { $0.contains(x: x, y: y) || Self.share(of: detection.box, in: $0) >= Self.mostly }) { return nil }
         guard !watched.isEmpty else { return [] }
         let inside = watched.filter { $0.contains(x: x, y: y) && $0.takes(detection.category.rawValue) }
         return inside.isEmpty ? nil : Set(inside.map(\.id))
+    }
+
+    /// In an ignored zone when this much of it is: a person on a screen is nearly all inside the zone round it;
+    /// someone standing in front of the screen, their head before it and their feet on the floor below, much less.
+    static let mostly = 0.75
+
+    /// How much of a box is in a zone (sampled on a 6×6 grid).
+    static func share(of box: Detection.Box, in zone: Config.Zone) -> Double {
+        let n = 6
+        var inside = 0
+        for i in 0 ..< n {
+            for j in 0 ..< n where zone.contains(x: box.x + (Double(i) + 0.5) / Double(n) * box.width,
+                                                y: box.y + (Double(j) + 0.5) / Double(n) * box.height) {
+                inside += 1
+            }
+        }
+        return Double(inside) / Double(n * n)
     }
 
     /// The grid cells (row by row) whose middle is in an ignored zone: motion there doesn't count.

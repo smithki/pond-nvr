@@ -380,7 +380,7 @@ public struct Config: Codable, Equatable, Sendable {
             case ignore
         }
 
-        public static let allCategories = ["person", "vehicle", "animal", "package"]
+        public static let allCategories = ["person", "vehicle", "animal", "package", "item"]
 
         public init(id: String, name: String, points: [[Double]], kind: Kind? = nil, categories: [String]? = nil) {
             self.id = id
@@ -478,7 +478,7 @@ extension Config {
                 }
                 if let categories = zone.categories {
                     if let unknown = categories.first(where: { !Zone.allCategories.contains($0) }) {
-                        out.append("\(zlabel): \u{201C}\(unknown)\u{201D} isn\u{2019}t a kind of thing it can take (person, vehicle, animal, package).")
+                        out.append("\(zlabel): \u{201C}\(unknown)\u{201D} isn\u{2019}t a kind of thing it can take (person, vehicle, animal, package, item).")
                     } else if categories.isEmpty, !zone.isIgnored {
                         out.append("\(zlabel): a watched zone needs at least one kind of thing to take.")
                     }

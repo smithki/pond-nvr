@@ -1,13 +1,30 @@
-// Events on the timeline. Detection (phase 5) will supply them; until then, POND_MOCK_EVENTS=1 makes up a
-// plausible day of them over what was recorded, to try the timeline with.
+// Events on the timeline: what the service's detection kept (read from Pond's database), and when each camera
+// was private (from its health). POND_MOCK_EVENTS=1 makes up a plausible day of events instead, to try the
+// timeline with.
+import Detection
 import Foundation
+import Health
+import NVRCore
 import SwiftUI
+import Watch
 
 struct TimelineEvent: Identifiable, Equatable, Sendable {
     enum Kind: String, CaseIterable, Identifiable, Sendable {
-        case person, vehicle, animal, package, motion
+        case person, vehicle, animal, package, item, ring, motion
 
         var id: String { rawValue }
+
+        init(_ category: DetectedCategory) {
+            switch category {
+            case .person: self = .person
+            case .vehicle: self = .vehicle
+            case .animal: self = .animal
+            case .package: self = .package
+            case .item: self = .item
+            case .ring: self = .ring
+            case .other: self = .motion
+            }
+        }
 
         var title: String {
             switch self {
@@ -15,6 +32,8 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .vehicle: "Vehicle"
             case .animal: "Animal"
             case .package: "Package"
+            case .item: "Left item"
+            case .ring: "Doorbell"
             case .motion: "Motion"
             }
         }
@@ -25,6 +44,8 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .vehicle: "car.fill"
             case .animal: "pawprint.fill"
             case .package: "shippingbox.fill"
+            case .item: "bag.fill"
+            case .ring: "bell.fill"
             case .motion: "dot.radiowaves.left.and.right"
             }
         }
@@ -34,21 +55,78 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .person: .blue
             case .vehicle: .orange
             case .animal: .green
-            case .package: .yellow
+            case .package: .brown
+            case .item: .teal
+            case .ring: .yellow
             case .motion: .gray
             }
         }
     }
 
-    var id: Int
+    var id: String
     var camera: String
     var kind: Kind
     var start: Date
     var end: Date
-    /// What the description model would say about it.
+    /// What happened, in a sentence.
     var summary: String
+    /// Its picture, if it has one.
+    var snapshot: URL?
 
     var seconds: Double { end.timeIntervalSince(start) }
+}
+
+/// Where the app reads events and private stretches from (the settings' database and events folder).
+struct EventSource: Sendable {
+    var database: String
+    var eventsFolder: String
+    /// Zone names, by "camera/zone".
+    var zoneNames: [String: String] = [:]
+
+    init(database: String, eventsFolder: String, zoneNames: [String: String] = [:]) {
+        self.database = database
+        self.eventsFolder = eventsFolder
+        self.zoneNames = zoneNames
+    }
+
+    init?(config: Config?) {
+        guard let config else { return nil }
+        self.init(database: config.storage.databasePath, eventsFolder: config.storage.eventsPath,
+                  zoneNames: Dictionary(config.cameras.flatMap { c in c.zones.map { ("\(c.id)/\($0.id)", $0.name) } },
+                                        uniquingKeysWith: { a, _ in a }))
+    }
+
+    /// The events begun within `from`…`to`, oldest first; the one going on now ends now.
+    func events(from: Date, to: Date, now: Date = Date()) -> [TimelineEvent] {
+        guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }
+        return store.events(since: from).filter { $0.event.start < to }.map { kept in
+            let e = kept.event
+            return TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
+                                 end: kept.ongoing ? max(e.end, now) : max(e.end, e.start.addingTimeInterval(1)),
+                                 summary: summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) })
+        }
+    }
+
+    /// When each camera was private within `from`…`to`.
+    func privateSpans(from: Date, to: Date) -> [String: [ClosedRange<Date>]] {
+        guard FileManager.default.fileExists(atPath: database), let store = HealthStore(path: database, readOnly: true) else { return [:] }
+        return store.privateSpans(from: from, to: to)
+    }
+
+    /// "A person and a dog, in Path." "A backpack left." "Doorbell pressed."
+    func summary(_ e: CameraEvent) -> String {
+        if e.category == .ring { return "Doorbell pressed." }
+        let things = Self.list(e.labels)
+        if e.category == .item { return Self.sentence("\(things) left") }
+        let zones = e.zones.map { zoneNames["\(e.camera)/\($0)"] ?? $0 }
+        return Self.sentence(things + (zones.isEmpty ? "" : ", in " + Self.join(zones)))
+    }
+
+    static func sentence(_ text: String) -> String { text.prefix(1).uppercased() + text.dropFirst() + "." }
+
+    static func list(_ labels: [String: Int]) -> String { CameraEvent.words(labels) }
+
+    static func join(_ parts: [String]) -> String { CameraEvent.join(parts) }
 }
 
 enum MockEvents {
@@ -65,7 +143,7 @@ enum MockEvents {
                     let kind = rng.pick([(.person, 30), (.vehicle, 18), (.animal, 10), (.package, 4), (.motion, 38)] as [(TimelineEvent.Kind, Int)])
                     let length = kind == .motion ? rng.uniform(5, 25) : rng.uniform(10, 95)
                     let end = min(t.addingTimeInterval(length), range.upperBound)
-                    out.append(TimelineEvent(id: out.count, camera: camera, kind: kind, start: t, end: end,
+                    out.append(TimelineEvent(id: "mock-\(out.count)", camera: camera, kind: kind, start: t, end: end,
                                              summary: summary(kind, &rng)))
                     t = end.addingTimeInterval(rng.uniform(90, 1100))
                 }
@@ -83,6 +161,8 @@ enum MockEvents {
                                   "A delivery truck stops in front of the house.", "A grey SUV backs out of the driveway."]
         case .animal: options = ["A cat crosses the lawn.", "A dog sniffs around the porch.", "A deer walks along the fence."]
         case .package: options = ["A courier leaves a box at the door.", "A package is picked up from the porch."]
+        case .item: options = ["A backpack left.", "A suitcase left."]
+        case .ring: options = ["Doorbell pressed."]
         case .motion: options = ["Movement in the trees.", "Headlights sweep across the frame.", "Shadows move as clouds pass."]
         }
         return options[Int(rng.next() % UInt64(options.count))]

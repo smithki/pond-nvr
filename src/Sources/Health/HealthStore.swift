@@ -66,11 +66,17 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
         }
     }
 
-    /// What's older than a week let go.
+    /// When a camera was made private and public again: kept a year (few, and the timeline shows them as far
+    /// back as recordings go).
+    public static let keepPrivacy: TimeInterval = 366 * 86400
+
+    /// What's older than a week let go (privacy's changes, older than a year).
     public func prune(now: Date = Date()) {
         let before = now.addingTimeInterval(-Self.keep).timeIntervalSince1970
+        let privacyBefore = now.addingTimeInterval(-Self.keepPrivacy).timeIntervalSince1970
         queue.async { [self] in
-            run("DELETE FROM incidents WHERE time < ?", [before])
+            run("DELETE FROM incidents WHERE time < ? AND kind NOT IN ('madePrivate', 'madePublic')", [before])
+            run("DELETE FROM incidents WHERE time < ?", [privacyBefore])
             run("DELETE FROM samples WHERE start < ?", [before])
         }
     }
@@ -88,6 +94,39 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
                                       detail: row.text(3))
             }
         }
+    }
+
+    /// When each camera was private, within `from`…`to`: from each time it was made private to when it was made
+    /// public again (or `to`, if it still is).
+    public func privateSpans(from: Date, to: Date) -> [String: [ClosedRange<Date>]] {
+        let changes = queue.sync {
+            rows("SELECT camera, time, kind FROM incidents WHERE kind IN ('madePrivate', 'madePublic') AND time < ? ORDER BY time",
+                 [to.timeIntervalSince1970]) { row -> (String, Date, Bool)? in
+                guard let camera = row.text(0) else { return nil }
+                return (camera, Date(timeIntervalSince1970: row.double(1)), row.text(2) == "madePrivate")
+            }
+        }
+        return Self.spans(changes, from: from, to: to)
+    }
+
+    /// Private stretches from changes in time order (camera, when, made private), clipped to `from`…`to`.
+    static func spans(_ changes: [(String, Date, Bool)], from: Date, to: Date) -> [String: [ClosedRange<Date>]] {
+        var since: [String: Date] = [:]
+        var out: [String: [ClosedRange<Date>]] = [:]
+        func close(_ camera: String, at end: Date) {
+            guard let start = since.removeValue(forKey: camera) else { return }
+            let lo = max(start, from), hi = min(end, to)
+            if lo < hi { out[camera, default: []].append(lo ... hi) }
+        }
+        for (camera, time, made) in changes {
+            if made {
+                if since[camera] == nil { since[camera] = time }
+            } else {
+                close(camera, at: time)
+            }
+        }
+        for camera in Array(since.keys) { close(camera, at: to) }
+        return out
     }
 
     public func samples(since: Date, camera: String? = nil) -> [HealthSample] {

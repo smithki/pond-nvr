@@ -95,8 +95,14 @@ final class TimelineModel {
     var rate: Float = 1 {
         didSet { if playing { player.rate = rate } }
     }
+    /// Where events and private stretches are read from (set from the settings before loading).
+    var source: EventSource?
     /// The events in `loaded`, all kinds; `shown` filters them.
     private(set) var events: [TimelineEvent] = []
+    /// When each camera was private, in `loaded`.
+    private(set) var privateSpans: [String: [ClosedRange<Date>]] = [:]
+    /// The kinds of event there are in `loaded` (the filters offered).
+    var kindsPresent: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { k in events.contains { $0.kind == k } } }
     /// The events of the day in the middle of the view.
     var dayEvents: [TimelineEvent] { events.filter { $0.start >= day && $0.start < dayEnd } }
     var shownKinds = Set(TimelineEvent.Kind.allCases)
@@ -194,14 +200,16 @@ final class TimelineModel {
         let calendar = Calendar.current
         let from = calendar.startOfDay(for: visible.lowerBound.addingTimeInterval(-86400))
         let to = min(horizon, calendar.startOfDay(for: visible.upperBound).addingTimeInterval(2 * 86400))
-        let (found, starts) = await Task.detached {
+        let source = self.source
+        let (found, starts, kept, privacy) = await Task.detached {
             var out: [String: [RecordedSpan]] = [:]
             var starts: [String: Date] = [:]
             for c in cameras {
                 out[c] = RecordingIndex.spans(base: base, camera: c, from: from, to: to)
                 starts[c] = RecordingIndex.earliest(base: base, camera: c)
             }
-            return (out, starts)
+            let events = (source?.events(from: from, to: to) ?? []).filter { cameras.contains($0.camera) }
+            return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:])
         }.value
         let first = starts.values.min()
         // Each camera's newest segment is listed as a nominal minute; its file may be shorter (cut at a
@@ -218,7 +226,8 @@ final class TimelineModel {
         firstRecording = first
         cameraStarts = starts
         coverage = trimmed.mapValues { RecordingIndex.coverage($0) }
-        events = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : []
+        events = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : kept
+        privateSpans = privacy
         loaded = from ... to
     }
 
@@ -237,7 +246,7 @@ final class TimelineModel {
             }
             out += MockEvents.make(coverage: clipped, day: dayStart).map { event in
                 var e = event
-                e.id += n * 100_000
+                e.id = "\(n)-\(e.id)"
                 return e
             }
             n += 1

@@ -154,6 +154,8 @@ enum DetectCommand {
             case .vehicle: CGColor(red: 0.3, green: 0.6, blue: 1, alpha: 1)
             case .animal: CGColor(red: 1, green: 0.7, blue: 0.2, alpha: 1)
             case .package: CGColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 1)
+            case .item: CGColor(red: 0.7, green: 0.5, blue: 1, alpha: 1)
+            case .ring: CGColor(red: 1, green: 0.9, blue: 0.3, alpha: 1)
             case .other: CGColor(gray: 0.9, alpha: 1)
             }
             context.setStrokeColor(colour)
