@@ -473,3 +473,82 @@ import Testing
         #expect(CloserLook.areas(mask).count == 2)
     }
 }
+
+@Suite struct StreetTests {
+    static func thing(_ category: DetectedCategory, _ label: String, x: Double, y: Double) -> Detection {
+        Detection(label: label, category: category, confidence: 0.85, box: .init(x: x, y: y, width: 0.15, height: 0.15))
+    }
+
+    /// Motion on a 20×20 grid only where these are (what moves), not where a parked car stands.
+    static func motion(_ moving: [Detection]) -> MotionMask {
+        var cells = Set<Int>()
+        for d in moving {
+            for row in Int(d.box.y * 20) ..< min(20, Int((d.box.y + d.box.height) * 20) + 1) {
+                for column in Int(d.box.x * 20) ..< min(20, Int((d.box.x + d.box.width) * 20) + 1) { cells.insert(row * 20 + column) }
+            }
+        }
+        return MotionMask(columns: 20, rows: 20, cells: cells)
+    }
+
+    @Test func someoneWalkingPastWithTrafficEndsWhenTheyveGone() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "doorbell")
+        let t0 = Date()
+        let parked = Self.thing(.vehicle, "car", x: 0.7, y: 0.75)
+        var changes: [EventBuilder.Change] = []
+        // A parked car (driven in long before), a person walking past for 20 s, and a car passing every 15 s for
+        // ten minutes.
+        _ = tracker.update([parked], mask: Self.motion([parked]), at: t0.addingTimeInterval(-600))
+        var s = 0.0
+        while s < 600 {
+            let time = t0.addingTimeInterval(s)
+            var moving: [Detection] = []
+            if s < 20 { moving.append(Self.thing(.person, "person", x: 0.05 + s * 0.02, y: 0.5)) }
+            let lap = s.truncatingRemainder(dividingBy: 15)
+            if lap < 4 { moving.append(Self.thing(.vehicle, "car", x: 0.05 + lap * 0.15, y: 0.2)) }
+            changes += builder.update(tracker.update([parked] + moving, mask: Self.motion(moving), at: time), at: time)
+            s += 0.5
+        }
+        let people = changes.compactMap { if case let .ended(e) = $0, e.category == .person { e } else { nil } }
+        #expect(people.count == 1)
+        #expect((people.first?.seconds ?? 999) < 40)
+    }
+
+    @Test func passingCarsAreEachTheirOwn() {
+        var tracker = Tracker(), builder = EventBuilder(camera: "doorbell")
+        let t0 = Date()
+        var began = 0
+        var s = 0.0
+        // A car every 25 s, each in view 4 s.
+        while s < 200 {
+            let time = t0.addingTimeInterval(s)
+            let lap = s.truncatingRemainder(dividingBy: 25)
+            let found = lap < 4 ? [Self.thing(.vehicle, "car", x: 0.05 + lap * 0.15, y: 0.3)] : []
+            for change in builder.update(tracker.update(found, mask: Self.motion(found), at: time), at: time) {
+                if case .began = change { began += 1 }
+            }
+            s += 0.5
+        }
+        #expect(began == 8)
+    }
+}
+
+@Suite struct SightingStoreTests {
+    @Test func aLooksSightingsAreKeptAndReadBack() throws {
+        let path = NSTemporaryDirectory() + "pond-sightings-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        let person = Sighting(camera: "porch", time: t, label: "person", category: .person, confidence: 0.9,
+                              box: .init(x: 0.1, y: 0.2, width: 0.3, height: 0.4), track: 3)
+        let onTV = Sighting(camera: "porch", time: t, label: "person", category: .person, confidence: 0.6,
+                            box: .init(x: 0.7, y: 0.2, width: 0.1, height: 0.2), counted: false)
+        store.save([person, onTV])
+        store.save([Sighting(camera: "drive", time: t, label: "car", category: .vehicle, confidence: 0.8, box: .init(x: 0, y: 0, width: 0.1, height: 0.1))])
+        store.flush()
+        let read = store.sightings(camera: "porch", from: t.addingTimeInterval(-1), to: t.addingTimeInterval(1))
+        #expect(read == [person, onTV])
+        store.prune(days: 1, now: t.addingTimeInterval(2 * 86400))
+        store.flush()
+        #expect(store.sightings(camera: "porch", from: .distantPast, to: .distantFuture).isEmpty)
+    }
+}

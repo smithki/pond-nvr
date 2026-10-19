@@ -132,6 +132,16 @@ public struct Config: Codable, Equatable, Sendable {
         /// events; nil for the default: on.
         public var detection: Bool?
         public var watches: Bool { detection ?? true }
+        /// What sets its motion sensor in the Home app (which HomeKit Secure Video records on, and notifies about):
+        /// Pond's detection (nil, the default, while the camera is watched: a person, vehicle, bike or animal in
+        /// its zones), or the camera's own motion.
+        public var homekitMotion: HomeKitMotion?
+        public var homeKitMotionFromDetection: Bool { watches && homekitMotion != .camera }
+
+        public enum HomeKitMotion: String, Codable, Sendable, CaseIterable {
+            case detection
+            case camera
+        }
 
         public enum HomeKitVideo: String, Codable, Sendable, CaseIterable {
             /// The camera's sub-stream (or main, for a viewer with the bandwidth), as it is: no work for the Mac.
@@ -157,7 +167,7 @@ public struct Config: Codable, Equatable, Sendable {
 
         public init(id: String, name: String, main: String, sub: String, username: String, zones: [Zone] = [],
                     kind: Kind = .camera, homekit: Bool = false, device: Device? = nil, homekitViewers: Int? = nil,
-                    instantLive: Bool? = nil, homekitVideo: HomeKitVideo? = nil, homekitRecording: Bool? = nil, detection: Bool? = nil) {
+                    instantLive: Bool? = nil, homekitVideo: HomeKitVideo? = nil, homekitRecording: Bool? = nil, detection: Bool? = nil, homekitMotion: HomeKitMotion? = nil) {
             self.id = id
             self.name = name
             self.main = main
@@ -172,6 +182,7 @@ public struct Config: Codable, Equatable, Sendable {
             self.homekitVideo = homekitVideo
             self.homekitRecording = homekitRecording
             self.detection = detection
+            self.homekitMotion = homekitMotion
         }
 
         /// The host in the main stream's address.
@@ -196,6 +207,7 @@ public struct Config: Codable, Equatable, Sendable {
             homekitVideo = try c.decodeIfPresent(HomeKitVideo.self, forKey: .homekitVideo)
             homekitRecording = try c.decodeIfPresent(Bool.self, forKey: .homekitRecording)
             detection = try c.decodeIfPresent(Bool.self, forKey: .detection)
+            homekitMotion = try c.decodeIfPresent(HomeKitMotion.self, forKey: .homekitMotion)
         }
 
         /// Reolink's stream addresses for a camera at this host.

@@ -48,7 +48,7 @@ commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Dete
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection"]))
-targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control"],
+targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control", "Watch"],
                            resources: [.copy("Fixtures")]))
 #endif
 

@@ -18,6 +18,7 @@ import AVFoundation
 import NVRCore
 import Observation
 import Recorder
+import Watch
 
 @MainActor
 @Observable
@@ -111,6 +112,51 @@ final class TimelineModel {
     }
     /// Where events and private stretches are read from (set from the settings before loading).
     var source: EventSource?
+    /// Boxes drawn over the recording round what was found (as the service saw it); remembered.
+    var showBoxes = UserDefaults.standard.bool(forKey: "timelineBoxes") {
+        didSet {
+            UserDefaults.standard.set(showBoxes, forKey: "timelineBoxes")
+            if showBoxes { Task { await loadSightings(around: playhead ?? Date()) } }
+        }
+    }
+    /// The selected camera's sightings around the playhead, and the stretch they cover.
+    @ObservationIgnored private var sightings: [Sighting] = []
+    @ObservationIgnored private var sightingsCover: (camera: String, range: ClosedRange<Date>, read: Date)?
+    private var loadingSightings = false
+
+    /// Reads the selected camera's sightings for a few minutes round `time` (again when it's moved off them, or
+    /// near the present, as they come).
+    func loadSightings(around time: Date) async {
+        guard showBoxes, let camera, let source, !loadingSightings else { return }
+        if let cover = sightingsCover, cover.camera == camera,
+           cover.range.lowerBound.addingTimeInterval(30) <= time, time <= cover.range.upperBound.addingTimeInterval(-30),
+           cover.range.upperBound < cover.read || Date().timeIntervalSince(cover.read) < 2 { return }
+        loadingSightings = true
+        let range = time.addingTimeInterval(-180) ... time.addingTimeInterval(180)
+        let found = await Task.detached { source.sightings(camera: camera, from: range.lowerBound, to: range.upperBound) }.value
+        sightings = found
+        sightingsCover = (camera, range, Date())
+        loadingSightings = false
+    }
+
+    /// The boxes to draw at `time`: those of the model's last look at or just before it (within half a second).
+    func boxes(at time: Date) -> [Sighting] {
+        guard showBoxes, let camera, sightingsCover?.camera == camera else { return [] }
+        return Self.look(in: sightings, at: time)
+    }
+
+    /// Of sightings in time order, those of the last look at or just before `time` (within half a second).
+    nonisolated static func look(in sightings: [Sighting], at time: Date) -> [Sighting] {
+        var low = 0, high = sightings.count
+        while low < high {
+            let mid = (low + high) / 2
+            if sightings[mid].time <= time.addingTimeInterval(0.1) { low = mid + 1 } else { high = mid }
+        }
+        guard low > 0 else { return [] }
+        let look = sightings[low - 1].time
+        guard time.timeIntervalSince(look) < 0.6 else { return [] }
+        return sightings[..<low].reversed().prefix { $0.time == look }.reversed()
+    }
     /// The events in `loaded`, all kinds; `shown` filters them. What's worked out from them (each camera's index,
     /// the shown ones, the day's) is worked out once as they change, not each time they're drawn.
     private(set) var events: [TimelineEvent] = [] {
@@ -536,6 +582,7 @@ final class TimelineModel {
         leaveLive()
         atEnd = false
         let time = min(time, Date())
+        if showBoxes { Task { await loadSightings(around: time) } }
         if let window, window.camera == camera, let current = queued.first(where: { $0.item === player.currentItem }),
            time >= current.origin, time < current.end {
             playhead = time
@@ -662,6 +709,7 @@ final class TimelineModel {
         let origin = queued.first { $0.item === player.currentItem }?.origin ?? window.origin
         let before = playhead
         playhead = origin.addingTimeInterval(time.seconds)
+        if showBoxes, let playhead { Task { await loadSightings(around: playhead) } }
         // Catching up to the present at more than 1×: real time from here.
         if playing, rate != 1, nearPresent { rate = 1 }
         // Playing past the edge of a panned view: follow the playhead again. Only as it crosses the edge (it was

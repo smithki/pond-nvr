@@ -67,6 +67,8 @@ final class CameraSupervisor: @unchecked Sendable {
     /// Every camera's parts, as the service starts. (The recorder starts its own workers as it runs.)
     func startAll() {
         host.pressed = { [weak self] id in self?.pressed(id) }
+        // A camera's motion in the Home app is Pond's detection when it's watched (and a model is loaded).
+        host.motionFromDetection = { [weak self] camera in camera.homeKitMotionFromDetection && self?.detector != nil }
         host.start(cameras: config.cameras) { [self] in password($0) }
         for camera in config.cameras {
             let parts = Self.parts(camera, password: passwords[camera.id])
@@ -167,7 +169,7 @@ final class CameraSupervisor: @unchecked Sendable {
         // (HomeKit takes the camera's every setting but detection's, which its watcher has.)
         var served = camera
         served.zones = []
-        served.detection = nil
+        served.detection = camera.homeKitMotionFromDetection ? nil : false
         let whole = (try? encoder.encode(served)).map { String(decoding: $0, as: UTF8.self) } ?? camera.id
         let zones = (try? encoder.encode(camera.zones)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         let reolink = !camera.isVideoOnly && CameraProviders.choices(for: camera.device).contains { $0.id == "reolink" }
@@ -227,9 +229,18 @@ final class CameraSupervisor: @unchecked Sendable {
     private func startWatcher(_ camera: Config.Camera, _ parts: Parts) {
         guard parts.watch != nil, let detector, let password = password(camera.id) else { return }
         let log = log, id = camera.id
+        let host = self.host
         let watcher = CameraWatcher(camera: id, url: camera.sub, username: camera.username, password: password, detector: detector,
                                     store: events, eventsFolder: lock.withLock { config.storage.eventsPath },
                                     zones: camera.zones, main: camera.main) { line in log.log(id, line) }
+        // Its events set the camera's motion sensor in the Home app (where that follows Pond's detection).
+        watcher.changed = { change in
+            switch change {
+            case .began, .resumed: host.detected(id, true)
+            case .ended: host.detected(id, false)
+            case .better: break
+            }
+        }
         lock.withLock { watchers[id] = watcher }
         watcher.start()
     }

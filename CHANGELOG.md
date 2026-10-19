@@ -16,6 +16,9 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 - **Zones**, drawn on a camera's latest picture in its settings (Detection › Edit Zones): a watched zone limits events to what stands in it, of the kinds it takes (people, vehicles, animals, packages); an ignored zone is left out, its motion too (a road, a tree in the wind). Events list the zones they were in.
 - **A closer look at what moves**: the moving area, cut from the main stream at full resolution, given to the model too, so small or far-off things are found (on the living room's footage, three times the sightings of a cat across the room).
 - **Bikes** (bicycles, motorcycles, scooters) are a category of their own on the timeline; in zones they're taken with vehicles.
+- **Boxes on the timeline**: a toggle (B) draws what the model found over the recording, labelled with what and how sure, the ignored ones dashed. The service keeps each look's findings for it; the recording itself is untouched.
+- **HomeKit motion from Pond's detection**: a camera's motion sensor in the Home app follows its events (a person, vehicle, bike or animal in its zones), so HomeKit Secure Video records, and the Home app notifies, for those and not for leaves or headlights. A video-only camera records to HomeKit Secure Video again. Per camera, its own motion can be chosen instead.
+- **Events end when what began them has gone**: something parked since before isn't part of an event, and passing cars don't keep someone's visit going; passing cars are each their own event.
 - **Doorbell presses** are kept as events of their own, with the picture at that moment, for every doorbell (in HomeKit or not).
 - **Left items**: a bag, suitcase or umbrella put down and left (still there 30 s later, nobody over it) is an event of its own, with its picture. Packages need a model that knows them; Pond's own is on the roadmap.
 

@@ -697,6 +697,8 @@ struct EditCameraSheet: View {
     @State private var homeKitVideo = Config.Camera.HomeKitVideo.camera
     @State private var homeKitRecording = false
     @State private var detection = true
+    @State private var homeKitMotion = Config.Camera.HomeKitMotion.detection
+    @State private var showHomeKitOptions = false
     @State private var zones: [Config.Zone] = []
     @State private var editingZones = false
     @State private var confirmForget = false
@@ -780,6 +782,7 @@ struct EditCameraSheet: View {
             homeKitVideo = camera.homekitVideo ?? .camera
             homeKitRecording = camera.homekitRecording == true
             detection = camera.watches
+            homeKitMotion = camera.homekitMotion ?? .detection
             zones = camera.zones
             // Opened to fix the password: show the login.
             if focus == .password { showLogin = true }
@@ -863,15 +866,14 @@ struct EditCameraSheet: View {
                 }
             }
             if saved.homekit {
-                homeKitPicture
-                // Video only: nothing would start a recording. The choice is kept, shown, and comes back.
-                // Revisit with Pond's own detection (see the roadmap's Detection item).
-                let paused = provider == Config.Device.videoOnly
+                // Video only with its motion from the camera: nothing would start a recording. The choice is kept,
+                // shown, and comes back (with Pond's detection, it records).
+                let paused = provider == Config.Device.videoOnly && !motionFromDetection
                 Toggle(isOn: $homeKitRecording) {
                     Text("Allow recording in the Home app")
                     if paused {
                         let others = CameraProviders.choices(for: saved.device).map(\.name).joined(separator: " or ")
-                        Text("Paused while \(saved.name) is video only: recording needs its motion. It comes back when you choose \(others.isEmpty ? "another way" : others) again.")
+                        Text("Paused while \(saved.name) is video only and its motion is its own: recording needs motion. Choose Pond\u{2019}s detection in Options, or \(others.isEmpty ? "another way" : others) again.")
                     } else {
                         Text("HomeKit Secure Video: your home hub records \(saved.name)\u{2019}s motion to iCloud, where the Home app keeps it. Needs a home hub and iCloud+. Then turn recording on in the Home app, in \(saved.name)\u{2019}s Recording Options.")
                     }
@@ -880,10 +882,57 @@ struct EditCameraSheet: View {
                 if !paused, homeKitRecording, saved.homekitRecording == true, let status = model.homeKitRecording(for: saved) {
                     RecordingSummary(text: RecordingText(status, camera: saved, in: .settings))
                 }
+                // The rest, set once and rarely again: folded away.
+                FoldRow(title: "Options", summary: homeKitOptionsSummary, expanded: $showHomeKitOptions)
+                if showHomeKitOptions {
+                    Group {
+                        homeKitPicture
+                        homeKitMotionRow
+                        Picker(selection: $homeKitViewers) {
+                            ForEach(Array(Config.Camera.homeKitViewerRange), id: \.self) { Text("\($0)").tag($0) }
+                        } label: {
+                            Text("Home app viewers at once")
+                            Text("Each iPhone, iPad, Mac or Apple TV watching \(saved.name) live in the Home app takes one; one more is told the camera is busy. They share one connection to the camera; Pond\u{2019}s own windows don\u{2019}t count.")
+                        }
+                    }
+                    .padding(.leading, FoldRow.indent)
+                }
             }
         } header: {
             Text("HomeKit")
         }
+    }
+
+    /// HomeKit's options, closed: "Camera's stream · Pond's detection".
+    var homeKitOptionsSummary: String {
+        let picture = homeKitVideo == .camera ? "Camera\u{2019}s stream" : "Re-encoded"
+        let motion = motionFromDetection ? "Pond\u{2019}s detection" : "Camera\u{2019}s motion"
+        return "\(picture) \u{00B7} \(motion)"
+    }
+
+    /// Its motion in the Home app (what HomeKit Secure Video records on, and notifies about) follows Pond's detection.
+    var motionFromDetection: Bool { detection && homeKitMotion == .detection }
+
+    /// What sets the camera's motion in the Home app: Pond's detection, or the camera's own motion.
+    var homeKitMotionRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Motion in the Home app")
+            Picker("Motion in the Home app", selection: $homeKitMotion) {
+                Text("Pond\u{2019}s detection").tag(Config.Camera.HomeKitMotion.detection)
+                Text("The camera\u{2019}s own").tag(Config.Camera.HomeKitMotion.camera)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .disabled(!detection)
+            Text(!detection ? "The camera\u{2019}s own: Pond isn\u{2019}t watching \(saved.name) (Detection, below)."
+                 : homeKitMotion == .detection
+                 ? "Only a person, vehicle, bike or animal in \(saved.name)\u{2019}s zones: the Home app records and notifies for those, not for leaves, shadows or headlights."
+                 : "Whatever the camera calls motion. Pond\u{2019}s detection still makes its events here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 2)
     }
 
     /// The picture the Home app gets: the camera's own stream, or one Pond makes, with what each costs.
@@ -1070,14 +1119,6 @@ struct EditCameraSheet: View {
                         Text("Start live view instantly")
                         Text("Keeps the sub-stream open, so live views in the Home app and Pond, and snapshots, start at once instead of after a few seconds. Costs one more connection to the camera and about 0.3 Mbit/s on your network. On by default for a camera in HomeKit.")
                     }
-                    if saved.homekit {
-                        Picker(selection: $homeKitViewers) {
-                            ForEach(Array(Config.Camera.homeKitViewerRange), id: \.self) { Text("\($0)").tag($0) }
-                        } label: {
-                            Text("Home app viewers at once")
-                            Text("Each iPhone, iPad, Mac or Apple TV watching \(saved.name) live in the Home app takes one; one more is told the camera is busy. They share one connection to the camera; Pond\u{2019}s own windows don\u{2019}t count.")
-                        }
-                    }
                 }
                 .padding(.leading, FoldRow.indent)
             }
@@ -1192,6 +1233,7 @@ struct EditCameraSheet: View {
         if homeKitVideo != (saved.homekitVideo ?? .camera) { model.setHomeKitVideo(camera.id, homeKitVideo) }
         if homeKitRecording != (saved.homekitRecording == true) { model.setHomeKitRecording(camera.id, homeKitRecording) }
         if detection != saved.watches || zones != saved.zones { model.setDetection(camera.id, detection, zones: zones) }
+        if homeKitMotion != (saved.homekitMotion ?? .detection) { model.setHomeKitMotion(camera.id, homeKitMotion) }
         // The new way of talking to it, if it answers that way; else it stays as it was, and says so.
         if provider == Config.Device.videoOnly, !saved.isVideoOnly {
             model.setVideoOnly(camera.id)

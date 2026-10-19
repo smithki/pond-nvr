@@ -143,6 +143,15 @@ extension AppModel {
         }
     }
 
+    /// What sets the camera's motion in the Home app. (The running service takes it up with the settings' reload:
+    /// only the camera's accessory starts again.)
+    func setHomeKitMotion(_ id: String, _ motion: Config.Camera.HomeKitMotion) {
+        update(affectsRecorder: false) { config in
+            guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
+            config.cameras[i].homekitMotion = motion == .detection ? nil : motion
+        }
+    }
+
     func setInstantLive(_ id: String, _ on: Bool) {
         guard update(affectsRecorder: false, { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }

@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import Testing
 @testable import NVRApp
+import Watch
 
 @MainActor
 @Suite struct ZoneLabelTests {
@@ -163,4 +164,19 @@ import Testing
 extension Date {
     /// To the whole second (segment files are named to the second).
     func rounded() -> Date { Date(timeIntervalSince1970: timeIntervalSince1970.rounded(.down)) }
+}
+
+@Suite struct BoxesAtAMomentTests {
+    @Test func theLastLookJustBeforeIsShownAndNotOneTooOld() {
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        func s(_ at: Double, _ label: String) -> Sighting {
+            Sighting(camera: "porch", time: t.addingTimeInterval(at), label: label, category: .person, confidence: 0.9,
+                     box: .init(x: 0, y: 0, width: 0.1, height: 0.1))
+        }
+        let all = [s(0, "a"), s(0, "b"), s(0.25, "c"), s(0.5, "d"), s(0.5, "e")]
+        #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(0.3)).map(\.label) == ["c"])
+        #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(0.6)).map(\.label) == ["d", "e"])
+        #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(2)).isEmpty)
+        #expect(TimelineModel.look(in: all, at: t.addingTimeInterval(-1)).isEmpty)
+    }
 }

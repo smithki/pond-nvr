@@ -27,6 +27,9 @@ public final class CameraWatcher: @unchecked Sendable {
     /// Told as events begin and end (for HomeKit's motion sensor, later).
     public var changed: (@Sendable (EventBuilder.Change) -> Void)?
 
+    /// The kinds of thing whose sightings are kept.
+    static let kept: Set<DetectedCategory> = [.person, .vehicle, .bike, .animal, .package, .item]
+
     /// Motion looked for this often.
     static let lookEvery: TimeInterval = 0.2
     /// The model run at most this often, while something moves.
@@ -153,9 +156,18 @@ public final class CameraWatcher: @unchecked Sendable {
         gate.ignored = rules.ignoredCells(columns: gate.columns, rows: gate.rows)
         var lastLook = Date.distantPast, lastDetect = Date.distantPast, lastMotion = Date.distantPast
         var told = false
+        // Each picture's time is when the camera took it (its RTP time, by the camera's sender reports), as the
+        // recorder places the recording: so a box drawn over the recording is on the picture it was found in, not
+        // the network's and the decoder's second or so later. (The Mac's clock until the first report.)
+        var clock = RTPClock(rate: source.video.clockRate > 0 ? source.video.clockRate : 90000)
+        var toldDelay = false
         while !isStopped, !PrivacyState.shared.isPrivate(camera) {
             guard let packet = try source.next(timeout: 1) else {
                 apply(builder.quiet(at: Date()))
+                continue
+            }
+            if packet.channel == CameraSession.videoChannel + 1 {
+                clock.noteRTCP(packet.data)
                 continue
             }
             guard packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { continue }
@@ -168,7 +180,11 @@ public final class CameraWatcher: @unchecked Sendable {
                     say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")
                     told = true
                 }
-                let now = Date()
+                let now = clock.wallTime(unit.timestamp).map { Date(timeIntervalSince1970: $0) } ?? Date()
+                if !toldDelay, clock.isSynchronized {
+                    say(String(format: "pictures reach detection %.2f s after the camera takes them", Date().timeIntervalSince(now)))
+                    toldDelay = true
+                }
                 guard now.timeIntervalSince(lastLook) >= Self.lookEvery else { continue }
                 lastLook = now
                 let mask = motion(in: picture)
@@ -196,6 +212,13 @@ public final class CameraWatcher: @unchecked Sendable {
                     counted.first { $0.0 == d }?.1 ?? []
                 }
                 apply(builder.update(sightings, at: now), picture: picture)
+                // Kept, for drawing over the recording when it's played back: what matters, counted or not (an
+                // ignored one shows the zones at work), each with the track it was followed as.
+                store?.save(found.filter { Self.kept.contains($0.category) }.map { d in
+                    Sighting(camera: camera, time: now, label: d.label, category: d.category, confidence: d.confidence, box: d.box,
+                             track: sightings.first { $0.track.box == d.box }?.track.id,
+                             counted: counted.contains { $0.0 == d })
+                })
                 let items = counted.filter { $0.0.category == .item }
                     .map { (detection: $0.0, zones: $0.1, moved: mask.overlaps(($0.0.box.x, $0.0.box.y, $0.0.box.width, $0.0.box.height))) }
                 for event in leftItems.update(items, people: found.filter { $0.category == .person }, at: now) {

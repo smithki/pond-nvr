@@ -4,6 +4,7 @@
 import AVFoundation
 import NVRCore
 import SwiftUI
+import Watch
 
 struct TimelineView: View {
     @Environment(AppModel.self) private var model
@@ -52,6 +53,11 @@ struct TimelineView: View {
             ZStack {
                 Color.black
                 PlayerLayerView(player: timeline.player)
+                // What was found, boxed (the recording only: live has no kept sightings yet).
+                if timeline.showBoxes, !timeline.isLive, let id = timeline.camera, let at = timeline.playhead {
+                    DetectionBoxes(boxes: timeline.boxes(at: at), aspect: CameraAspect.known(id) ?? 16.0 / 9.0)
+                        .allowsHitTesting(false)
+                }
                 if timeline.isLive, let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
                     TimelineLive(camera: camera).id(camera.id)
                 }
@@ -343,6 +349,15 @@ struct TimelineControls: View {
                     .disabled(timeline.nearPresent)
                     .opacity(timeline.nearPresent ? 0.4 : 1)
                     .help(timeline.nearPresent ? "Live and the last few minutes play in real time" : "Playback speed")
+                    // Boxes round what was found, over the recording.
+                    Button { timeline.showBoxes.toggle() } label: {
+                        Image(systemName: "viewfinder")
+                            .symbolVariant(timeline.showBoxes ? .fill : .none)
+                            .foregroundStyle(timeline.showBoxes ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                            .frame(width: 28)
+                    }
+                    .keyboardShortcut("b", modifiers: [])
+                    .help(timeline.showBoxes ? "Hide the boxes round what was found (B)" : "Show boxes round what was found, with how sure (B)")
                     // Sound: for recordings and live alike, off until turned on.
                     Button { timeline.muted.toggle() } label: {
                         Image(systemName: timeline.muted || !timeline.hasAudio ? "speaker.slash.fill" : "speaker.wave.2.fill")
@@ -1864,5 +1879,40 @@ struct EndOfRecording: View {
         .glassEffect(.regular, in: .capsule)
         .environment(\.colorScheme, .dark)
         .animation(.snappy(duration: 0.25), value: ready)
+    }
+}
+
+/// Boxes over the video round what the model found, as the service saw it: each in its kind's colour with what it
+/// is and how sure; one the camera's zones ignored (on a TV, say) dimmed and dashed.
+struct DetectionBoxes: View {
+    let boxes: [Sighting]
+    /// The video's shape, to place the boxes on the picture as it's fitted in the view.
+    let aspect: Double
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = min(geometry.size.width, geometry.size.height * aspect), height = width / aspect
+            let picture = CGRect(x: (geometry.size.width - width) / 2, y: (geometry.size.height - height) / 2, width: width, height: height)
+            ForEach(Array(boxes.enumerated()), id: \.offset) { _, s in
+                let rect = CGRect(x: picture.minX + s.box.x * picture.width, y: picture.minY + s.box.y * picture.height,
+                                  width: s.box.width * picture.width, height: s.box.height * picture.height)
+                let color = TimelineEvent.Kind(s.category).color
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(color, style: StrokeStyle(lineWidth: 2, dash: s.counted ? [] : [6, 4]))
+                    Text("\(s.label.prefix(1).uppercased() + s.label.dropFirst()) \(Int((s.confidence * 100).rounded()))%")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(color, in: RoundedRectangle(cornerRadius: 3))
+                        .fixedSize()
+                        .offset(y: rect.minY - picture.minY > 18 ? -18 : 0)
+                }
+                .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+                .opacity(s.counted ? 1 : 0.55)
+                .position(x: rect.midX, y: rect.midY)
+            }
+        }
     }
 }

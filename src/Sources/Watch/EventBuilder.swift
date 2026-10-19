@@ -117,10 +117,20 @@ public struct EventBuilder: Sendable {
     /// A picture's tracks taken in (from the tracker); what changed.
     public mutating func update(_ sightings: [(track: Track, best: Bool)], at time: Date) -> [Change] {
         var changes: [Change] = []
-        let counting = sightings.filter { Self.important.contains($0.track.category) && $0.track.moved && $0.track.seen >= minimumSightings }
+        // What counts: something that matters, seen more than once, and moving lately (a car parked since before
+        // isn't part of anything, however long it's in view).
+        let counting = sightings.filter {
+            Self.important.contains($0.track.category) && $0.track.seen >= minimumSightings
+                && $0.track.lastMoved.map { time.timeIntervalSince($0) <= stillEnd } == true
+        }
         let moving = counting.filter { $0.track.lastMoved == time }
-        if !counting.isEmpty { lastSeen = time }
-        if !moving.isEmpty { lastMoved = time }
+        // What keeps an event going: its kind, or a more telling one (cars passing while someone's at the door are
+        // in the event, but don't keep it going once they've gone).
+        if let event = current {
+            let keeping = counting.filter { Self.rank($0.track.category) <= Self.rank(event.category) }
+            if !keeping.isEmpty { lastSeen = time }
+            if keeping.contains(where: { $0.track.lastMoved == time }) { lastMoved = time }
+        }
         changes += quiet(at: time)
         guard !counting.isEmpty else { return changes }
         if current == nil {
@@ -130,6 +140,8 @@ public struct EventBuilder: Sendable {
                 current = event
                 (peak, peakByCategory, votes) = kept
                 ended = nil
+                lastSeen = time
+                lastMoved = time
                 changes.append(.resumed(event))
             } else {
                 let first = moving.max { Self.rank($0.track.category) > Self.rank($1.track.category) }!
@@ -140,11 +152,14 @@ public struct EventBuilder: Sendable {
                 votes = [:]
                 tracks = []
                 ended = nil
+                lastSeen = time
+                lastMoved = time
                 changes.append(.began(current!))
             }
         }
         guard var event = current else { return changes }
-        event.end = time
+        // (It runs as long as what keeps it going is seen.)
+        event.end = max(event.end, lastSeen ?? time)
         var better = false
         // How many of each at once (one person found as two tracks for a moment counts once at most moments).
         for (label, n) in counting.reduce(into: [String: Int](), { $0[$1.track.label, default: 0] += 1 }) {
@@ -177,6 +192,9 @@ public struct EventBuilder: Sendable {
     static func resumes(_ event: CameraEvent, tracks: Set<Int>, by moving: [(track: Track, best: Bool)], at time: Date,
                         within: TimeInterval) -> Bool {
         if moving.contains(where: { tracks.contains($0.track.id) }) { return true }
+        // The same kind soon after: someone, or an animal, lost from view a moment. Not vehicles (a street's traffic
+        // is car after car, each its own).
+        guard event.category != .vehicle else { return false }
         return time.timeIntervalSince(event.end) <= within && moving.contains { $0.track.category == event.category }
     }
 

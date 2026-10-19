@@ -133,3 +133,23 @@ final class MemoryRecords: HomeKitRecords, @unchecked Sendable {
         #expect(host.record(for: "porch").setupCode == first.setupCode)
     }
 }
+
+@Suite struct DetectionMotionTests {
+    @Test func anEventBeginningSetsTheMotionSensor() {
+        let camera = CameraAccessory(name: "Porch", details: AccessoryDetails(device: nil, cameraID: "porch"))
+        let hold = MotionHold(accessory: camera, name: "Porch") { _ in }
+        #expect(camera.motion.value == .bool(false))
+        hold.set(true)
+        #expect(camera.motion.value == .bool(true))
+    }
+
+    @Test func detectionIsTheDefaultWhereTheCameraIsWatched() {
+        var camera = Config.Camera(id: "porch", name: "Porch", main: "rtsp://h/main", sub: "rtsp://h/sub", username: "u")
+        #expect(camera.homeKitMotionFromDetection)
+        camera.homekitMotion = .camera
+        #expect(!camera.homeKitMotionFromDetection)
+        camera.homekitMotion = nil
+        camera.detection = false
+        #expect(!camera.homeKitMotionFromDetection)
+    }
+}

@@ -29,6 +29,11 @@ public final class EventStore: @unchecked Sendable {
                 labels TEXT NOT NULL DEFAULT '{}', confidence REAL NOT NULL DEFAULT 0, snapshot TEXT, box TEXT, summary TEXT,
                 ongoing INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS events_by_start ON events (start);
+            CREATE TABLE IF NOT EXISTS sightings (
+                camera TEXT NOT NULL, time REAL NOT NULL, label TEXT NOT NULL, category TEXT NOT NULL,
+                confidence REAL NOT NULL, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
+                track INTEGER, counted INTEGER NOT NULL DEFAULT 1);
+            CREATE INDEX IF NOT EXISTS sightings_by_time ON sightings (camera, time);
             """, nil, nil, nil) == SQLITE_OK
             guard made else { return nil }
             // Added since the table was first made (fails, harmlessly, when it's there).
@@ -62,16 +67,48 @@ public final class EventStore: @unchecked Sendable {
         queue.async { [self] in run("UPDATE events SET ongoing = 0 WHERE ongoing = 1", []) }
     }
 
-    /// Events older than `days` let go (their pictures are swept with the events folder).
+    /// What one look of the model found (things that matter only), each as the zones took it: kept for drawing
+    /// over the recording when it's played back. One transaction a look.
+    public func save(_ found: [Sighting]) {
+        guard !found.isEmpty else { return }
+        queue.async { [self] in
+            run("BEGIN", [])
+            for s in found {
+                run("INSERT INTO sightings (camera, time, label, category, confidence, x, y, w, h, track, counted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [s.camera, s.time.timeIntervalSince1970, s.label, s.category.rawValue, s.confidence, s.box.x, s.box.y,
+                     s.box.width, s.box.height, s.track, s.counted ? 1 : 0])
+            }
+            run("COMMIT", [])
+        }
+    }
+
+    /// Events (and sightings) older than `days` let go (their pictures are swept with the events folder).
     public func prune(days: Int, now: Date = Date()) {
         let before = now.addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        queue.async { [self] in run("DELETE FROM events WHERE start < ?", [before]) }
+        queue.async { [self] in
+            run("DELETE FROM events WHERE start < ?", [before])
+            run("DELETE FROM sightings WHERE time < ?", [before])
+        }
     }
 
     /// Waits for the writes so far.
     public func flush() { queue.sync {} }
 
     // MARK: Reading
+
+    /// One camera's sightings within `from`…`to`, in time order.
+    public func sightings(camera: String, from: Date, to: Date) -> [Sighting] {
+        queue.sync {
+            rows("SELECT time, label, category, confidence, x, y, w, h, track, counted FROM sightings WHERE camera = ? AND time >= ? AND time < ? ORDER BY time",
+                 [camera, from.timeIntervalSince1970, to.timeIntervalSince1970]) { row in
+                guard let label = row.text(1), let category = row.text(2).flatMap(DetectedCategory.init) else { return nil }
+                return Sighting(camera: camera, time: Date(timeIntervalSince1970: row.double(0)), label: label, category: category,
+                                confidence: row.double(3),
+                                box: .init(x: row.double(4), y: row.double(5), width: row.double(6), height: row.double(7)),
+                                track: row.isNull(8) ? nil : row.int(8), counted: row.int(9) != 0)
+            }
+        }
+    }
 
     public struct Kept: Sendable, Equatable {
         public var event: CameraEvent
@@ -104,6 +141,7 @@ public final class EventStore: @unchecked Sendable {
         func text(_ i: Int32) -> String? { sqlite3_column_text(statement, i).map { String(cString: $0) } }
         func double(_ i: Int32) -> Double { sqlite3_column_double(statement, i) }
         func int(_ i: Int32) -> Int { Int(sqlite3_column_int64(statement, i)) }
+        func isNull(_ i: Int32) -> Bool { sqlite3_column_type(statement, i) == SQLITE_NULL }
     }
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -138,5 +176,30 @@ public final class EventStore: @unchecked Sendable {
             if let item = make(Row(statement: statement)) { out.append(item) }
         }
         return out
+    }
+}
+
+/// Something the model found in one look, as kept: what, how sure, where (fractions of the picture), the track it
+/// was followed as, and whether the camera's zones counted it (an ignored one: on a TV, say).
+public struct Sighting: Sendable, Equatable {
+    public var camera: String
+    public var time: Date
+    public var label: String
+    public var category: DetectedCategory
+    public var confidence: Double
+    public var box: Detection.Box
+    public var track: Int?
+    public var counted: Bool
+
+    public init(camera: String, time: Date, label: String, category: DetectedCategory, confidence: Double, box: Detection.Box,
+                track: Int? = nil, counted: Bool = true) {
+        self.camera = camera
+        self.time = time
+        self.label = label
+        self.category = category
+        self.confidence = confidence
+        self.box = box
+        self.track = track
+        self.counted = counted
     }
 }

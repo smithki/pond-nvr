@@ -153,6 +153,12 @@ struct EventSource: Sendable {
         }
     }
 
+    /// What the service found in a camera's pictures within `from`…`to` (for boxes over the recording).
+    func sightings(camera: String, from: Date, to: Date) -> [Sighting] {
+        guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }
+        return store.sightings(camera: camera, from: from, to: to)
+    }
+
     /// When each camera was private within `from`…`to`.
     func privateSpans(from: Date, to: Date) -> [String: [ClosedRange<Date>]] {
         guard FileManager.default.fileExists(atPath: database), let store = HealthStore(path: database, readOnly: true) else { return [:] }

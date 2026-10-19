@@ -104,6 +104,11 @@ public final class HomeKitHost: @unchecked Sendable {
     public var statusChanged: (@Sendable (HomeKitStatus) -> Void)?
     /// Called with the camera's id when a doorbell in HomeKit is pressed (the service keeps it as an event).
     public var pressed: (@Sendable (String) -> Void)?
+    /// Whether a camera's motion sensor follows Pond's detection (its events, told through `detected`) rather
+    /// than the camera's own motion: set by the service, which knows whether detection runs.
+    public var motionFromDetection: @Sendable (Config.Camera) -> Bool = { _ in false }
+    /// Each camera's motion sensor, held on a little after the last motion.
+    private var motions: [String: MotionHold] = [:]
     private var status = HomeKitStatus()
     /// Each camera's event watcher and privacy observer, by camera (so one can be stopped alone).
     private var watchers: [String: CameraEvents] = [:]
@@ -173,6 +178,7 @@ public final class HomeKitHost: @unchecked Sendable {
             let gone = running.first { $0.camera.id == id }
             running.removeAll { $0.camera.id == id }
             defer { status.cameras[id] = nil; status.updated = Date() }
+            motions[id] = nil
             return (gone, watchers.removeValue(forKey: id), privacyObservers.removeValue(forKey: id))
         }
         events?.stop()
@@ -218,10 +224,11 @@ public final class HomeKitHost: @unchecked Sendable {
                              reencode: camera.reencodesForHomeKit, log: log)
         }
         let doorbell = camera.kind == .doorbell
-        // HomeKit Secure Video, for a camera set to record in HomeKit: its state kept with the record.
-        // Not while it is video only: nothing would start a recording (its choice stays, and comes back).
-        // Revisit with Pond's own detection, which could start recordings for a video-only camera too.
-        let recording = camera.homekitRecording == true && !camera.isVideoOnly
+        // HomeKit Secure Video, for a camera set to record in HomeKit: its state kept with the record. Not while it
+        // is video only with its motion from the camera (nothing would start a recording: its choice stays, and
+        // comes back); with Pond's detection, a video-only camera records too.
+        let fromDetection = motionFromDetection(camera)
+        let recording = camera.homekitRecording == true && (!camera.isVideoOnly || fromDetection)
             ? RecordingController(options: RecordingOptions(doorbell: doorbell), state: record.recording,
                                   source: (camera.main, camera.username, password),
                                   log: Self.labelled(camera.name, log)) : nil
@@ -333,7 +340,11 @@ public final class HomeKitHost: @unchecked Sendable {
         }
         log("HomeKit: \(camera.name) is \(record.isPaired ? "in the Home app" : "waiting to be added to the Home app")")
 
-        let seesMotion = watchEvents(camera, password: password, accessory: accessory)
+        let motion = MotionHold(accessory: accessory, name: camera.name, log: log)
+        lock.withLock { motions[id] = motion }
+        let seesMotion = watchEvents(camera, password: password, accessory: accessory, motion: fromDetection ? nil : motion)
+            || fromDetection
+        if fromDetection { log("HomeKit: \(camera.name)'s motion is Pond's detection (people, vehicles, bikes, animals)") }
         recording?.report { $0.motion = seesMotion }
 
         // Remember the port once known, so the camera comes back where controllers expect it.
@@ -357,10 +368,13 @@ public final class HomeKitHost: @unchecked Sendable {
     /// HomeKit Secure Video, and notifies about); a doorbell's press rings in the Home app.
     /// Whether the camera's provider can tell motion at all.
     @discardableResult
-    private func watchEvents(_ camera: Config.Camera, password: String, accessory: CameraAccessory) -> Bool {
+    /// `motion`: the sensor the camera's own motion sets; nil when Pond's detection sets it instead (a doorbell's
+    /// button is still watched).
+    private func watchEvents(_ camera: Config.Camera, password: String, accessory: CameraAccessory, motion: MotionHold?) -> Bool {
         let id = camera.id, name = camera.name, log = self.log, doorbell = camera.kind == .doorbell
+        guard motion != nil || doorbell else { return false }
         if camera.isVideoOnly {
-            log("HomeKit: \(name) is set to video only: its motion\(doorbell ? " and button" : "") aren't watched")
+            log("HomeKit: \(name) is set to video only: its \(motion == nil ? "button isn\u{2019}t" : "motion\(doorbell ? " and button" : "") aren\u{2019}t") watched")
             if doorbell { update(id) { $0.doorbell = .videoOnly } }
             return false
         }
@@ -372,10 +386,9 @@ public final class HomeKitHost: @unchecked Sendable {
             }
             return false
         }
-        let motion = MotionHold(accessory: accessory, name: name, log: log)
         // Private: no motion (nothing watches the camera). A doorbell still rings: someone is at the door.
         let privacy = self.privacy
-        events.start(motion: { moving in motion.set(moving && !privacy.isPrivate(id)) }, pressed: { [weak accessory] in
+        events.start(motion: { moving in motion?.set(moving && !privacy.isPrivate(id)) }, pressed: { [weak accessory] in
             guard doorbell else { return }
             log("HomeKit: \(name) rang")
             accessory?.ring()
@@ -386,6 +399,12 @@ public final class HomeKitHost: @unchecked Sendable {
         })
         lock.withLock { watchers[id] = events }
         return true
+    }
+
+    /// Pond's detection on a camera whose motion sensor follows it: an event began (or took up again), or ended.
+    public func detected(_ camera: String, _ active: Bool) {
+        guard let motion = lock.withLock({ motions[camera] }) else { return }
+        motion.set(active && !privacy.isPrivate(camera))
     }
 
     public func stop() {

@@ -153,7 +153,7 @@ struct RecordingText: Equatable {
         }
         if !r.motion, camera.isVideoOnly {
             self.init(title: "Won\u{2019}t record", attention: true,
-                      detail: "\(name) is set to video only, so Pond doesn\u{2019}t watch its motion, which is what starts a recording. Change it \(HomeKitText.settings("Device", from: place)).")
+                      detail: "\(name) is set to video only, so Pond doesn\u{2019}t watch its own motion, which is what starts a recording. Choose Pond\u{2019}s detection for its motion in the Home app, or change how Pond talks to it \(HomeKitText.settings("Device", from: place)).")
         } else if !r.motion {
             self.init(title: "Won\u{2019}t record", attention: true,
                       detail: "Pond can\u{2019}t see motion from \(name), and motion is what starts a recording.")
