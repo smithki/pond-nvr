@@ -79,3 +79,21 @@ import Testing
         #expect(spans["yard"] == nil)
     }
 }
+
+@Suite struct PrivateSpanQueryTests {
+    @Test func readsTheStateBeforeAndTheChangesWithin() throws {
+        let path = NSTemporaryDirectory() + "pond-privacy-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(HealthStore(path: path))
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        for (camera, at, kind) in [("porch", -9000.0, HealthIncident.Kind.madePrivate), ("porch", -8000, .madePublic),
+                                   ("porch", -500, .madePrivate),                   // private since before the window
+                                   ("porch", 100, .madePublic), ("drive", 200, .madePrivate)] {
+            store.record(HealthIncident(camera: camera, time: t.addingTimeInterval(at), kind: kind))
+        }
+        store.flush()
+        let spans = store.privateSpans(from: t, to: t.addingTimeInterval(1000))
+        #expect(spans["porch"] == [t ... t.addingTimeInterval(100)])
+        #expect(spans["drive"] == [t.addingTimeInterval(200) ... t.addingTimeInterval(1000)])
+    }
+}

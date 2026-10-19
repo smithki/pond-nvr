@@ -29,6 +29,7 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
             PRAGMA journal_mode = WAL;
             CREATE TABLE IF NOT EXISTS incidents (camera TEXT NOT NULL, time REAL NOT NULL, kind TEXT NOT NULL, detail TEXT);
             CREATE INDEX IF NOT EXISTS incidents_by_time ON incidents (time);
+            CREATE INDEX IF NOT EXISTS incidents_by_kind ON incidents (kind, time);
             CREATE TABLE IF NOT EXISTS samples (
                 camera TEXT NOT NULL, start REAL NOT NULL, flowing REAL NOT NULL DEFAULT 0, frames INTEGER NOT NULL DEFAULT 0,
                 keyframes INTEGER NOT NULL DEFAULT 0, received INTEGER NOT NULL DEFAULT 0, lost INTEGER NOT NULL DEFAULT 0,
@@ -97,14 +98,20 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
     }
 
     /// When each camera was private, within `from`…`to`: from each time it was made private to when it was made
-    /// public again (or `to`, if it still is).
+    /// public again (or `to`, if it still is). Reads only what it needs, however long the history: each camera's
+    /// last change before `from` (whether it was private then), and the changes within.
     public func privateSpans(from: Date, to: Date) -> [String: [ClosedRange<Date>]] {
-        let changes = queue.sync {
-            rows("SELECT camera, time, kind FROM incidents WHERE kind IN ('madePrivate', 'madePublic') AND time < ? ORDER BY time",
-                 [to.timeIntervalSince1970]) { row -> (String, Date, Bool)? in
+        let changes = queue.sync { () -> [(String, Date, Bool)] in
+            func change(_ row: Row) -> (String, Date, Bool)? {
                 guard let camera = row.text(0) else { return nil }
                 return (camera, Date(timeIntervalSince1970: row.double(1)), row.text(2) == "madePrivate")
             }
+            // (With MAX in a GROUP BY, SQLite gives the other columns of the row with the latest time.)
+            let before = rows("SELECT camera, MAX(time), kind FROM incidents WHERE kind IN ('madePrivate', 'madePublic') "
+                + "AND time < ? GROUP BY camera", [from.timeIntervalSince1970], change)
+            let within = rows("SELECT camera, time, kind FROM incidents WHERE kind IN ('madePrivate', 'madePublic') "
+                + "AND time >= ? AND time < ? ORDER BY time", [from.timeIntervalSince1970, to.timeIntervalSince1970], change)
+            return before.sorted { $0.1 < $1.1 } + within
         }
         return Self.spans(changes, from: from, to: to)
     }
