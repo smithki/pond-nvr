@@ -1989,19 +1989,21 @@ struct DetectionBoxes: View {
                 let rect = CGRect(x: picture.minX + s.box.x * picture.width, y: picture.minY + s.box.y * picture.height,
                                   width: s.box.width * picture.width, height: s.box.height * picture.height)
                 let color = TimelineEvent.Kind(s.category).color
-                ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(color, style: StrokeStyle(lineWidth: 2, dash: s.counted ? [] : [6, 4]))
-                    Text("\(s.label.prefix(1).uppercased() + s.label.dropFirst()) \(Int((s.confidence * 100).rounded()))%")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(color, in: RoundedRectangle(cornerRadius: 3))
-                        .fixedSize()
-                        .offset(y: rect.minY - picture.minY > 18 ? -18 : 0)
-                }
-                .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(color, style: StrokeStyle(lineWidth: 2, dash: s.counted ? [] : [6, 4]))
+                    .frame(width: rect.width, height: rect.height)
+                    // Its label over it, not beside it in a stack: a label wider than the box (a person, in a small
+                    // picture) mustn't make the box as wide.
+                    .overlay(alignment: .topLeading) {
+                        Text("\(s.label.prefix(1).uppercased() + s.label.dropFirst()) \(Int((s.confidence * 100).rounded()))%")
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(color, in: RoundedRectangle(cornerRadius: 3))
+                            .fixedSize()
+                            .offset(y: rect.minY - picture.minY > 18 ? -18 : 0)
+                    }
                 .opacity(s.counted ? 1 : 0.55)
                 .position(x: rect.midX, y: rect.midY)
             }

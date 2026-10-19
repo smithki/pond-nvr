@@ -154,6 +154,30 @@ import Testing
         store.flush()
         #expect(store.events(since: .distantPast).isEmpty)
     }
+
+    /// Deleted, it stays deleted: the service, still at it (going on, or taken up again), doesn't write it back.
+    @Test func aDeletedEventIsntWrittenBack() throws {
+        let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        var event = CameraEvent(id: "e1", camera: "porch", start: t0, end: t0, category: .person, labels: ["person": 1],
+                                confidence: 0.8, snapshot: "porch/e1.jpg")
+        let other = CameraEvent(id: "e2", camera: "porch", start: t0, end: t0, category: .animal, labels: ["cat": 1], confidence: 0.7)
+        store.save(event, ongoing: true)
+        store.save(other, ongoing: false)
+        store.flush()
+        #expect(store.delete(["e1"], now: t0) == ["porch/e1.jpg"])
+        event.end = t0.addingTimeInterval(5)
+        store.save(event, ongoing: false)
+        store.flush()
+        #expect(store.events(since: .distantPast).map(\.event.id) == ["e2"])
+        // The note's let go a day on (the service long done with it).
+        store.prune(days: 30, now: t0.addingTimeInterval(2 * 86400))
+        store.save(event, ongoing: false)
+        store.flush()
+        #expect(Set(store.events(since: .distantPast).map(\.event.id)) == ["e1", "e2"])
+    }
 }
 
 @Suite struct ZoneTests {

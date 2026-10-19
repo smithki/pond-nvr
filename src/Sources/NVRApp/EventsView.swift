@@ -37,6 +37,11 @@ struct EventsView: View {
     @State private var atTop = true
     /// Events just come in (since the last read): they glow a moment, in their kind's colour.
     @State private var fresh: Set<String> = []
+    /// The event the user's asked to delete (confirming), and those deleted (a read under way as they were may
+    /// still have them).
+    @State private var deleting: TimelineEvent?
+    @State private var deleted: Set<String> = []
+    @Environment(\.openSettings) private var openSettingsWindow
 
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
     /// How far back events are kept.
@@ -60,7 +65,10 @@ struct EventsView: View {
         VStack(alignment: .leading, spacing: 12) {
             filters
             HStack(alignment: .top, spacing: 14) {
-                OnScreenRail(events: shown, days: keptDays, onScreen: onScreen) { hour in
+                OnScreenRail(events: shown, days: keptDays, onScreen: onScreen, retention: {
+                    model.settingsTab = .retention
+                    openSettingsWindow()
+                }) { hour in
                     // The first card at or after that hour (newest first: the last one before the next hour).
                     let next = hour.addingTimeInterval(3600)
                     if let target = shown.last(where: { $0.start < next && $0.start >= hour }) ?? shown.first(where: { $0.start < next }) {
@@ -77,7 +85,7 @@ struct EventsView: View {
                     ZStack {
                         EventDetail(event: selected, camera: name(selected.camera), recordings: model.config?.storage.recordingsPath ?? "",
                                     source: EventSource(config: model.config),
-                                    watch: { watch(selected) }, close: { panel(nil) },
+                                    watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
                                     earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
                                     later: neighbour(of: selected, later: true).map { e in { choose(e) } })
                             .id(selected.id)
@@ -90,18 +98,30 @@ struct EventsView: View {
         }
         .padding(16)
         .onChange(of: selected?.id) { _, id in model.eventsState.selected = id }
+        .onKeyPress(keys: [.delete, .deleteForward]) { _ in
+            guard let selected else { return .ignored }
+            deleting = selected
+            return .handled
+        }
+        .confirmationDialog("Delete this event?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            presenting: deleting) { event in
+            Button("Delete", role: .destructive) { delete(event) }
+        } message: { _ in
+            Text("Its picture is deleted too. The recording it's in is kept.")
+        }
         .onKeyPress(.escape) {
             guard selected != nil else { return .ignored }
             panel(nil)
             return .handled
         }
+        // As the grid has them: newer to the left, older to the right.
         .onKeyPress(.leftArrow) {
-            guard let selected, let e = neighbour(of: selected, later: false) else { return .ignored }
+            guard let selected, let e = neighbour(of: selected, later: true) else { return .ignored }
             choose(e)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            guard let selected, let e = neighbour(of: selected, later: true) else { return .ignored }
+            guard let selected, let e = neighbour(of: selected, later: false) else { return .ignored }
             choose(e)
             return .handled
         }
@@ -154,6 +174,22 @@ struct EventsView: View {
         request = GridScroll(kind: .centre(event.id, always: false))
     }
 
+    /// Deleted: gone from the grid (the others closing up), the panel on to the one after it (older; or before, at
+    /// the end), or closed.
+    func delete(_ event: TimelineEvent) {
+        deleted.insert(event.id)
+        if selected?.id == event.id {
+            if let next = neighbour(of: event, later: false) ?? neighbour(of: event, later: true) {
+                choose(next)
+            } else {
+                panel(nil)
+            }
+        }
+        withAnimation(EventGrid.panelAnimation) { events.removeAll { $0.id == event.id } }
+        let source = EventSource(config: model.config)
+        Task.detached { source?.delete([event.id]) }
+    }
+
     func watch(_ event: TimelineEvent) {
         model.timelineJump = TimelineJump(camera: event.camera, time: event.start)
         model.mode = .timeline
@@ -164,7 +200,7 @@ struct EventsView: View {
         let from = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-Double(keptDays - 1) * 86400)
         let to = Date().addingTimeInterval(60)
         let found = await Task.detached { source.events(from: from, to: to) }.value
-            .filter { $0.kind != .privacy }
+            .filter { $0.kind != .privacy && !deleted.contains($0.id) }
             .sorted { $0.start > $1.start }
         if found != events {
             // New ones (after the first read) come in smoothly, the others making room, and glow a moment.
@@ -242,7 +278,7 @@ struct EventsView: View {
                          focus: focus, selected: selected?.id, fresh: fresh, request: $request,
                          name: name,
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
-                         open: { watch($0) },
+                         open: { watch($0) }, delete: { deleting = $0 },
                          onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 })
         }
     }
@@ -272,13 +308,14 @@ struct OnScreenRail: View {
     let events: [TimelineEvent]
     let days: Int
     let onScreen: GridOnScreen
+    let retention: () -> Void
     let go: (Date) -> Void
 
     var body: some View {
         let shown = events.filter { onScreen.cards.contains($0.id) }
         let starts = shown.map(\.start)
         ActivityRail(events: events, days: days, onScreen: Set(shown.map { Calendar.current.startOfDay(for: $0.start) }),
-                     window: starts.min().flatMap { low in starts.max().map { low ... $0 } }, go: go)
+                     window: starts.min().flatMap { low in starts.max().map { low ... $0 } }, retention: retention, go: go)
     }
 }
 
@@ -293,6 +330,8 @@ struct ActivityRail: View {
     let onScreen: Set<Date>
     /// The time the grid shows now.
     var window: ClosedRange<Date>?
+    /// Opens the retention settings (how many days there are is theirs).
+    let retention: () -> Void
     let go: (Date) -> Void
 
     nonisolated static let label = 46.0, labelGap = 6.0, pad = 2.0, cell = 5.0, gap = 1.0
@@ -307,6 +346,8 @@ struct ActivityRail: View {
     @State private var hovered: (back: Int, h: Int, count: Int, hour: Date)?
     /// How far the rail is scrolled (the hover label's drawn over it, not in it, so nothing cuts it off).
     @State private var offset = 0.0
+    /// The hours outlined as drawn: following what's in view, animated; shown first, grown out from its middle.
+    @State private var drawn: RailSpan?
 
     /// Events an hour, by the hour's start.
     var counts: [Date: Int] {
@@ -324,15 +365,14 @@ struct ActivityRail: View {
         ScrollView {
             ZStack(alignment: .topLeading) {
                 // The hours in view: under the cells (a hovered cell grows over it).
-                RailWindow(start: span?.start ?? 0, end: span?.end ?? 0, days: days)
+                RailWindow(start: drawn?.start ?? 0, end: drawn?.end ?? 0, days: days)
                     .fill(.white.opacity(0.12))
                     .overlay {
-                        RailWindow(start: span?.start ?? 0, end: span?.end ?? 0, days: days)
+                        RailWindow(start: drawn?.start ?? 0, end: drawn?.end ?? 0, days: days)
                             .stroke(.white.opacity(0.85), lineWidth: 1.5)
                     }
                     .opacity(span == nil ? 0 : 1)
-                    .animation(.snappy(duration: 0.35), value: span?.start)
-                    .animation(.snappy(duration: 0.35), value: span?.end)
+                    .animation(.easeOut(duration: 0.2), value: span == nil)
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: Self.rowGap) {
                     ForEach(0 ..< days, id: \.self) { back in
@@ -344,9 +384,24 @@ struct ActivityRail: View {
             }
             .frame(width: Self.width, alignment: .topLeading)
             .padding(.vertical, Self.top)
+            // Why it goes back as far as it does, and where that's changed.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Events are kept \(days == 1 ? "1 day" : "\(days) days").")
+                    .foregroundStyle(.secondary)
+                Button("Retention Settings\u{2026}", action: retention)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
+            .font(.caption2)
+            .frame(width: Self.rowWidth - Self.cellsX + Self.pad, alignment: .leading)
+            .padding(.leading, Self.cellsX - Self.pad)
+            .padding(.top, 6)
+            .padding(.bottom, 12)
         }
         .scrollIndicators(.never)
         .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, y in offset = y }
+        .onChange(of: span, initial: true) { _, span in follow(span) }
         // The hovered hour, said beside it at once: over the rail (past its edge if need be), not cut off by it.
         .overlay(alignment: .topLeading) {
             if let hovered {
@@ -364,6 +419,20 @@ struct ActivityRail: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: hovered?.hour)
+    }
+
+    /// The outline to the hours now in view: moved there; or, the first time there are some, put at their middle at
+    /// once and grown out from it.
+    func follow(_ span: RailSpan?) {
+        guard let span else { return }
+        guard drawn != nil else {
+            let middle = ((span.start + span.end) / 2).rounded(.down)
+            drawn = RailSpan(start: middle, end: middle)
+            // (Next turn of the run loop: drawn at its middle first, so there's something to grow from.)
+            DispatchQueue.main.async { withAnimation(.snappy(duration: 0.45)) { drawn = span } }
+            return
+        }
+        withAnimation(.snappy(duration: 0.35)) { drawn = span }
     }
 
     func row(_ back: Int, day: Date, counts: [Date: Int], busiest: Double) -> some View {
@@ -397,7 +466,7 @@ struct ActivityRail: View {
 
     /// The hours `window` spans, as a stretch of the rail's one line of hours (counted from the oldest day's first
     /// hour): its first hour, and past its last.
-    static func span(_ window: ClosedRange<Date>?, today: Date, days: Int) -> (start: Double, end: Double)? {
+    static func span(_ window: ClosedRange<Date>?, today: Date, days: Int) -> RailSpan? {
         guard let window else { return nil }
         let calendar = Calendar.current
         let oldest = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
@@ -406,8 +475,14 @@ struct ActivityRail: View {
             return (hour.timeIntervalSince(oldest) / 3600).rounded()
         }
         let start = max(0, index(window.lowerBound)), end = min(Double(days * 24), index(window.upperBound) + 1)
-        return end > start ? (start, end) : nil
+        return end > start ? RailSpan(start: start, end: end) : nil
     }
+}
+
+/// A stretch of the rail's one line of hours (counted from the oldest day's first hour): its first, and past its last.
+struct RailSpan: Equatable {
+    var start: Double
+    var end: Double
 }
 
 /// The rail's hours in view, as one shape: a piece a day it crosses, from `start` to `end` on the rail's one line of
@@ -496,6 +571,7 @@ struct EventCard: View {
     var fresh = false
     let choose: () -> Void
     let open: () -> Void
+    let delete: () -> Void
     @State private var hovering = false
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
@@ -517,16 +593,13 @@ struct EventCard: View {
             .frame(maxWidth: .infinity, minHeight: EventGridLayout.textHeight, maxHeight: EventGridLayout.textHeight, alignment: .topLeading)
         }
         .padding(EventGridLayout.pad)
-        // Resized as one (the panel opening): its picture and words move with it, not each on its own.
-        .geometryGroup()
         .background(.quaternary.opacity(hovering || selected ? 0.9 : 0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            if selected {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.accentColor, lineWidth: 2)
-            }
-        }
+        // (Its outline, chosen, is the grid's: drawn over it, moving and resizing with it exactly.)
         // Always there, switched on and off (one inserted and removed would fade where the card was).
         .overlay { NewEventGlow(color: event.kind.color, cornerRadius: 14, active: fresh) }
+        // Resized as one (the panel opening): its picture, words and glow all at the size it is part way, not each
+        // going to its new size on its own.
+        .geometryGroup()
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onTapGesture(count: 2, perform: open)
         .onTapGesture(perform: choose)
@@ -538,6 +611,8 @@ struct EventCard: View {
             if let snapshot = event.snapshot {
                 Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
             }
+            Divider()
+            Button("Delete Event…", role: .destructive, action: delete)
         }
     }
 }
@@ -616,9 +691,13 @@ struct EventDetail: View {
     let source: EventSource?
     let watch: () -> Void
     let close: () -> Void
+    let delete: () -> Void
     /// The event before and after it (in what's shown), if there are.
     var earlier: (() -> Void)?
     var later: (() -> Void)?
+    /// The watch button's height (the menu beside it is drawn as tall), and the pointer over the menu.
+    @State private var actionHeight = 0.0
+    @State private var menuHovered = false
 
     static let width = 380.0
     /// Shown from this long before it to this long after.
@@ -667,8 +746,9 @@ struct EventDetail: View {
                 KindBadge(event: event)
                 Spacer()
                 HStack(spacing: 2) {
-                    round("chevron.left", help: "Earlier event (\u{2190})", action: earlier)
-                    round("chevron.right", help: "Later event (\u{2192})", action: later)
+                    // As the grid has them: newer to the left, older to the right.
+                    round("chevron.left", help: "Newer event (\u{2190})", action: later)
+                    round("chevron.right", help: "Older event (\u{2192})", action: earlier)
                 }
                 round("xmark", help: "Close (Esc)", action: close)
             }
@@ -757,6 +837,7 @@ struct EventDetail: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .onGeometryChange(for: Double.self) { $0.size.height } action: { actionHeight = $0 }
             Menu {
                 if let snapshot = event.snapshot {
                     Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
@@ -764,16 +845,23 @@ struct EventDetail: View {
                 if let recording {
                     Button("Show Recording in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording)]) }
                 }
+                Divider()
+                Button("Delete Event…", role: .destructive, action: delete)
             } label: {
+                // Drawn here, not by the menu's own button (smaller than a large one, whatever its size's set to):
+                // a capsule as tall as the button beside it.
                 Image(systemName: "ellipsis")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 44, height: max(actionHeight, 28))
+                    .background(.fill.opacity(menuHovered ? 1 : 0.7), in: Capsule())
+                    .contentShape(Capsule())
             }
-            // Drawn as a button beside the other, as tall as it.
             .menuStyle(.button)
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .controlSize(.large)
             .fixedSize()
-            .disabled(event.snapshot == nil && recording == nil)
+            .onHover { menuHovered = $0 }
+            .help("More")
         }
     }
 

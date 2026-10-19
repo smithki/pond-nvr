@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 @testable import NVRApp
 import Watch
@@ -277,5 +278,29 @@ extension Date {
         let narrow = EventGridLayout(sections: sections, width: 900, columns: 4)
         #expect(narrow.card.height < wide.card.height && narrow.height < wide.height)
         #expect(narrow.cards["e8"]!.minY < wide.cards["e8"]!.minY)
+    }
+}
+
+@MainActor @Suite struct DetectionBoxesTests {
+    /// A box narrower than its label (a person, in the event panel's small picture) is drawn as wide as it is, not
+    /// as wide as the label.
+    @Test func aBoxIsntWidenedByItsLabel() throws {
+        let person = Sighting(camera: "c", time: Date(), label: "person", category: .person, confidence: 0.87,
+                              box: .init(x: 0.5, y: 0.4, width: 0.05, height: 0.4))
+        let size = CGSize(width: 320, height: 180)
+        let renderer = ImageRenderer(content: DetectionBoxes(boxes: [person], aspect: 16.0 / 9.0)
+            .frame(width: size.width, height: size.height).background(Color.black))
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        let data = try #require(image.dataProvider?.data as Data?)
+        // The box's bottom edge: where it's drawn, along a row through it (well below the label).
+        let row = Int(size.height * 0.8) - 1
+        var lit: [Int] = []
+        for x in 0 ..< image.width {
+            let i = row * image.bytesPerRow + x * image.bitsPerPixel / 8
+            if Int(data[i]) + Int(data[i + 1]) + Int(data[i + 2]) > 120 { lit.append(x) }
+        }
+        let drawn = Double((lit.max() ?? 0) - (lit.min() ?? 0))
+        #expect(abs(drawn - 0.05 * size.width) < 4, "drawn \(drawn) wide")
     }
 }

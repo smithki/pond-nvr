@@ -125,6 +125,28 @@ struct FlipPlacement: GeometryEffect {
     }
 }
 
+/// The chosen card's outline, part way from where the card was to where it goes (and from its size to its new
+/// one), by the grid's phase, as the card itself is drawn.
+struct SelectionRing: Shape {
+    var phase: Double
+    let target: Double
+    let start: Double
+    let from: CGRect
+    let to: CGRect
+
+    var animatableData: Double {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let p = target > start ? min(max((phase - start) / (target - start), 0), 1) : 1
+        func mix(_ a: Double, _ b: Double) -> Double { a + (b - a) * p }
+        let r = CGRect(x: mix(from.minX, to.minX), y: mix(from.minY, to.minY), width: mix(from.width, to.width), height: mix(from.height, to.height))
+        return RoundedRectangle(cornerRadius: 14, style: .continuous).path(in: r)
+    }
+}
+
 /// A move of the grid asked for from outside: a card's row to the middle (if it isn't wholly in view, unless
 /// `always`), or the top.
 struct GridScroll: Equatable {
@@ -154,6 +176,7 @@ struct EventGrid: View {
     let name: (String) -> String
     let choose: (TimelineEvent) -> Void
     let open: (TimelineEvent) -> Void
+    let delete: (TimelineEvent) -> Void
     /// The cards on screen, told as they change.
     let onVisible: (Set<String>) -> Void
     /// Whether it's at the top (new events slide in there; scrolled down, they're added without moving the view).
@@ -176,11 +199,13 @@ struct EventGrid: View {
     @State private var phase = 0.0
     /// Whether the panel was open, as the grid was last laid out (it differs the moment it opens or closes).
     @State private var laidOutOpen: Bool?
+    /// Scroll bars always shown (a mouse, or the setting): the scroller takes room beside the cards.
+    @State private var scrollerTakesRoom = NSScroller.preferredScrollerStyle == .legacy
     @State private var told: Set<String> = []
     @State private var toldTop = true
     @State private var cache = LayoutCache()
 
-    var layout: EventGridLayout { cache.layout(sections: sections, width: width, columns: columns) }
+    var layout: EventGridLayout { cache.layout(sections: sections, width: width - gutter, columns: columns) }
 
     var body: some View {
         let layout = layout
@@ -208,18 +233,39 @@ struct EventGrid: View {
                     if let event = events[item.id] {
                         EventCard(event: event, camera: name(event.camera), selected: selected == item.id,
                                   fresh: fresh.contains(item.id),
-                                  choose: { choose(event) }, open: { open(event) })
+                                  choose: { choose(event) }, open: { open(event) }, delete: { delete(event) })
                             .frame(width: item.frame.width, height: item.frame.height)
                             .modifier(FlipPlacement(phase: phase, target: phase, start: flip?.start ?? phase,
                                                     from: flip.flatMap { f in f.card(item.id).map { CGPoint(x: $0.x, y: $0.y + f.offset) } } ?? item.frame.origin,
                                                     to: item.frame.origin))
-                            // New ones grow in; any other made (scrolled near, or through a move) is simply there.
-                            .transition(fresh.contains(item.id) ? .scale(scale: 0.92).combined(with: .opacity) : .identity)
+                            // New ones grow in; any other made (scrolled near, or through a move) is simply there. Gone,
+                            // they shrink away (deleted, filtered out; those let go far off screen, unseen). Either about
+                            // the card's middle, where it's drawn (its frame's at the corner, the card moved from there).
+                            .transition(.asymmetric(insertion: fresh.contains(item.id) ? Self.appear(item.frame) : .identity,
+                                                    removal: Self.appear(item.frame)))
                     }
                 }
             }
+            // The chosen card's outline, over it: drawn by the grid, moving and resizing with the card as one (the
+            // card's own outline went to its new size before the card did).
+            // Closing, it stays on the card that was chosen through the move, fading as the panel goes.
+            .overlay(alignment: .topLeading) {
+                if let ringed = selected ?? focus, let frame = layout.cards[ringed] {
+                    SelectionRing(phase: phase, target: phase, start: flip?.start ?? phase,
+                                  from: flip.flatMap { f in
+                                      f.card(ringed).map { CGRect(x: $0.x, y: $0.y + f.offset, width: f.before.card.width, height: f.before.card.height) }
+                                  } ?? frame,
+                                  to: frame)
+                        .stroke(Color.accentColor, lineWidth: 2)
+                        .opacity(selected == nil ? 0 : 1)
+                        .allowsHitTesting(false)
+                }
+            }
             .frame(width: layout.width, height: layout.height, alignment: .topLeading)
+            .padding(.trailing, gutter > 0 ? Self.scrollerGap : 0)
         }
+        // (Its scroller, if it takes room, a gap short of the panel.)
+        .padding(.trailing, gutter > 0 ? Self.scrollerGap : 0)
         .scrollPosition($position)
         .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, y in
             offset = y
@@ -252,7 +298,10 @@ struct EventGrid: View {
             self.request = nil
             perform(request)
         }
-        .onChange(of: sections) { old, new in kept(from: old, to: new) }
+        .onChange(of: sections) { old, _ in eventsChanged(from: old) }
+        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+            scrollerTakesRoom = NSScroller.preferredScrollerStyle == .legacy
+        }
     }
 
     func header(_ day: Date, count: Int, pinned: Bool) -> some View {
@@ -317,25 +366,60 @@ struct EventGrid: View {
         return frame.minY >= offset + EventGridLayout.headerHeight - 4 && frame.maxY <= offset + viewHeight + 1
     }
 
+    /// A card coming or going: scaled about its middle as drawn, fading.
+    static func appear(_ frame: CGRect) -> AnyTransition {
+        .scale(scale: 0.85, anchor: UnitPoint(x: (frame.minX + frame.width / 2) / max(frame.width, 1),
+                                               y: (frame.minY + frame.height / 2) / max(frame.height, 1)))
+            .combined(with: .opacity)
+    }
+
     /// Cards made besides those near the screen: those kept through a move, and, the moment the panel's opened or
     /// closed (its move not begun), those on screen before.
     func also(_ margin: Double) -> Set<String> {
         guard let laidOutOpen, laidOutOpen != panelOpen else { return keep }
-        let before = EventGridLayout(sections: sections, width: width + (panelOpen ? panelWidth : -panelWidth), columns: columns)
+        let before = laidOut(sections, width: width + (panelOpen ? panelWidth : -panelWidth))
         return keep.union(before.cards(in: (offset - margin) ... (offset + viewHeight + margin)).map(\.id))
     }
 
     /// The cards made: those within this of the screen, either way.
     var margin: Double { max(600, viewHeight * 1.5) }
 
-    /// The panel opened or closed (the width's already the new one): the scroll is put at once where the focused
-    /// card's row is in the middle (or, with none, where the top card stays put), and every card is drawn moving
-    /// from where it was on screen to where it now goes, one animation with the panel's. Begun part way through
-    /// another, it moves them on from where that one had them.
+    /// The panel opened or closed (the width's already the new one): the focused card's row goes to the middle (or,
+    /// with none, the top card stays put), the cards reshaping as they move.
     func panelChanged(open: Bool) {
         laidOutOpen = open
         guard viewHeight > 0 else { return }
-        let before = EventGridLayout(sections: sections, width: width + (open ? panelWidth : -panelWidth), columns: columns)
+        let before = laidOut(sections, width: width + (open ? panelWidth : -panelWidth))
+        let target: Double
+        if let focus, let centred = layout.centring(focus, view: viewHeight) {
+            target = centred
+        } else {
+            target = anchored(from: before)
+        }
+        move(from: before, to: target)
+    }
+
+    /// Events came or went: they make room, or close up, as they move. Scrolled down, what's on screen stays where
+    /// it is (the scroll moving by as much as the cards above it did); at the top, new ones come in there.
+    func eventsChanged(from old: [EventGridLayout.Section]) {
+        guard viewHeight > EventGridLayout.headerHeight else { return }
+        let before = laidOut(old, width: width)
+        move(from: before, to: offset > 40 ? anchored(from: before) : layout.clamp(offset, view: viewHeight))
+    }
+
+    /// The scroll that keeps the top card on screen (one that's still there) where it is, laid out as now.
+    func anchored(from before: EventGridLayout) -> Double {
+        let on = before.cards(in: (offset + EventGridLayout.headerHeight) ... (offset + max(viewHeight, EventGridLayout.headerHeight)))
+        guard let first = on.first(where: { layout.cards[$0.id] != nil }), let now = layout.cards[first.id] else {
+            return layout.clamp(offset, view: viewHeight)
+        }
+        return layout.clamp(offset + (now.minY - first.frame.minY), view: viewHeight)
+    }
+
+    /// From one layout to this one: the scroll put at once at `target`, and every card (and header) drawn moving
+    /// from where it was on screen to where it now goes, one animation (the panel's). Begun part way through
+    /// another, it moves them on from where that one had them.
+    func move(from before: EventGridLayout, to target: Double) {
         let drawn = before.cards(in: (offset - margin) ... (offset + viewHeight + margin))
         let now = Date()
         var cards: [String: CGPoint] = [:], headers: [Date: Double] = [:]
@@ -354,21 +438,13 @@ struct EventGrid: View {
             }
             start = mix(flip.start, phase)
         }
-        let target: Double
-        if let focus, let centred = layout.centring(focus, view: viewHeight) {
-            target = centred
-        } else if let first = before.cards(in: offset ... (offset + viewHeight)).first, let after = layout.cards[first.id] {
-            target = layout.clamp(after.minY - (first.frame.minY - offset), view: viewHeight)
-        } else {
-            target = layout.clamp(offset, view: viewHeight)
-        }
         keep = Set(drawn.map(\.id)).union(layout.cards(in: (target - margin) ... (target + viewHeight + margin)).map(\.id))
         // At once (no animation): the scroll, and where each card starts from.
         var instant = Transaction(animation: nil)
         instant.disablesAnimations = true
         withTransaction(instant) {
             flip = GridFlip(before: before, beforeOffset: offset, cards: cards, headers: headers, offset: target, start: start, began: now)
-            position.scrollTo(y: target)
+            if abs(target - offset) > 0.5 { position.scrollTo(y: target) }
             offset = target
         }
         withAnimation(Self.panelAnimation) {
@@ -394,15 +470,15 @@ struct EventGrid: View {
         }
     }
 
-    /// Events came or went: scrolled down, what's on screen is kept where it is (the scroll moved by as much as the
-    /// cards above it did); at the top, they slide in.
-    func kept(from old: [EventGridLayout.Section], to new: [EventGridLayout.Section]) {
-        guard offset > 40, viewHeight > EventGridLayout.headerHeight else { return }
-        let before = EventGridLayout(sections: old, width: width, columns: columns)
-        guard let first = before.cards(in: (offset + EventGridLayout.headerHeight) ... (offset + viewHeight)).first,
-              let now = layout.cards[first.id] else { return }
-        position.scrollTo(y: layout.clamp(offset + (now.minY - first.frame.minY), view: viewHeight))
+    /// Laid out at a width the grid's been given (less the scroller's gutter, if it takes room).
+    func laidOut(_ sections: [EventGridLayout.Section], width: Double) -> EventGridLayout {
+        EventGridLayout(sections: sections, width: width - gutter, columns: columns)
     }
+
+    /// Room for a scroller that takes it (scroll bars always shown), and a little either side of it, so the cards
+    /// don't run under it nor it against the panel.
+    var gutter: Double { scrollerTakesRoom ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 2 * Self.scrollerGap : 0 }
+    static let scrollerGap = 6.0
 }
 
 /// The last layout, kept while its inputs are the same (the grid's body runs each frame of a scroll).

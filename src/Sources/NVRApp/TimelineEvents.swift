@@ -164,6 +164,14 @@ struct EventSource: Sendable {
         }
     }
 
+    /// Deleted, with their pictures (the recordings they were in, and what was found in them, are kept).
+    func delete(_ ids: [String]) {
+        guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database) else { return }
+        for picture in store.delete(ids) {
+            try? FileManager.default.removeItem(atPath: (eventsFolder as NSString).appendingPathComponent(picture))
+        }
+    }
+
     /// What the service found in a camera's pictures within `from`…`to` (for boxes over the recording).
     func sightings(camera: String, from: Date, to: Date) -> [Sighting] {
         guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }

@@ -1,6 +1,7 @@
 // The cameras' events, kept in Pond's database (pond.sqlite, beside the camera health): one row each, written
-// as it begins and again as it goes on and ends. The service writes; the app and `pond events` read. Their
-// pictures are files in the events folder, the row naming each; both are kept as long as event retention says.
+// as it begins and again as it goes on and ends. The service writes; the app and `pond events` read, and the app
+// deletes those its user deletes (noted, so the service, still at one, doesn't write it back). Their pictures are
+// files in the events folder, the row naming each; both are kept as long as event retention says.
 import Detection
 import Foundation
 import SQLite3
@@ -34,6 +35,7 @@ public final class EventStore: @unchecked Sendable {
                 confidence REAL NOT NULL, x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
                 track INTEGER, counted INTEGER NOT NULL DEFAULT 1);
             CREATE INDEX IF NOT EXISTS sightings_by_time ON sightings (camera, time);
+            CREATE TABLE IF NOT EXISTS deleted (id TEXT PRIMARY KEY, time REAL NOT NULL);
             """, nil, nil, nil) == SQLITE_OK
             guard made else { return nil }
             // Added since the table was first made (fails, harmlessly, when it's there).
@@ -53,12 +55,28 @@ public final class EventStore: @unchecked Sendable {
         queue.async { [self] in
             run("""
             INSERT INTO events (id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM deleted WHERE id = ?1)
             ON CONFLICT (id) DO UPDATE SET end = excluded.end, category = excluded.category, labels = excluded.labels,
                 confidence = excluded.confidence, snapshot = excluded.snapshot, box = excluded.box,
                 summary = excluded.summary, ongoing = excluded.ongoing, zones = excluded.zones
             """, [event.id, event.camera, event.start.timeIntervalSince1970, event.end.timeIntervalSince1970,
                   event.category.rawValue, labels, event.confidence, event.snapshot, box, event.summary, ongoing ? 1 : 0, zones])
+        }
+    }
+
+    /// Deleted (the user's doing), and noted as deleted, so the service, if it's still at one (going on, or taken
+    /// up again), doesn't write it back. The names of their pictures, to delete too.
+    public func delete(_ ids: [String], now: Date = Date()) -> [String] {
+        queue.sync {
+            run("BEGIN", [])
+            var pictures: [String] = []
+            for id in ids {
+                pictures += rows("SELECT snapshot FROM events WHERE id = ?", [id]) { $0.text(0) }
+                run("DELETE FROM events WHERE id = ?", [id])
+                run("INSERT OR REPLACE INTO deleted (id, time) VALUES (?, ?)", [id, now.timeIntervalSince1970])
+            }
+            run("COMMIT", [])
+            return pictures
         }
     }
 
@@ -88,6 +106,8 @@ public final class EventStore: @unchecked Sendable {
         queue.async { [self] in
             run("DELETE FROM events WHERE start < ?", [before])
             run("DELETE FROM sightings WHERE time < ?", [before])
+            // (A deleted one's note is needed only while the service might be at it still.)
+            run("DELETE FROM deleted WHERE time < ?", [now.addingTimeInterval(-86400).timeIntervalSince1970])
         }
     }
 
