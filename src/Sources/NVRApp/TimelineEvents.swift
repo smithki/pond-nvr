@@ -86,6 +86,8 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
     var summary: String
     /// Its picture, if it has one.
     var snapshot: URL?
+    /// Still going on (as last read): drawn up to the present.
+    var ongoing = false
 
     var seconds: Double { end.timeIntervalSince(start) }
 }
@@ -146,7 +148,8 @@ struct EventSource: Sendable {
             let e = kept.event
             return TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
                                  end: kept.ongoing ? max(e.end, now) : max(e.end, e.start.addingTimeInterval(1)),
-                                 summary: summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) })
+                                 summary: summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
+                                 ongoing: kept.ongoing)
         }
     }
 

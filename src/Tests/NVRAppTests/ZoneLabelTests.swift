@@ -112,3 +112,55 @@ import Testing
         #expect(clusters.map(\.ids) == [["b", "c"], ["a"], ["d"]])
     }
 }
+
+@MainActor
+@Suite struct LiveEdgeTests {
+    static let names: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd/HH-mm-ss"
+        return f
+    }()
+
+    static func write(_ root: String, _ start: Date, partial: Bool, modified: Date) throws -> String {
+        let name = names.string(from: start)
+        let folder = "\(root)/continuous/porch/\(name.prefix(10))"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let path = "\(folder)/\(name.suffix(8)).mp4\(partial ? ".partial" : "")"
+        FileManager.default.createFile(atPath: path, contents: Data([0]))
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: path)
+        return path
+    }
+
+    @Test func theBarsEndMovesOnThroughANewFileNeverBackNorPastThePresent() async throws {
+        let root = NSTemporaryDirectory() + "pond-edge-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let now = Date()
+        // A minute finished, and the next being written for 20 s.
+        let earlier = now.addingTimeInterval(-81).rounded()
+        _ = try Self.write(root, earlier, partial: false, modified: earlier.addingTimeInterval(60))
+        let current = earlier.addingTimeInterval(61)
+        let writing = try Self.write(root, current, partial: true, modified: now.addingTimeInterval(-1))
+        let timeline = TimelineModel()
+        await timeline.load(base: root, cameras: ["porch"])
+        await timeline.refreshLive()
+        let first = try #require(timeline.liveEdge(of: "porch", now: Date()))
+        #expect(first <= Date() && first > current)
+        // No gap where the minute changed: one stretch.
+        #expect(timeline.coverage["porch"]?.count == 1)
+
+        // The minute ends: renamed, and the next begins (written a moment ago).
+        try FileManager.default.moveItem(atPath: writing, toPath: String(writing.dropLast(8)))
+        _ = try Self.write(root, Date().addingTimeInterval(-0.5).rounded(), partial: true, modified: Date())
+        await timeline.refreshLive()
+        let after = try #require(timeline.liveEdge(of: "porch", now: Date()))
+        #expect(after >= first && after <= Date())
+        #expect(timeline.coverage["porch"]?.count == 1)
+    }
+}
+
+extension Date {
+    /// To the whole second (segment files are named to the second).
+    func rounded() -> Date { Date(timeIntervalSince1970: timeIntervalSince1970.rounded(.down)) }
+}

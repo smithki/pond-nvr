@@ -21,6 +21,19 @@ public struct RecordedSpan: Equatable, Sendable {
     public var isBeingWritten: Bool { path.hasSuffix(".partial") }
 }
 
+/// The segment being written: from `start` (its first frame) through `through` (as far as it's written).
+public struct LiveSegment: Equatable, Sendable {
+    public var path: String
+    public var start: Date
+    public var through: Date
+
+    public init(path: String, start: Date, through: Date) {
+        self.path = path
+        self.start = start
+        self.through = through
+    }
+}
+
 public enum RecordingIndex {
     /// The nominal length of a continuous segment (`pond run` cuts at the first keyframe after 60 s).
     public static let segmentSeconds = 60.0
@@ -70,6 +83,36 @@ public enum RecordingIndex {
             out.append(RecordedSpan(path: path, start: start, end: end))
         }
         return out
+    }
+
+    /// The segment a camera's recorder is writing now, and how far: its start (from its name) and the time its
+    /// file was last written (each 2-second fragment, as it's added: what's recorded reaches about there). Cheap:
+    /// the file `known` (the last one found) is looked at alone while it's still being written; else the day
+    /// folders (today's and yesterday's, UTC) are listed for the newest. Nil if none is being written.
+    public static func beingWritten(base: String, camera: String, known: String? = nil, now: Date = Date()) -> LiveSegment? {
+        let fm = FileManager.default
+        if let known, let segment = liveSegment(path: known) { return segment }
+        let top = SegmentFiles.cameraFolder(root: base, camera: camera)
+        let days = DateFormatter()
+        days.locale = Locale(identifier: "en_US_POSIX")
+        days.timeZone = TimeZone(identifier: "UTC")
+        days.dateFormat = "yyyy-MM-dd"
+        for day in [now, now.addingTimeInterval(-86400)].map(days.string(from:)) {
+            let names = ((try? fm.contentsOfDirectory(atPath: "\(top)/\(day)")) ?? []).filter { $0.hasSuffix(".mp4.partial") }
+            if let newest = names.max(), let segment = liveSegment(path: "\(top)/\(day)/\(newest)") { return segment }
+        }
+        return nil
+    }
+
+    /// A segment file being written: its start from its name, how far from when it was last written.
+    static func liveSegment(path: String) -> LiveSegment? {
+        guard path.hasSuffix(".mp4.partial"),
+              let modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
+        let parts = path.split(separator: "/")
+        guard parts.count >= 2,
+              let start = RetentionSweeper.nameFormatter.date(from: "\(parts[parts.count - 2])/\(parts[parts.count - 1].prefix(8))")
+        else { return nil }
+        return LiveSegment(path: path, start: start, through: max(start, modified))
     }
 
     /// When a camera's earliest recording starts: its first day folder's first segment. Cheap, whatever the

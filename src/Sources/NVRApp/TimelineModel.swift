@@ -8,6 +8,10 @@
 // come): playing into it, what's written since is queued after what's playing (an AVQueuePlayer, so it runs on
 // without a stop), a few seconds behind the present.
 //
+// The bar's growing end has one owner: `live`, each camera's segment being written and how far (its file's last
+// write), read every half second. It's drawn at the clock less the writing's smoothed lag, so it moves steadily,
+// through new files, never back and never past the present. Nothing else (playback, the follower) moves it.
+//
 // Live: the selected camera as it is now, with the playhead at the present; only ever chosen (LIVE, or L).
 // Seeking anywhere leaves it.
 import AVFoundation
@@ -119,6 +123,17 @@ final class TimelineModel {
     private var privacyRead = Date.distantPast
     /// Finished segments' real lengths, as measured.
     private var measured: [String: Double] = [:]
+    /// What each camera is recording now: the segment being written and how far (its file's last write), read
+    /// every half second. The one thing the bar's growing end follows (nothing else moves it).
+    private(set) var live: [String: LiveSegment] = [:]
+    /// How far behind the present each camera's writing runs (smoothed over the reads): the bar's end is drawn that
+    /// far behind the clock, so it moves with it, steadily, whatever the fragments' timing.
+    @ObservationIgnored private var liveLag: [String: Double] = [:]
+    /// Nothing written for this long: not recording now.
+    static let liveTimeout = 15.0
+    /// The edge is drawn on past what was last seen written by at most this (a fragment's length), as time passes,
+    /// so it moves with the clock between reads instead of stepping.
+    static let liveGlide = 2.5
     /// The cameras private now, and since when this app saw each become so (set from the app's privacy state):
     /// a stretch going on now is drawn up to the present, and one just begun at once, not at the next read.
     var privateNow: [String: Date] = [:]
@@ -276,32 +291,40 @@ final class TimelineModel {
         let from = calendar.startOfDay(for: visible.lowerBound.addingTimeInterval(-86400))
         let to = min(horizon, calendar.startOfDay(for: visible.upperBound).addingTimeInterval(2 * 86400))
         let source = self.source
-        let (found, starts, kept, privacy) = await Task.detached {
+        let known = live.mapValues(\.path)
+        let (found, starts, kept, privacy, writing) = await Task.detached {
             var out: [String: [RecordedSpan]] = [:]
             var starts: [String: Date] = [:]
+            var writing: [String: LiveSegment] = [:]
             for c in cameras {
                 out[c] = RecordingIndex.spans(base: base, camera: c, from: from, to: to, writing: true)
                 starts[c] = RecordingIndex.earliest(base: base, camera: c)
+                writing[c] = RecordingIndex.beingWritten(base: base, camera: c, known: known[c])
             }
             let events = (source?.events(from: from, to: to) ?? []).filter { cameras.contains($0.camera) }
-            return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:])
+            return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:], writing)
         }.value
+        for (c, segment) in writing where Date().timeIntervalSince(segment.through) < Self.liveTimeout {
+            live[c] = segment
+        }
+        for c in cameras where writing[c].map({ Date().timeIntervalSince($0.through) >= Self.liveTimeout }) ?? true { live[c] = nil }
         let first = starts.values.min()
-        // A segment with no other right after it (the newest, or one before a gap: the camera went private, or
-        // dropped) is listed as a nominal minute; its file may be much shorter. Its real length, so the bar shows
-        // only what can be played, and ends where the video did. (Finished files' lengths kept: they don't change.)
+        // Ends: the segment being written ends where it's written (its file's last write); a finished one the next
+        // follows on from, at the next one's start; a finished one before a gap (the camera went private, or
+        // dropped), where its video does: measured, once (finished files don't change).
         var trimmed = found
         for (c, list) in found {
-            // (One the next follows on from was given the next one's start as its end: it runs on, nothing to trim.)
-            for (i, span) in list.enumerated() where i == list.count - 1 || list[i + 1].start > span.end.addingTimeInterval(0.5) {
-                let seconds: Double?
-                if let known = measured[span.path] {
-                    seconds = known
-                } else {
-                    seconds = try? await Self.asset(span.path).load(.duration).seconds
-                    if let seconds, !span.isBeingWritten { measured[span.path] = seconds }
+            for (i, span) in list.enumerated() {
+                if let segment = live[c], span.path == segment.path {
+                    trimmed[c]![i] = RecordedSpan(path: span.path, start: span.start, end: segment.through)
+                    continue
                 }
-                if let seconds, seconds > 0, span.start.addingTimeInterval(seconds) < span.end {
+                guard i == list.count - 1 || list[i + 1].start > span.end.addingTimeInterval(0.5) else { continue }
+                if measured[span.path] == nil {
+                    measured[span.path] = (try? await Self.asset(span.path).load(.duration).seconds) ?? 0
+                }
+                let seconds = measured[span.path] ?? 0
+                if span.start.addingTimeInterval(seconds) < span.end {
                     trimmed[c]![i] = RecordedSpan(path: span.path, start: span.start, end: span.start.addingTimeInterval(seconds))
                 }
             }
@@ -433,17 +456,62 @@ final class TimelineModel {
         liveClock = nil
     }
 
-    /// How long after its last recorded moment a camera still counts as recording: the minute being written is
-    /// listed as far as it was written when the index was last read (every 10 s), and a camera that reconnects
-    /// starts its next minute a little later. 150 s covers that with room to spare.
+    /// Near the present, playing faster than real time would run out of recording.
     static let recordingLag = 150.0
 
-    /// What the camera is recording now and can't be played yet: from the end of what's written (as last read)
-    /// to `now`, if that ended less than `recordingLag` ago. A few seconds, mostly.
+    /// Reads how far each camera's segment being written has got (its file's last write: cheap), and moves the
+    /// bar's end there; a new segment begun (the last one finished) reads the folder again for it.
+    func refreshLive() async {
+        let base = self.base, cameras = self.cameras, known = live.mapValues(\.path)
+        let now = Date()
+        let read = await Task.detached {
+            Dictionary(uniqueKeysWithValues: cameras.map { c in (c, RecordingIndex.beingWritten(base: base, camera: c, known: known[c], now: now)) })
+        }.value
+        var relist = false
+        for c in cameras {
+            let segment = read[c] ?? nil
+            guard let segment, now.timeIntervalSince(segment.through) < Self.liveTimeout else {
+                if live[c] != nil { live[c] = nil }
+                continue
+            }
+            if let was = live[c], was.path != segment.path { relist = true }
+            let sample = max(0, now.timeIntervalSince(segment.through))
+            liveLag[c] = liveLag[c].map { $0 * 0.85 + sample * 0.15 } ?? sample
+            if live[c] != segment {
+                live[c] = segment
+                setLiveEnd(of: c, segment)
+            }
+        }
+        if relist { await load(base: base, cameras: cameras) }
+    }
+
+    /// The segment being written's span ends where it's written (added if it's newer than what's listed).
+    private func setLiveEnd(of camera: String, _ segment: LiveSegment) {
+        guard var list = spans[camera] else { return }
+        if let i = list.lastIndex(where: { $0.path == segment.path }) {
+            list[i] = RecordedSpan(path: segment.path, start: segment.start, end: segment.through)
+        } else if list.last.map({ $0.start < segment.start }) ?? true {
+            list.append(RecordedSpan(path: segment.path, start: segment.start, end: segment.through))
+        } else {
+            return
+        }
+        spans[camera] = list
+        coverage[camera] = RecordingIndex.coverage(list)
+    }
+
+    /// Where the bar's growing end is drawn at `now`: the clock less the writing's lag (so it moves steadily),
+    /// never further than a fragment past what's written (a camera that stops, stops it) nor past the present.
+    /// Nil when the camera isn't recording.
+    func liveEdge(of camera: String, now: Date) -> Date? {
+        guard let segment = live[camera], now.timeIntervalSince(segment.through) < Self.liveTimeout else { return nil }
+        let steady = now.addingTimeInterval(-(liveLag[camera] ?? 0))
+        return max(segment.start, min(steady, segment.through.addingTimeInterval(Self.liveGlide), now))
+    }
+
+    /// What the camera is recording now and can't be played yet: from the bar's growing end to `now`.
     func recordingNow(of id: String, now: Date = Date()) -> ClosedRange<Date>? {
-        guard let last = coverage[id]?.last, last.upperBound < now,
-              now.timeIntervalSince(last.upperBound) < Self.recordingLag else { return nil }
-        return last.upperBound ... now
+        guard let edge = liveEdge(of: id, now: now), edge < now else { return nil }
+        return edge ... now
     }
 
     /// Live, or playing the last few minutes on the way to it: only real time makes sense (faster would run
@@ -456,15 +524,6 @@ final class TimelineModel {
     var newerAvailable: Bool {
         guard atEnd, let playhead, let latest = latestRecorded else { return false }
         return latest > playhead.addingTimeInterval(1)
-    }
-
-    /// Played up to `end` (while playing, or at the end): the newest segment's file has grown since it was
-    /// measured, so the bar is drawn to here, never short of the playhead.
-    private func reachedEnd(of camera: String, at end: Date) {
-        guard var list = spans[camera], let last = list.last, last.end < end else { return }
-        list[list.count - 1] = RecordedSpan(path: last.path, start: last.start, end: end)
-        spans[camera] = list
-        coverage[camera] = RecordingIndex.coverage(list)
     }
 
     /// The end of the selected camera's latest recording.
@@ -487,9 +546,11 @@ final class TimelineModel {
             return
         }
         let all = (spans[camera] ?? []).filter { $0.seconds > 0 }
-        // Into what is being recorded (not playable yet): the last frame there is, straight away, paused there
-        // (live is only ever chosen), as at the end of the recording.
-        if let now = recordingNow(of: camera), now.contains(time), let last = all.last {
+        // Past the newest recording, while the camera is recording (what's being written isn't playable yet) or
+        // stopped just now: the last frame there is, straight away, paused there (live is only ever chosen), as at
+        // the end of the recording.
+        if let last = all.last, time >= last.end,
+           live[camera] != nil || Date().timeIntervalSince(last.end) < Self.recordingLag {
             await seek(to: last.end.addingTimeInterval(-0.1))
             pause()
             atEnd = true
@@ -529,7 +590,6 @@ final class TimelineModel {
             start = max(chunk[0].start, built.end.addingTimeInterval(-0.1))
             playhead = start
             atEnd = true
-            reachedEnd(of: camera, at: built.end)
         }
         window = (camera, chunk[0].start, built.end)
         seeks += 1
@@ -602,9 +662,6 @@ final class TimelineModel {
         let origin = queued.first { $0.item === player.currentItem }?.origin ?? window.origin
         let before = playhead
         playhead = origin.addingTimeInterval(time.seconds)
-        // Playing into what was being recorded when the bar was measured (the newest file has grown since):
-        // what plays is recorded, so the bar keeps up with the playhead.
-        if let playhead { reachedEnd(of: window.camera, at: playhead) }
         // Catching up to the present at more than 1×: real time from here.
         if playing, rate != 1, nearPresent { rate = 1 }
         // Playing past the edge of a panned view: follow the playhead again. Only as it crosses the edge (it was
@@ -622,7 +679,7 @@ final class TimelineModel {
         guard let window, playing else { return }
         // Played up to what's written of the minute being written: on as soon as the next fragment is (the
         // follower adds it), unless none comes.
-        if spans[window.camera]?.last?.isBeingWritten == true, follower != nil {
+        if live[window.camera] != nil, follower != nil {
             waitingForMore = true
             return
         }
@@ -631,7 +688,6 @@ final class TimelineModel {
         guard spans[window.camera]?.contains(where: { $0.start >= window.end.addingTimeInterval(-1) }) == true else {
             pause()
             atEnd = true
-            reachedEnd(of: window.camera, at: window.end)
             return
         }
         Task { await seek(to: window.end.addingTimeInterval(0.01)) }
@@ -651,7 +707,7 @@ final class TimelineModel {
     /// was written after the window's end, as an item of its own after the last. Stops when the window leaves it.
     private func follow() {
         follower?.cancel()
-        guard let window, spans[window.camera]?.last.map({ $0.isBeingWritten && $0.start < window.end.addingTimeInterval(1) }) == true
+        guard let window, live[window.camera].map({ $0.start < window.end.addingTimeInterval(1) }) == true
         else { follower = nil; return }
         let camera = window.camera, base = self.base
         follower = Task { [weak self] in
@@ -675,7 +731,6 @@ final class TimelineModel {
                             self.waitingForMore = false
                             self.pause()
                             self.atEnd = true
-                            self.reachedEnd(of: camera, at: window.end)
                             return
                         }
                     }
@@ -685,11 +740,8 @@ final class TimelineModel {
                 let item = AVPlayerItem(asset: built.composition)
                 self.player.insert(item, after: self.queued.last?.item)
                 self.queued.append((item, window.end, built.end))
+                // (Playback only: the bar follows what's written, by its own reads.)
                 self.window = (camera, window.origin, built.end)
-                // As far as it's written (listed as a nominal minute, which would run past the present).
-                self.merge(found.map { span in
-                    span.isBeingWritten ? RecordedSpan(path: span.path, start: span.start, end: min(span.end, built.end)) : span
-                }, of: camera)
                 if self.waitingForMore {
                     // The last item had ended: on into this one.
                     self.waitingForMore = false
@@ -708,15 +760,6 @@ final class TimelineModel {
     static let followAhead = 6.0
     /// Seconds waited at the end of what's written for the next fragment before stopping there.
     static let followPatience = 8.0
-
-    /// Newly listed segments in place of what was known of them (the minute being written, renamed when done).
-    private func merge(_ found: [RecordedSpan], of camera: String) {
-        guard var list = spans[camera], let first = found.first else { return }
-        list.removeAll { $0.start >= first.start.addingTimeInterval(-0.5) }
-        list += found
-        spans[camera] = list
-        coverage[camera] = RecordingIndex.coverage(list)
-    }
 
     // MARK: - Composition
 

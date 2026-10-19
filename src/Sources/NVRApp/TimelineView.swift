@@ -145,6 +145,14 @@ struct TimelineView: View {
                 }
             }
         }
+        // How far each camera's recording has got: read every half second while today is shown (a file's last
+        // write: cheap), for the bar's growing end.
+        .task(id: cameras.map(\.id)) {
+            while !Task.isCancelled {
+                if timeline.isToday { await timeline.refreshLive() }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
         .onChange(of: cameras.map { model.isPrivate($0.id) }, initial: true) { _, _ in
             let now = Date()
             var next: [String: Date] = [:]
@@ -464,8 +472,6 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// Advanced every second while the timeline shows today, so what is being recorded (drawn up to the
     /// present) keeps growing when nothing else changes.
     @State private var clock = Date()
-    /// Each camera's recording as drawn while it grows to newly loaded minutes (see CatchUp).
-    @State private var catchUps: [String: CatchUp] = [:]
     /// Kinds of event being shown or hidden (a filter just changed): their marks fade in or out.
     @State private var kindFades: [TimelineEvent.Kind: KindFade] = [:]
     /// Where the visible part started when a pan of the time axis began.
@@ -601,13 +607,12 @@ struct TimelineLanes: View, @MainActor Animatable {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
-        .onChange(of: timeline.coverage) { old, new in catchUp(from: old, to: new) }
         .onChange(of: timeline.shownKinds) { old, new in fadeKinds(from: old, to: new) }
     }
 
     /// Zoomed in far enough on today that a second's growth shows: drawn every frame.
     var smoothNow: Bool { timeline.isToday && [.hour, .quarter].contains(timeline.zoom) }
-    var animating: Bool { smoothNow || !catchUps.isEmpty || !kindFades.isEmpty }
+    var animating: Bool { smoothNow || !kindFades.isEmpty }
 
     /// A kind's marks fading from one opacity to another.
     struct KindFade {
@@ -639,54 +644,13 @@ struct TimelineLanes: View, @MainActor Animatable {
         }
     }
 
-    /// Newly loaded recording, drawn growing from where the bar ended to where it ends now. A few seconds more
-    /// (the minute being written, read again as it's written): at the clock's pace, evenly, so step after step
-    /// is one steady growth rather than a start and stop each time; more (a reload after a while): quickly.
-    struct CatchUp {
-        var from: Date
-        var to: Date
-        var began: Date
-        static let duration = 0.8
-        /// Steps up to this long grow at the clock's pace.
-        static let steady = 15.0
-
-        var isSteady: Bool { to.timeIntervalSince(from) <= Self.steady }
-        var length: Double { isSteady ? max(Self.duration, to.timeIntervalSince(from)) : Self.duration }
-
-        func end(at time: Date) -> Date {
-            let t = max(0, min(1, time.timeIntervalSince(began) / length))
-            let eased = isSteady ? t : t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
-            return from.addingTimeInterval(to.timeIntervalSince(from) * eased)
-        }
-    }
-
-    /// When a camera's last recording reaches further after a load, its bar grows there instead of jumping.
-    /// Not the small steps of playing into the newest minute (the bar keeps to the playhead), nor a different
-    /// day's recordings.
-    func catchUp(from old: [String: [ClosedRange<Date>]], to new: [String: [ClosedRange<Date>]]) {
-        let time = Date()
-        for (camera, ranges) in new {
-            guard let last = ranges.last, let before = old[camera]?.last?.upperBound,
-                  last.upperBound.timeIntervalSince(before) > 0.5, last.upperBound.timeIntervalSince(before) < 600,
-                  last.lowerBound <= before.addingTimeInterval(5) else { continue }
-            let from = catchUps[camera].map { $0.end(at: time) } ?? before
-            catchUps[camera] = CatchUp(from: from, to: last.upperBound, began: time)
-        }
-        let longest = catchUps.values.map(\.length).max() ?? CatchUp.duration
-        Task {
-            try? await Task.sleep(for: .seconds(longest + 0.1))
-            catchUps = catchUps.filter { Date().timeIntervalSince($0.value.began) < $0.value.length }
-        }
-    }
-
-    /// A camera's recording as drawn: its last stretch ends where its catch-up has reached.
-    func drawnCoverage(_ camera: String, at time: Date) -> [ClosedRange<Date>] {
+    /// A camera's recording as drawn at `now`: what's listed, its last stretch ending where the model says the
+    /// recording being written has reached (the one thing that moves it).
+    func drawnCoverage(_ camera: String, now: Date) -> [ClosedRange<Date>] {
         var ranges = timeline.coverage[camera] ?? []
-        guard let catchUp = catchUps[camera], let last = ranges.last else { return ranges }
-        var end = min(last.upperBound, catchUp.end(at: time))
-        // Never short of what's playing (it's recorded).
-        if camera == timeline.camera, let head, head > end { end = min(last.upperBound, head) }
-        if end < last.upperBound { ranges[ranges.count - 1] = last.lowerBound ... max(last.lowerBound, end) }
+        guard let edge = timeline.liveEdge(of: camera, now: now), let segment = timeline.live[camera],
+              let last = ranges.last, last.contains(segment.start) || last.upperBound >= segment.start else { return ranges }
+        ranges[ranges.count - 1] = last.lowerBound ... max(last.lowerBound, edge)
         return ranges
     }
 
@@ -822,7 +786,9 @@ struct TimelineLanes: View, @MainActor Animatable {
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let lane = laneRect(cameras.firstIndex { $0.id == event.camera } ?? 0, width: width)
         let x0 = event.start.timeIntervalSince(visible.lowerBound) / length * width
-        let x1 = event.end.timeIntervalSince(visible.lowerBound) / length * width
+        // One going on now grows with the clock (till the next read says how it ended).
+        let end = event.ongoing ? max(event.end, Date()) : event.end
+        let x1 = end.timeIntervalSince(visible.lowerBound) / length * width
         return CGRect(x: x0, y: lane.minY + 3, width: max(3, x1 - x0), height: lane.height - 6)
     }
 
@@ -1089,18 +1055,21 @@ struct TimelineLanes: View, @MainActor Animatable {
             context.fill(Path(roundedRect: lane, cornerRadius: 6), with: .style(.quaternary.opacity(selected ? 1 : 0.6)))
             if let added = timeline.added(camera.id) { drawAdded(context, camera: camera, at: added, lane: lane, size: size, visible: visible) }
             // Being recorded now (not playable yet): drawn after the recording it continues, joined to it.
-            let coverage = drawnCoverage(camera.id, at: frame)
+            // The live end and what's being recorded beyond it, from one moment, so they meet exactly.
+            let edgeNow = smoothNow ? frame : clockNow
+            let coverage = drawnCoverage(camera.id, now: edgeNow)
             // Private stretches, reaching to the recording on either side (recording stops and starts again a
             // moment apart from the change), so the lane runs on through them without a break.
             let privateSpans = Self.joined(timeline.privateSpans(of: camera.id, now: clockNow), to: coverage)
-            // While the bar catches up, the part being recorded starts where the bar has reached.
-            let recordingNow = timeline.recordingNow(of: camera.id, now: timeline.isLive ? (head ?? clockNow) : clockNow)
-                .map { now in (coverage.last.map { min($0.upperBound, now.lowerBound) } ?? now.lowerBound) ... now.upperBound }
+            let recordingNow = timeline.recordingNow(of: camera.id, now: edgeNow)
             for range in coverage where range.upperBound > visible.lowerBound && range.lowerBound < visible.upperBound {
                 // Running on under a private stretch beside it by a corner's width, so the bar shows in the
                 // stretch's rounded corners (it sits on top).
-                let underRight = privateSpans.contains { $0.lowerBound == range.upperBound } ? 6.0 : 0
-                let underLeft = privateSpans.contains { $0.upperBound == range.lowerBound } ? 6.0 : 0
+                // (Only where that edge is in view: cut off at the view's edge, the bar keeps its rounded end there.)
+                let privateAfter = visible.contains(range.upperBound) && privateSpans.contains { $0.lowerBound == range.upperBound }
+                let privateBefore = visible.contains(range.lowerBound) && privateSpans.contains { $0.upperBound == range.lowerBound }
+                let underRight = privateAfter ? 6.0 : 0
+                let underLeft = privateBefore ? 6.0 : 0
                 let x0 = max(0, x(range.lowerBound, width: size.width, visible: visible) - underLeft)
                 let x1 = min(size.width, x(range.upperBound, width: size.width, visible: visible) + underRight)
                 let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
@@ -1108,9 +1077,9 @@ struct TimelineLanes: View, @MainActor Animatable {
                 // Square on the right where the part being recorded carries on from it; square on the left where
                 // it begins the camera's recording, against the line that marks it ("Recording starts", "… added").
                 // Square under a private stretch's ends too: it sits on top, its rounded corners over the bar.
-                let joined = recordingNow?.lowerBound == range.upperBound || privateSpans.contains { $0.lowerBound == range.upperBound }
+                let joined = recordingNow?.lowerBound == range.upperBound || privateAfter
                 let opens = timeline.cameraStarts[camera.id].map { abs(range.lowerBound.timeIntervalSince($0)) < 1 } ?? false
-                    || privateSpans.contains { $0.upperBound == range.lowerBound }
+                    || privateBefore
                 let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
                     topLeading: opens ? 0 : 6, bottomLeading: opens ? 0 : 6,
                     bottomTrailing: joined ? 0 : 6, topTrailing: joined ? 0 : 6))

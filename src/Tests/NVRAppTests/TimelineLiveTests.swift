@@ -64,20 +64,31 @@ import Testing
 
 @MainActor
 @Suite struct OngoingRecordingTests {
-    @Test func whatIsBeingRecordedRunsFromTheLatestRecordingToNow() {
+    @Test func whatIsBeingRecordedRunsFromTheBarsEndToNow() async throws {
+        let root = NSTemporaryDirectory() + "pond-ongoing-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        // Being written: begun 20 s ago, last written a second ago.
+        let start = Date().addingTimeInterval(-20).rounded()
+        _ = try LiveEdgeTests.write(root, start, partial: true, modified: Date().addingTimeInterval(-1))
         let t = TimelineModel()
+        await t.load(base: root, cameras: ["porch"])
+        await t.refreshLive()
         let now = Date()
-        let end = now.addingTimeInterval(-70)
-        t.coverage["porch"] = [now.addingTimeInterval(-3600) ... end]
-        #expect(t.recordingNow(of: "porch", now: now) == end ... now)
+        let edge = try #require(t.liveEdge(of: "porch", now: now))
+        #expect(t.recordingNow(of: "porch", now: now) == edge ... now || edge == now)
     }
 
-    @Test func notAfterRecordingStopped() {
+    @Test func notAfterRecordingStopped() async throws {
+        let root = NSTemporaryDirectory() + "pond-stopped-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        // A segment last written ten minutes ago (left by a recorder that stopped): not being recorded now.
+        let start = Date().addingTimeInterval(-700).rounded()
+        _ = try LiveEdgeTests.write(root, start, partial: true, modified: Date().addingTimeInterval(-600))
         let t = TimelineModel()
-        let now = Date()
-        t.coverage["porch"] = [now.addingTimeInterval(-3600) ... now.addingTimeInterval(-600)]
-        #expect(t.recordingNow(of: "porch", now: now) == nil)
-        #expect(t.recordingNow(of: "none", now: now) == nil)
+        await t.load(base: root, cameras: ["porch"])
+        await t.refreshLive()
+        #expect(t.recordingNow(of: "porch", now: Date()) == nil)
+        #expect(t.recordingNow(of: "none", now: Date()) == nil)
     }
 }
 
