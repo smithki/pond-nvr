@@ -134,6 +134,34 @@ struct TimelineView: View {
                     .animation(settled ? .snappy(duration: 0.35) : nil, value: timeline.playhead)
                     .animation(settled ? .easeInOut(duration: 0.25) : nil, value: timeline.jumps)
                     .frame(height: lanes)
+                    // Panned away from the playhead: a way back to it, on the side it's on.
+                    .overlay(alignment: playheadBefore(visible) == true ? .leading : .trailing) {
+                        if let before = playheadBefore(visible), let playhead = timeline.playhead {
+                            Button {
+                                withAnimation(.snappy(duration: 0.35)) { timeline.followPlayhead() }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    if before { Image(systemName: "chevron.left") }
+                                    Text(playhead.formatted(Calendar.current.isDate(playhead, inSameDayAs: visible.lowerBound.addingTimeInterval(visible.upperBound.timeIntervalSince(visible.lowerBound) / 2))
+                                                            ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()))
+                                        .monospacedDigit()
+                                    if !before { Image(systemName: "chevron.right") }
+                                }
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                // The whole capsule, not just its words.
+                                .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .help("Back to the playhead")
+                            .padding(before ? .leading : .trailing, before ? TimelineLanes.labelWidth + 24 : 24)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        }
+                    }
+                    .animation(.snappy(duration: 0.25), value: playheadBefore(visible))
             }
         }
         // The filters' row coming or going takes its room from the video: the picture's edge and the controls
@@ -233,6 +261,13 @@ struct TimelineView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// Panned away from the playhead: whether it's before the view (true) or after (false); nil while it's in
+    /// view, or the view follows it.
+    func playheadBefore(_ visible: ClosedRange<Date>) -> Bool? {
+        guard timeline.panStart != nil, let playhead = timeline.playhead, !visible.contains(playhead) else { return nil }
+        return playhead < visible.lowerBound
     }
 
     /// Shows the event at the jump's time (or just that moment), playing.
@@ -542,9 +577,8 @@ struct TimelineLanes: View, @MainActor Animatable {
                                 timeline.pan(by: -value.translation.width * perPoint)
                             }
                             .onEnded { _ in panAnchor = nil })
-                        .onHover { inside in
-                            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-                        }
+                        // An open hand over the time axis, closed while it's held and dragged.
+                        .pointerStyle(panAnchor == nil ? .grabIdle : .grabActive)
                         .help("Drag to move along the day")
                 }
                 .frame(width: lanesWidth)
@@ -610,7 +644,8 @@ struct TimelineLanes: View, @MainActor Animatable {
                 }
             }
         }
-        // Two-finger sideways scrolling over the timeline pans it; up and down still scroll the lanes.
+        // Two-finger sideways scrolling over the timeline pans it (up and down still scroll the lanes); so does
+        // dragging with the middle button (the scroll wheel pressed).
         .onHover { overTimeline = $0 }
         .background(HorizontalScroll(active: overTimeline) { dx in
             let perPoint = timeline.zoom.rawValue / max(lanesWidth ?? 600, 1)
@@ -1624,18 +1659,41 @@ struct HorizontalScroll: NSViewRepresentable {
             self.onScroll = onScroll
         }
 
+        /// A drag with the middle button (the scroll wheel pressed) under way: it pans, wherever the pointer goes.
+        private var grabbing = false
+
         func start() {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self, self.active, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return event }
-                let scale = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
-                self.onScroll(event.scrollingDeltaX * scale)
-                return nil
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .otherMouseDown, .otherMouseDragged, .otherMouseUp]) { [weak self] event in
+                guard let self else { return event }
+                switch event.type {
+                case .scrollWheel:
+                    guard self.active, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return event }
+                    let scale = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
+                    self.onScroll(event.scrollingDeltaX * scale)
+                    return nil
+                // The middle button, held and dragged: the timeline follows the hand, as with two fingers.
+                case .otherMouseDown where event.buttonNumber == 2 && self.active:
+                    self.grabbing = true
+                    NSCursor.closedHand.push()
+                    return nil
+                case .otherMouseDragged where self.grabbing:
+                    self.onScroll(event.deltaX)
+                    return nil
+                case .otherMouseUp where self.grabbing:
+                    self.grabbing = false
+                    NSCursor.pop()
+                    return nil
+                default:
+                    return event
+                }
             }
         }
 
         func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            if grabbing { NSCursor.pop() }
+            grabbing = false
         }
     }
 }

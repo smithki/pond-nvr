@@ -352,6 +352,13 @@ final class TimelineModel {
         loadMoreIfNeeded()
     }
 
+    /// The view, panned away, back to following the playhead (its day the one in view again).
+    func followPlayhead() {
+        panStart = nil
+        if let playhead, Calendar.current.startOfDay(for: playhead) != day { day = Calendar.current.startOfDay(for: playhead) }
+        loadMoreIfNeeded()
+    }
+
     /// Loads the days around the view when it nears the edge of what is loaded.
     func loadMoreIfNeeded() {
         guard !loadingMore, let loaded else { return }
