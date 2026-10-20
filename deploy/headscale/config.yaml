@@ -1,0 +1,28 @@
+# Headscale, for Pond's "only over my mesh": a private WireGuard mesh between your Mac and your devices, run by you.
+# A starting point; see Headscale's own documentation for the rest. Set server_url to this server's address.
+server_url: https://mesh.example.com:8443
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+# Its own relay (DERP), so a mesh never falls back to relays run by others.
+derp:
+  server:
+    enabled: true
+    region_id: 999
+    region_code: pond
+    region_name: Pond
+    stun_listen_addr: 0.0.0.0:3479
+    private_key_path: /var/lib/headscale/derp_server_private.key
+  urls: []
+  auto_update_enabled: false
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+dns:
+  magic_dns: false
+  override_local_dns: false

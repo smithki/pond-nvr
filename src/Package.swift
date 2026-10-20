@@ -17,6 +17,12 @@ var targets: [Target] = [
     .testTarget(name: "MediaTests", dependencies: ["Media"]),
     .testTarget(name: "RecorderTests", dependencies: ["Recorder", "Ingest", "Media", "NVRCore"]),
     .testTarget(name: "NVRCLITests", dependencies: ["NVRCLI", "NVRCore", "Ingest", "Recorder", "Control"]),
+    // Finding a way through NAT: STUN's messages, and the hashes they and WebSocket need (plain Swift, for Linux).
+    .target(name: "Traversal"),
+    .testTarget(name: "TraversalTests", dependencies: ["Traversal"]),
+    // The signaling service: a blind courier for sealed envelopes, and a STUN responder (deploy/ runs it).
+    .target(name: "Signal", dependencies: ["Traversal"]),
+    .executableTarget(name: "pond-signal", dependencies: ["Signal"]),
 ]
 
 #if os(macOS)
@@ -31,6 +37,9 @@ targets += [
     .testTarget(name: "HAPCameraTests", dependencies: ["HAPCamera", "HAP", "NVRCore", "Ingest", "Devices"],
                 exclude: ["Fixtures"]),
     .testTarget(name: "NVRMacTests", dependencies: ["NVRMac"]),
+    // Remote access: identities, pairing, sealed envelopes (CryptoKit), and later the connection itself.
+    .target(name: "Remote", dependencies: ["NVRCore", "Signal", "Traversal"]),
+    .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal"]),
 ]
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
@@ -49,7 +58,7 @@ targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detectio
 // words alike (SigLIP 2), for search.
 targets.append(.target(name: "Understanding"))
 targets.append(.testTarget(name: "UnderstandingTests", dependencies: ["Understanding"], resources: [.copy("Fixtures")]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding"]
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding", "Remote"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection",

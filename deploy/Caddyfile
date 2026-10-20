@@ -1,0 +1,4 @@
+# HTTPS (and WebSocket) for the signaling service at your domain.
+{$POND_SIGNAL_DOMAIN} {
+	reverse_proxy signal:8080
+}

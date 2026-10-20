@@ -10,12 +10,15 @@ public struct Config: Codable, Equatable, Sendable {
     public var storage: Storage
     public var retention: Retention
     public var cameras: [Camera]
+    /// Reaching this Mac from outside (remote access); left out, it's off.
+    public var remote: Remote?
 
-    public init(storage: Storage, retention: Retention = Retention(), cameras: [Camera] = []) {
+    public init(storage: Storage, retention: Retention = Retention(), cameras: [Camera] = [], remote: Remote? = nil) {
         version = Self.currentVersion
         self.storage = storage
         self.retention = retention
         self.cameras = cameras
+        self.remote = remote
     }
 
     public init(from decoder: any Decoder) throws {
@@ -24,6 +27,25 @@ public struct Config: Codable, Equatable, Sendable {
         storage = try c.decode(Storage.self, forKey: .storage)
         retention = try c.decodeIfPresent(Retention.self, forKey: .retention) ?? Retention()
         cameras = try c.decodeIfPresent([Camera].self, forKey: .cameras) ?? []
+        remote = try c.decodeIfPresent(Remote.self, forKey: .remote)
+    }
+
+    /// Remote access: whether this Mac can be reached from outside, and the signaling service its devices find it
+    /// through (a WebSocket address: wss://…; see deploy/).
+    public struct Remote: Codable, Equatable, Sendable {
+        public var enabled: Bool
+        public var signaling: String?
+
+        public init(enabled: Bool = false, signaling: String? = nil) {
+            self.enabled = enabled
+            self.signaling = signaling
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+            signaling = try c.decodeIfPresent(String.self, forKey: .signaling)
+        }
     }
 
     public struct Storage: Codable, Equatable, Sendable {

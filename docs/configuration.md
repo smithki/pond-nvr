@@ -78,6 +78,17 @@ A minute being written ends in `.mp4.partial` and gets its final name when compl
 
 GB here are 1,000,000,000 bytes, as drives are sold. One camera recording its 2560×1440 main stream uses about 32 GB a day, so a 2 TB SSD holds roughly 7 weeks for one camera, or 2 weeks for four.
 
+## Remote access
+
+Optional, and off unless set: reaching this Mac from outside its network, through a signaling service you run (`deploy/`). Video goes directly between the two ends; the signaling service passes on only sealed messages it can't read.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `remote.enabled` | `false` | `true` to keep this Mac reachable: the service stays connected to the signaling service, and answers pairing. |
+| `remote.signaling` | none | The signaling service's address: `wss://HOST` (or `ws://` on your own network, for testing). |
+
+Pair devices from the command line, with the service running: `pond remote pair` shows a code and QR code (good once, for ten minutes); `pond remote devices` lists those paired; `pond remote unpair ID` removes one; `pond remote join CODE` pairs this Mac with another Pond, by the code that one showed. This Mac's keys and its devices' are kept in the Keychain (service `pond-remote`).
+
 ## Cameras
 
 ```sh

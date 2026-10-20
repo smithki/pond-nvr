@@ -14,6 +14,8 @@ public enum Brand {
     /// Keychain services: camera passwords (account: the camera's ID), and each camera's HomeKit record.
     public static let keychainService = "pond"
     public static let homeKitKeychainService = "pond-homekit"
+    /// Remote access: this Mac's own keys, and the devices paired with it.
+    public static let remoteKeychainService = "pond-remote"
 
     /// The folder for the settings file, the HomeKit status and the app's socket to the service.
     public static let supportFolder = "~/Library/Application Support/Pond"

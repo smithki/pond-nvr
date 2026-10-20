@@ -1,0 +1,62 @@
+# Pond's remote-access services, to run on a server of your own (any Linux host with Docker, reachable from the
+# internet). Pond itself stays on your Mac: it records, watches and answers; these only help your devices find it.
+#
+#   POND_SIGNAL_DOMAIN=signal.example.com docker compose up -d                   # signaling + STUN (+ HTTPS)
+#   POND_SIGNAL_DOMAIN=… docker compose --profile relay up -d                    # and a relay of your own (coturn)
+#   POND_SIGNAL_DOMAIN=… docker compose --profile mesh up -d                     # and a private mesh (Headscale)
+#
+# See README.md here.
+services:
+  # Passes sealed envelopes between paired devices (it can read none of them), and answers STUN.
+  signal:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.signal
+    restart: unless-stopped
+    expose:
+      - "8080"
+    ports:
+      - "3478:3478/udp"
+
+  # HTTPS for the signaling service (wss://your-domain), with a certificate from Let's Encrypt.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      - POND_SIGNAL_DOMAIN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - signal
+
+  # A relay of your own, for when your Mac and a device can't reach each other directly (both behind strict NAT,
+  # no IPv6). Video stays encrypted end to end through it. Set its secret in turnserver.conf and in Pond.
+  coturn:
+    profiles: ["relay"]
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+  # A private WireGuard mesh (Tailscale's open-source control server): Pond's "only over my mesh" connects over it
+  # alone. Join your Mac and devices with Tailscale's apps, pointed at this server.
+  headscale:
+    profiles: ["mesh"]
+    image: headscale/headscale:0.26
+    restart: unless-stopped
+    command: serve
+    ports:
+      - "8443:8080"
+      - "3479:3479/udp"
+    volumes:
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - headscale-data:/var/lib/headscale
+
+volumes:
+  caddy-data:
+  headscale-data:

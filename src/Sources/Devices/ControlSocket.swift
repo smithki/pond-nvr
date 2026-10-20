@@ -25,7 +25,8 @@ public enum ControlSocket {
         /// "controls", "ptz.move", "ptz.stop", "ptz.presets", "ptz.goto", "ptz.save", "ptz.remove",
         /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
         /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
-        /// "search" (events that answer `question`; `camera` unused).
+        /// "search" (events that answer `question`; `camera` unused);
+        /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
@@ -38,6 +39,9 @@ public enum ControlSocket {
         public var reading: EventQuery?
         public var byModel: Bool?
         public var plain: Bool?
+        /// "remote.unpair": the device's id; "remote.join": another Pond's pairing code.
+        public var device: String?
+        public var code: String?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
                     name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {
@@ -72,6 +76,12 @@ public enum ControlSocket {
         public var restartNeeded: Bool?
         /// "search": the question answered.
         public var search: SearchResult?
+        /// "remote.pair": the code (as text), and until when it's good; "remote.devices": those paired;
+        /// "remote.join": the Pond paired with.
+        public var pairing: String?
+        public var pairingExpires: Date?
+        public var devices: [RemoteDevice]?
+        public var paired: RemoteDevice?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -88,6 +98,17 @@ public enum ControlSocket {
             self.value = value
             self.values = values
             self.sampleRate = sampleRate
+        }
+    }
+
+    /// A device (or another Pond) paired for remote access.
+    public struct RemoteDevice: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
         }
     }
 
@@ -285,6 +306,9 @@ public final class ControlServer: @unchecked Sendable {
     /// Search (set by the service): a question answered, as the request asks.
     public var search: (@Sendable (ControlSocket.Request) async -> SearchResult)?
 
+    /// Remote access (set by the service, when it's on): the "remote." actions.
+    public var remote: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
+
     /// A camera's controls worked out again when next asked (it changed, or was removed).
     public func forget(_ id: String) { _ = lock.withLock { controls.removeValue(forKey: id) } }
 
@@ -321,6 +345,12 @@ public final class ControlServer: @unchecked Sendable {
                 } else {
                     reply.error = .notSupported
                 }
+                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
+                continue
+            }
+            if request.action.hasPrefix("remote.") {
+                let reply = remote.map { remote in blocking { await remote(request) } }
+                    ?? ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))
                 guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
                 continue
             }
