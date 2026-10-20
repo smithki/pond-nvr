@@ -22,6 +22,12 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 - **Doorbell presses** are kept as events of their own, with the picture at that moment, for every doorbell (in HomeKit or not).
 - **Left items**: a bag, suitcase or umbrella put down and left (still there 30 s later, nobody over it) is an event of its own, with its picture. Packages need a model that knows them; Pond's own is on the roadmap.
 
+### Events
+- **The Events view**: every event as a card (its picture, its subject boxed, what and when), newest first, by day, filtered by camera and kind; new ones come in as they're made, glowing a moment in their kind's colour.
+- **The activity rail**: every day kept (as long as event retention says), an hour a cell shaded by how much happened, the hours on screen outlined; a click on an hour goes there.
+- **Details** in a panel beside the grid: the event's recording looping with its boxes, what was seen, where, when and how sure, and the way to the timeline; the arrow keys step through events.
+- **Deleting events**, from a card's menu, the panel's or the Delete key: the event and its picture go; the recording and what was found in it stay.
+
 The first version: recording, the app and HomeKit.
 
 ### Renamed: nvr is now Pond
