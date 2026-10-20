@@ -7,8 +7,8 @@ camera ──RTSP──► Ingest (StreamHub: one connection per stream) ──�
  main + sub                                                      ├──► Pond NVR.app's live views (through the service's StreamRelay)
                                                                  ├──► HomeKit live view (SRTP to each viewer)
                                                                  └──► prebuffer (last few seconds) ──► HKSV (fMP4 over HomeKit Data Stream)
-camera's motion (Devices) ──► HomeKit motion sensor ──► the home hub asks for a recording
-                               later: Detection ──► events ──► Understanding ──► Search
+camera's sub-stream (Watch) ──► Detection ──► events ──► Understanding ──► Search (the service; the app and pond ask it)
+                                                 └──► HomeKit motion sensor (or the camera's own motion, Devices) ──► the home hub asks for a recording
 ```
 
 One SwiftPM package, `src/`, with a module per responsibility:
@@ -25,7 +25,7 @@ One SwiftPM package, `src/`, with a module per responsibility:
 | `HAPCamera` | A camera as an accessory (`CameraAccessory`: stream management, microphone, motion sensor, doorbell), snapshots (`Snapshotter`), the Keychain record (`HomeKitRecord`), `HomeKitHost`; live view: stream setup (`StreamManagement`), RTP packets (`RTPPacketizer`), SRTP, sound (`AudioTranscoder`: AAC-LC to AAC-ELD), optional re-encoding (`VideoTranscoder` on VideoToolbox, steered by `RateControl` from the viewer's RTCP reports) and the stream itself (`LiveSession`); HKSV: the recording services and selection (`RecordingController`), the prebuffer (`Prebuffer`) and one recording sent to the hub (`RecordingSession`) | no | done |
 | `Devices` | What a camera is (maker, model, serial, firmware, doorbell), its events (motion, doorbell presses) and its controls (PTZ, talking back, and declared items: day and night, image settings, volume, home, tours, relays), behind `CameraProvider`: `ReolinkProvider` (HTTP API) and `ONVIFProvider`; `DeviceReader` asks them in turn, `CameraControls` resolves each control to the first provider that offers it, `CameraSessions` shares one login per camera, and `ControlServer` serves the app over a socket (see [controls.md](controls.md)) | no | done |
 | `Control` | Shared by the CLI and the app: the login service (`ServiceControl`, `LaunchAgent`, launchd), its log (`LogReader`) and the wording of camera checks (`CameraCheck`) | yes | done |
-| `NVRApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and H.264 depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events. The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done but Events |
+| `NVRApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and H.264 depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`: the cards laid out by Pond; `EventRail`, `EventCard`, `EventDetail`; search asked of the service). The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done |
 | `Storage` | SQLite index of segments, events, descriptions and embeddings | yes | later |
 | `Detection` | Motion gate, YOLO in Core ML, Vision, a multi-object tracker, zones, event lifecycle | no | later |
 | `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no | done |
@@ -42,9 +42,9 @@ The order of the work; [roadmap.md](roadmap.md) has each goal's status and plan,
 2. **HAP core.** Pairing with the Home app; each camera appears with a motion sensor and snapshots. Done.
 3. **Live view.** Stream setup, SRTP video, AAC-ELD audio, several viewers, optional re-encoding. Done.
 4. **HKSV.** HomeKit Data Stream, recording settings, fMP4 from the prebuffer. Done.
-5. **Detection and events.** The motion sensor switches from raw motion to "a relevant object in a zone".
-6. **Understanding.** Descriptions and embeddings, including for older events.
-7. **Search.** Plain-language questions, results that open the clip.
+5. **Detection and events.** The motion sensor switches from raw motion to "a relevant object in a zone". Done (event clips next; packages wait for a model).
+6. **Understanding.** Descriptions and embeddings, including for older events. Done.
+7. **Search.** Plain-language questions, results that open the clip. Done.
 
 ## What Reolink's RTSP server does
 
