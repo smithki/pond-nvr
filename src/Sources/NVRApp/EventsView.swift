@@ -41,6 +41,12 @@ struct EventsView: View {
     /// still have them).
     @State private var deleting: TimelineEvent?
     @State private var deleted: Set<String> = []
+    /// How tall the filters' bar is (the grid scrolls on under it; the rail and panel start below it), and whether
+    /// the grid's scrolled at all (anything under it: its glass shows).
+    @State private var barHeight = 56.0
+    @State private var scrolled = false
+    /// Whether any card's in the strip at the grid's bottom (its glass shows).
+    @State private var underBottom = false
     @Environment(\.openSettings) private var openSettingsWindow
 
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
@@ -62,9 +68,11 @@ struct EventsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            filters
-            HStack(alignment: .top, spacing: 14) {
+        // The grid runs the view's whole height: up under the filters' bar (glass over it, the window's width, once
+        // anything's under it) and down to the window's edge (under glass there too). The rail and the panel sit
+        // between the two.
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 0) {
                 OnScreenRail(events: shown, days: keptDays, onScreen: onScreen, retention: {
                     model.settingsTab = .retention
                     openSettingsWindow()
@@ -76,27 +84,64 @@ struct EventsView: View {
                     }
                 }
                 .frame(width: ActivityRail.width)
-                .zIndex(1)
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let selected {
-                    // A panel an event (its own player), swapped at once from one to the next; it slides in and out
-                    // only as it opens and closes.
-                    ZStack {
-                        EventDetail(event: selected, camera: name(selected.camera), recordings: model.config?.storage.recordingsPath ?? "",
-                                    source: EventSource(config: model.config),
-                                    watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
-                                    earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
-                                    later: neighbour(of: selected, later: true).map { e in { choose(e) } })
-                            .id(selected.id)
-                            .transition(.identity)
-                    }
-                    .frame(width: EventDetail.width)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
+            }
+            .padding(.top, barHeight)
+            .zIndex(1)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The panel's room (the panel's drawn over the glass at the window's edge, below).
+            if selected != nil {
+                Color.clear.frame(width: EventDetail.width)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        // (The toolbar without a backing of its own: with the window inactive, macOS 26 draws a hairline under its
+        // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
+        // out.png --inactive` without this, and look under the toolbar.)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        // Glass over the grid's edges, blurring the cards that scroll on under them, the window's width, while
+        // anything's under it: under the filters, easing out just below; at the window's edge, easing in towards it.
+        .overlay(alignment: .bottom) {
+            EdgeGlass(fromTop: false)
+                .frame(height: Self.bottomFade)
+                .opacity(underBottom ? 1 : 0)
+                .animation(.easeOut(duration: 0.2), value: underBottom)
+        }
+        // The panel, over the glass's layer and clear of it at the bottom (a surface of its own): an event's own (its
+        // own player), swapped at once from one to the next; it slides in and out only as it opens and closes.
+        .overlay(alignment: .topTrailing) {
+            if let selected {
+                ZStack {
+                    EventDetail(event: selected, camera: name(selected.camera), recordings: model.config?.storage.recordingsPath ?? "",
+                                source: EventSource(config: model.config),
+                                watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
+                                earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
+                                later: neighbour(of: selected, later: true).map { e in { choose(e) } })
+                        .id(selected.id)
+                        .transition(.identity)
+                }
+                .frame(width: EventDetail.width)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, barHeight)
+                // (Ending where the glass at the window's edge begins: clear of it.)
+                .padding(.bottom, Self.bottomFade)
+                .padding(.trailing, 16)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .top) {
+            EdgeGlass(fromTop: true)
+                .frame(height: barHeight + Self.glassEase)
+                .opacity(scrolled ? 1 : 0)
+                .animation(.easeOut(duration: 0.2), value: scrolled)
+        }
+        .overlay(alignment: .top) {
+            EventsFilterBar(model: model, cameras: cameras, kinds: kinds,
+                            counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count))
+                .padding(.top, 8)
+                .onGeometryChange(for: Double.self) { $0.size.height } action: { barHeight = $0 }
+        }
+
         .onChange(of: selected?.id) { _, id in model.eventsState.selected = id }
         .onKeyPress(keys: [.delete, .deleteForward]) { _ in
             guard let selected else { return .ignored }
@@ -134,6 +179,12 @@ struct EventsView: View {
         }
     }
 
+    /// How far below the filters' bar the glass under it eases out.
+    static let glassEase = 14.0
+
+    /// The strip at the grid's bottom the cards scroll on under (softened there, to the window's edge).
+    static let bottomFade = 80.0
+
     @ViewBuilder
     var content: some View {
         if !loaded {
@@ -146,6 +197,7 @@ struct EventsView: View {
                      ? "People, vehicles, bikes and animals your cameras see appear here, each with its picture. Detection is on for each camera in its settings."
                      : "Nothing matches these filters.")
             }
+            .padding(.top, barHeight)
         } else {
             grid
         }
@@ -227,9 +279,70 @@ struct EventsView: View {
 
     // MARK: Filters
 
-    var filters: some View {
+    // MARK: Cards
+
+    /// The grid, as wide as the room it's given (read from a view that takes what it's offered: the grid's content,
+    /// laid out to that width, mustn't feed back into it). The columns come from the width there'd be without the
+    /// panel, so the panel opening narrows the cards (smoothly) instead of changing how many there are a row.
+    var grid: some View {
+        let open = selected != nil
+        return GeometryReader { geo in
+            EventGrid(sections: days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) },
+                         events: Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                         width: max(200, geo.size.width),
+                         columns: columnCount(geo.size.width + (open ? EventDetail.width + 14 : 0)),
+                         panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: EventDetail.width + 14,
+                         focus: focus, selected: selected?.id, fresh: fresh, request: $request,
+                         name: name,
+                         choose: { event in if selected == nil { panel(event) } else { choose(event) } },
+                         open: { watch($0) }, delete: { deleting = $0 },
+                         onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },
+                         onUnderBottom: { underBottom = $0 })
+        }
+    }
+
+    /// As many as fit at least 300 wide in the width there is without the panel (the panel narrows them, it doesn't
+    /// change how many there are a row).
+    func columnCount(_ available: Double) -> Int { max(1, Int((available + 14) / (300 + 14))) }
+
+    static func dayTitle(_ day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+}
+
+/// Glass over an edge of the grid, blurring the cards under it: whole at the edge, fading to nothing away from it.
+struct EdgeGlass: View {
+    let fromTop: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    /// How far it's toned back towards the window (glass lifts what's under it: lighter in the dark, and the other
+    /// way in the light), so the edges don't stand out brighter, or duller, than what's between them.
+    static let toned = 0.2
+
+    var body: some View {
+        Rectangle()
+            .fill(.clear)
+            .glassEffect(.regular.tint((scheme == .dark ? Color.black : Color.white).opacity(Self.toned)), in: Rectangle())
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: fromTop ? 0.55 : 0.15),
+                                         .init(color: .black.opacity(0), location: 1)],
+                                 startPoint: fromTop ? .top : .bottom, endPoint: fromTop ? .bottom : .top))
+            .allowsHitTesting(false)
+    }
+}
+
+/// The filters, a bar over the top of the grid: the camera, and a chip a kind (how many there are of it), on or off.
+struct EventsFilterBar: View {
+    let model: AppModel
+    let cameras: [Config.Camera]
+    let kinds: [TimelineEvent.Kind]
+    let counts: [TimelineEvent.Kind: Int]
+
+    var body: some View {
         HStack(spacing: 10) {
-            Picker("Camera", selection: Binding(get: { camera }, set: { camera = $0 })) {
+            Picker("Camera", selection: Binding(get: { model.eventsState.camera }, set: { model.eventsState.camera = $0 })) {
                 Text("All Cameras").tag(String?.none)
                 Divider()
                 ForEach(cameras) { Text($0.name).tag(Optional($0.id)) }
@@ -237,16 +350,16 @@ struct EventsView: View {
             .labelsHidden()
             .fixedSize()
             ForEach(kinds) { kind in
-                let on = !hidden.contains(kind)
+                let on = !model.eventsState.hidden.contains(kind)
                 Button {
                     withAnimation(.snappy(duration: 0.25)) {
-                        if on { hidden.insert(kind) } else { hidden.remove(kind) }
+                        if on { model.eventsState.hidden.insert(kind) } else { model.eventsState.hidden.remove(kind) }
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: kind.symbol).foregroundStyle(on ? kind.color : .secondary)
                         Text(kind.title)
-                        Text("\(forCamera.count { $0.kind == kind })").monospacedDigit().foregroundStyle(.secondary)
+                        Text("\(counts[kind] ?? 0)").monospacedDigit().foregroundStyle(.secondary)
                     }
                     .font(.callout)
                     .padding(.horizontal, 10)
@@ -260,38 +373,8 @@ struct EventsView: View {
             }
             Spacer()
         }
-    }
-
-    // MARK: Cards
-
-    /// The grid, as wide as the room it's given (read from a view that takes what it's offered: the grid's content,
-    /// laid out to that width, mustn't feed back into it). The columns come from the width there'd be without the
-    /// panel, so the panel opening narrows the cards (smoothly) instead of changing how many there are a row.
-    var grid: some View {
-        let open = selected != nil
-        return GeometryReader { geo in
-            EventGrid(sections: days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) },
-                         events: Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                         width: max(200, geo.size.width),
-                         columns: columnCount(geo.size.width + (open ? EventDetail.width + 14 : 0)),
-                         panelOpen: open, panelWidth: EventDetail.width + 14,
-                         focus: focus, selected: selected?.id, fresh: fresh, request: $request,
-                         name: name,
-                         choose: { event in if selected == nil { panel(event) } else { choose(event) } },
-                         open: { watch($0) }, delete: { deleting = $0 },
-                         onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 })
-        }
-    }
-
-    /// As many as fit at least 300 wide in the width there is without the panel (the panel narrows them, it doesn't
-    /// change how many there are a row).
-    func columnCount(_ available: Double) -> Int { max(1, Int((available + 14) / (300 + 14))) }
-
-    static func dayTitle(_ day: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 
@@ -346,6 +429,8 @@ struct ActivityRail: View {
     @State private var hovered: (back: Int, h: Int, count: Int, hour: Date)?
     /// How far the rail is scrolled (the hover label's drawn over it, not in it, so nothing cuts it off).
     @State private var offset = 0.0
+    /// How far down its list starts (the filters' bar over its top).
+    @State private var inset = 0.0
     /// The hours outlined as drawn: following what's in view, animated; shown first, grown out from its middle.
     @State private var drawn: RailSpan?
 
@@ -397,10 +482,15 @@ struct ActivityRail: View {
             .frame(width: Self.rowWidth - Self.cellsX + Self.pad, alignment: .leading)
             .padding(.leading, Self.cellsX - Self.pad)
             .padding(.top, 6)
-            .padding(.bottom, 12)
+            // (Clear of the glass at the window's edge, scrolled to the end.)
+            .padding(.bottom, EventsView.bottomFade)
         }
         .scrollIndicators(.never)
-        .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, y in offset = y }
+        // (Its offset from under the filters' bar, which it scrolls on under: the label's placed in the view's frame.)
+        .onScrollGeometryChange(for: [Double].self) { [$0.contentOffset.y, $0.contentInsets.top] } action: { _, v in
+            offset = v[0]
+            inset = v[1]
+        }
         .onChange(of: span, initial: true) { _, span in follow(span) }
         // The hovered hour, said beside it at once: over the rail (past its edge if need be), not cut off by it.
         .overlay(alignment: .topLeading) {
@@ -413,7 +503,7 @@ struct ActivityRail: View {
                     .padding(.vertical, 4)
                     .glassEffect(.regular, in: .capsule)
                     .fixedSize()
-                    .position(x: max(x, 56), y: y < 24 ? y + Self.row + 14 : y - 14)
+                    .position(x: max(x, 56), y: y < inset + 24 ? y + Self.row + 14 : y - 14)
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }

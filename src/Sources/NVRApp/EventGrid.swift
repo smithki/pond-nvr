@@ -167,6 +167,10 @@ struct EventGrid: View {
     let width: Double
     let columns: Int
     let panelOpen: Bool
+    /// How far down the filters' bar over the grid's top reaches, and how tall the strip at its bottom is (under the
+    /// window's edge's glass): the grid scrolls on under both, its cards in view only between them.
+    var topInset = 0.0
+    var bottomInset = 0.0
     let panelWidth: Double
     /// The card the panel's opening or closing centres (the chosen one, or the one that was).
     let focus: String?
@@ -181,6 +185,10 @@ struct EventGrid: View {
     let onVisible: (Set<String>) -> Void
     /// Whether it's at the top (new events slide in there; scrolled down, they're added without moving the view).
     let onTop: (Bool) -> Void
+    /// Whether anything's scrolled under the bar above it, and whether any card or day is in the strip at its
+    /// bottom.
+    var onScrolled: (Bool) -> Void = { _ in }
+    var onUnderBottom: (Bool) -> Void = { _ in }
 
     /// The animation the panel opens and closes with, the cards moving with it (the spring's own, too, to tell where
     /// they are part way).
@@ -190,8 +198,14 @@ struct EventGrid: View {
     static let bring = Animation.spring(duration: 0.5, bounce: 0.2)
 
     @State private var position = ScrollPosition(edge: .top)
-    @State private var offset = 0.0
-    @State private var viewHeight = 0.0
+    /// What the scroll view says of itself, as it says it; everything the grid works out from it goes through
+    /// `metrics` (with the grid's own room for the bars), so there's one account of where things are.
+    @State private var reading = GridScrollReading()
+    var metrics: GridMetrics { GridMetrics(reading: reading, topRoom: topInset, bottomRoom: bottomInset) }
+    /// How far down the cards are scrolled (from their top, as the layout counts), and the height between the bars,
+    /// where cards are in view.
+    var offset: Double { metrics.offset }
+    var viewHeight: Double { metrics.visibleHeight }
     /// Cards also made through a move (those on screen before it and after), so none is let go mid-move.
     @State private var keep: Set<String> = []
     /// The panel's move under way, and the phase moves run by (up one a move, animated).
@@ -203,6 +217,8 @@ struct EventGrid: View {
     @State private var scrollerTakesRoom = NSScroller.preferredScrollerStyle == .legacy
     @State private var told: Set<String> = []
     @State private var toldTop = true
+    @State private var toldScrolled = false
+    @State private var toldUnder = false
     @State private var cache = LayoutCache()
 
     var layout: EventGridLayout { cache.layout(sections: sections, width: width - gutter, columns: columns) }
@@ -225,9 +241,7 @@ struct EventGrid: View {
                         .frame(width: layout.width, height: EventGridLayout.headerHeight, alignment: .bottomLeading)
                         // The pinned one is drawn over the grid instead (below).
                         .opacity(i == pinned && offset > h.y + 0.5 ? 0 : 1)
-                        .modifier(FlipPlacement(phase: phase, target: phase, start: flip?.start ?? phase,
-                                                from: CGPoint(x: 0, y: flip.flatMap { f in f.header(h.day).map { $0 + f.offset } } ?? h.y),
-                                                to: CGPoint(x: 0, y: h.y)))
+                        .modifier(headerPlacement(h))
                 }
                 ForEach(Array(made) + extra, id: \.id) { item in
                     if let event = events[item.id] {
@@ -235,9 +249,7 @@ struct EventGrid: View {
                                   fresh: fresh.contains(item.id),
                                   choose: { choose(event) }, open: { open(event) }, delete: { delete(event) })
                             .frame(width: item.frame.width, height: item.frame.height)
-                            .modifier(FlipPlacement(phase: phase, target: phase, start: flip?.start ?? phase,
-                                                    from: flip.flatMap { f in f.card(item.id).map { CGPoint(x: $0.x, y: $0.y + f.offset) } } ?? item.frame.origin,
-                                                    to: item.frame.origin))
+                            .modifier(cardPlacement(item))
                             // New ones grow in; any other made (scrolled near, or through a move) is simply there. Gone,
                             // they shrink away (deleted, filtered out; those let go far off screen, unseen). Either about
                             // the card's middle, where it's drawn (its frame's at the corner, the card moved from there).
@@ -262,22 +274,32 @@ struct EventGrid: View {
                 }
             }
             .frame(width: layout.width, height: layout.height, alignment: .topLeading)
+            // Room for the filters' bar above and a strip below (both drawn over the grid by the Events view, over
+            // glass): the cards scroll on under them. (Padding, not bars of the scroll view's: under a bar of its
+            // own, the system lays a band of its own when the pointer's over it, the grid's width only.)
+            .padding(.top, topInset)
+            .padding(.bottom, bottomInset)
             .padding(.trailing, gutter > 0 ? Self.scrollerGap : 0)
         }
+        .contentMargins(.top, topInset, for: .scrollIndicators)
+        .contentMargins(.bottom, bottomInset, for: .scrollIndicators)
+        // (The system's own edge effect blurs too little to see, and not at all under the filters: off, so it doesn't
+        // add to the glass the Events view lays over both edges, the window's width. Still needed? Capture the
+        // edges with scripts/capture-window.swift with it on and off, and compare.)
+        .scrollEdgeEffectHidden(true, for: [.top, .bottom])
         // (Its scroller, if it takes room, a gap short of the panel.)
         .padding(.trailing, gutter > 0 ? Self.scrollerGap : 0)
         .scrollPosition($position)
-        .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, y in
-            offset = y
-            tell()
-        }
-        .onGeometryChange(for: Double.self) { $0.size.height } action: { height in
+        .onScrollGeometryChange(for: GridScrollReading.self) { g in
+            GridScrollReading(contentOffset: g.contentOffset.y, insetTop: g.contentInsets.top, containerHeight: g.containerSize.height)
+        } action: { _, now in
             let first = viewHeight == 0
-            viewHeight = height
+            reading = now
+            let measured = viewHeight > 0
             if laidOutOpen == nil { laidOutOpen = panelOpen }
             tell()
             // A move asked before it knew its height (coming back with an event open): now.
-            if first, let request {
+            if first, measured, let request {
                 self.request = nil
                 perform(request)
             }
@@ -288,7 +310,7 @@ struct EventGrid: View {
                 let next = pinned + 1 < layout.headers.count ? layout.headers[pinned + 1].y : .infinity
                 header(layout.headers[pinned].day, count: layout.headers[pinned].count, pinned: true)
                     .frame(height: EventGridLayout.headerHeight, alignment: .bottomLeading)
-                    .offset(y: min(0, next - offset - EventGridLayout.headerHeight))
+                    .offset(y: metrics.pinnedHeaderY(nextHeaderAt: next, headerHeight: EventGridLayout.headerHeight))
             }
         }
         .clipped()
@@ -298,7 +320,11 @@ struct EventGrid: View {
             self.request = nil
             perform(request)
         }
-        .onChange(of: sections) { old, _ in eventsChanged(from: old) }
+        .onChange(of: sections) { old, _ in
+            eventsChanged(from: old)
+            // (What's on screen, and in the strips, may be other cards now, though nothing scrolled.)
+            tell()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
             scrollerTakesRoom = NSScroller.preferredScrollerStyle == .legacy
         }
@@ -358,6 +384,20 @@ struct EventGrid: View {
             toldTop = top
             onTop(top)
         }
+        let scrolled = offset > 1
+        if scrolled != toldScrolled {
+            toldScrolled = scrolled
+            onScrolled(scrolled)
+        }
+        let strip = metrics.bottomStrip
+        let under = !layout.cards(in: strip).isEmpty
+            || layout.headers.contains { $0.y + EventGridLayout.headerHeight >= strip.lowerBound && $0.y <= strip.upperBound }
+        if under != toldUnder {
+            toldUnder = under
+            onUnderBottom(under)
+        }
+
+
     }
 
     /// Whether a card is wholly in view, below the pinned header.
@@ -444,8 +484,8 @@ struct EventGrid: View {
         instant.disablesAnimations = true
         withTransaction(instant) {
             flip = GridFlip(before: before, beforeOffset: offset, cards: cards, headers: headers, offset: target, start: start, began: now)
-            if abs(target - offset) > 0.5 { position.scrollTo(y: target) }
-            offset = target
+            if abs(target - offset) > 0.5 { scroll(to: target) }
+            reading.contentOffset = metrics.contentOffset(showing: target)
         }
         withAnimation(Self.panelAnimation) {
             phase += 1
@@ -456,16 +496,34 @@ struct EventGrid: View {
         }
     }
 
+    /// Where a card's drawn: part way from where it was to where it goes, mid-move; where it goes, else.
+    func cardPlacement(_ item: (id: String, frame: CGRect)) -> FlipPlacement {
+        FlipPlacement(phase: phase, target: phase, start: flip?.start ?? phase,
+                      from: flip.flatMap { f in f.card(item.id).map { CGPoint(x: $0.x, y: $0.y + f.offset) } } ?? item.frame.origin,
+                      to: item.frame.origin)
+    }
+
+    func headerPlacement(_ h: (day: Date, y: Double, count: Int)) -> FlipPlacement {
+        FlipPlacement(phase: phase, target: phase, start: flip?.start ?? phase,
+                      from: CGPoint(x: 0, y: flip.flatMap { f in f.header(h.day).map { $0 + f.offset } } ?? h.y),
+                      to: CGPoint(x: 0, y: h.y))
+    }
+
+    /// Scrolled so the cards' `y` is at the top of the room between the bars.
+    func scroll(to y: Double) {
+        position.scrollTo(y: metrics.contentOffset(showing: y))
+    }
+
     func perform(_ request: GridScroll) {
         switch request.kind {
         case .top:
-            withAnimation(request.animated ? Self.bring : nil) { position.scrollTo(y: 0) }
+            withAnimation(request.animated ? Self.bring : nil) { position.scrollTo(edge: .top) }
         case let .centre(id, always):
             guard always || !wholly(id), let target = layout.centring(id, view: viewHeight) else { return }
             if request.animated {
-                withAnimation(Self.bring) { position.scrollTo(y: target) }
+                withAnimation(Self.bring) { scroll(to: target) }
             } else {
-                position.scrollTo(y: target)
+                scroll(to: target)
             }
         }
     }
@@ -479,6 +537,46 @@ struct EventGrid: View {
     /// don't run under it nor it against the panel.
     var gutter: Double { scrollerTakesRoom ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 2 * Self.scrollerGap : 0 }
     static let scrollerGap = 6.0
+}
+
+/// What the grid's scroll view says of itself: its offset, the inset at its top, its height.
+struct GridScrollReading: Equatable {
+    var contentOffset = 0.0
+    var insetTop = 0.0
+    var containerHeight = 0.0
+}
+
+/// Where things are in the grid: from what its scroll view says, and the grid's own room at its top (for the
+/// filters' bar, drawn over it) and bottom (the strip under the glass at the window's edge). The one account of it:
+/// the scroll offsets, the height in view, where the pinned day goes.
+///
+/// As macOS 26 has it (measured; not documented): the scroll view's inset at its top counts the window's toolbar,
+/// though the grid's frame is below the toolbar, and nothing of the grid's own room (that's padding in its
+/// content). Its offset counts from under that inset: at the top, it's minus the inset. So the inset's what the
+/// offset's measured from, but not what the height in view is less: that's the grid's own room. The tests hold
+/// these figures; if a macOS changes them, they say so.
+struct GridMetrics: Equatable {
+    var reading: GridScrollReading
+    /// The grid's room above its cards and below them.
+    var topRoom: Double
+    var bottomRoom: Double
+
+    /// How far down the cards are scrolled, from their top (as the layout counts).
+    var offset: Double { reading.contentOffset + reading.insetTop }
+    /// The height between the room above and below, where cards are in view.
+    var visibleHeight: Double { max(0, reading.containerHeight - topRoom - bottomRoom) }
+
+    /// The scroll view's offset that has the cards' `y` at the top of the height in view.
+    func contentOffset(showing y: Double) -> Double { y - reading.insetTop }
+
+    /// Where the pinned day's header goes in the grid's frame: just under the room above, pushed up by the next
+    /// day's as it arrives (`next`, its place in the layout).
+    func pinnedHeaderY(nextHeaderAt next: Double, headerHeight: Double) -> Double {
+        topRoom + min(0, next - offset - headerHeight)
+    }
+
+    /// The layout's stretch under the room below (the glass at the window's edge).
+    var bottomStrip: ClosedRange<Double> { (offset + visibleHeight) ... (offset + visibleHeight + bottomRoom) }
 }
 
 /// The last layout, kept while its inputs are the same (the grid's body runs each frame of a scroll).

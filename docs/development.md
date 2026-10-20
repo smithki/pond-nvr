@@ -26,7 +26,14 @@ make app           # dist/Pond NVR.app
 open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots "dist/Pond NVR.app"
 ```
 
-(Liquid Glass comes out flatter in these pictures than on screen; with screen-recording permission, `screencapture -l <window id>` takes the real thing.) `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.
+(Liquid Glass comes out flatter in these pictures than on screen.) For the real thing, `scripts/capture-window.swift` opens a fresh copy of the app in the background, captures only its main window and quits it; it needs screen-recording permission for the terminal:
+
+```sh
+swift scripts/capture-window.swift /tmp/events.png --mode events --appearance light
+swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks behind another app's window
+```
+
+ `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.
 
 **Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
 

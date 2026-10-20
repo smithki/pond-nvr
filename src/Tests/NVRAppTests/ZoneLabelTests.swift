@@ -304,3 +304,40 @@ extension Date {
         #expect(abs(drawn - 0.05 * size.width) < 4, "drawn \(drawn) wide")
     }
 }
+
+/// The grid's account of where things are, with the figures macOS 26 gives (measured): a window toolbar 52 tall
+/// (counted in the scroll view's inset, though the grid's below it), the filters' bar's room 50, the strip at the
+/// bottom 80, a scroll view 1079 tall. If a macOS reports otherwise, these say how.
+@Suite struct GridMetricsTests {
+    static func metrics(contentOffset: Double) -> GridMetrics {
+        GridMetrics(reading: GridScrollReading(contentOffset: contentOffset, insetTop: 52, containerHeight: 1079),
+                    topRoom: 50, bottomRoom: 80)
+    }
+
+    @Test func atTheTopTheCardsAreScrolledNothing() {
+        // (The scroll view's offset, at its top, is minus its inset.)
+        let top = Self.metrics(contentOffset: -52)
+        #expect(top.offset == 0)
+        // The height in view is between the grid's own room above and below, not less the toolbar.
+        #expect(top.visibleHeight == 949)
+    }
+
+    @Test func scrollingToACardAndReadingItBackAgree() {
+        let m = Self.metrics(contentOffset: -52)
+        for y in [0.0, 300, 1234.5] {
+            #expect(Self.metrics(contentOffset: m.contentOffset(showing: y)).offset == y)
+        }
+    }
+
+    @Test func thePinnedDayIsJustUnderTheBarUntilTheNextPushesItUp() {
+        let m = Self.metrics(contentOffset: 448)   // scrolled 500
+        #expect(m.pinnedHeaderY(nextHeaderAt: .infinity, headerHeight: 58) == 50)
+        // The next day's header 20 below the top of the height in view: the pinned one's pushed up 38.
+        #expect(m.pinnedHeaderY(nextHeaderAt: 520, headerHeight: 58) == 12)
+    }
+
+    @Test func theBottomStripIsTheStretchJustBelowWhatsInView() {
+        let m = Self.metrics(contentOffset: 448)
+        #expect(m.bottomStrip == 1449 ... 1529)
+    }
+}
