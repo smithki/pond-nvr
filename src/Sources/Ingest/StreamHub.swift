@@ -124,8 +124,8 @@ private final class Upstream: @unchecked Sendable {
             condition.broadcast()
         }
         // Only the reader thread uses the session from here on.
-        nonisolated(unsafe) let session = opened
-        let reader = Thread { [self] in read(session) }
+        nonisolated(unsafe) let source = opened
+        let reader = Thread { [self] in read(source) }
         reader.name = "stream \(url)"
         reader.qualityOfService = .userInitiated
         reader.start()

@@ -103,7 +103,7 @@ public enum MP4 {
         var avcC: [UInt8] = [1, v.sps[1], v.sps[2], v.sps[3], 0xFF, 0xE1] + u16(UInt16(v.sps.count)) + v.sps
             + [1] + u16(UInt16(v.pps.count)) + v.pps
         if [100, 110, 122, 144].contains(v.sps[1]) {
-            avcC += [0xFC | 1, 0xF8, 0xF8, 0]   // 4:2:0, 8-bit, no SPS extensions
+            avcC += [UInt8(0xFC | 1), 0xF8, 0xF8, 0]   // 4:2:0, 8-bit, no SPS extensions
         }
         let avc1 = box("avc1", zeros(6), u16(1), zeros(16), u16(UInt16(v.width)), u16(UInt16(v.height)),
                        u32(0x0048_0000), u32(0x0048_0000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xFFFF),

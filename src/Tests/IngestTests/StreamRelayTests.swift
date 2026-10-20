@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import Ingest
 
+// (StreamRelay is the Mac's: its local socket uses Darwin's.)
+#if canImport(Darwin)
+
 @Suite(.serialized) struct StreamRelayTests {
     /// A socket path short enough for a local socket, unique to the test.
     func socketPath() -> String { "/tmp/pond-relay-\(UUID().uuidString.prefix(8)).sock" }
@@ -87,3 +90,4 @@ import Testing
         #expect(connector.cameras.first?.closed == true)
     }
 }
+#endif

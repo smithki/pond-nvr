@@ -19,7 +19,8 @@ public final class PrintLog: EventLog, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         print("\(formatter.string(from: Date())) \(source): \(message)")
-        fflush(stdout)
+        // (Every stream: naming stdout itself is shared mutable state to Swift 6 on Linux.)
+        fflush(nil)
     }
 }
 

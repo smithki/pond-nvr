@@ -75,6 +75,8 @@ final class FakeH264Camera: PacketSource, @unchecked Sendable {
         recorder.close()
     }
 
+    // (The relay and the stream keeper are the Mac's.)
+    #if canImport(Darwin)
     @Test func theRelayCarriesReplayedPackets() throws {
         let camera = FakeH264Camera(gop: 5)
         let hub = hub(camera)
@@ -104,6 +106,7 @@ final class FakeH264Camera: PacketSource, @unchecked Sendable {
         #expect(got.first?.replayed == true)
         viewer.close()
     }
+    #endif
 
     @Test func keyframesAreRecognisedHoweverPacked() {
         func starts(_ payload: [UInt8]) -> Bool { RTPPacket(FakeH264Camera.rtp(payload, timestamp: 0, sequence: 0))!.startsH264Keyframe }
