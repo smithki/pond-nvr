@@ -1,8 +1,9 @@
 // `pond search QUESTION [--plain] [--top N]`: events that answer a question in plain words ("cats in the living room
 // last night", "a man in a red jacket", "packages this week"), best first, as the Events view finds them: how the
 // question was read (by the Mac's own model; --plain, by the plain rules), then the events, each with its sentence.
-// The pictures' model is the app's (or POND_SEARCH_MODELS, a folder: the repository's models/search).
+// Asked of the service, which does the searching (it has to be running).
 #if canImport(NVRMac)
+import Devices
 import Foundation
 import NVRCore
 import Understanding
@@ -23,15 +24,22 @@ enum SearchCommand {
         guard let config = try? ConfigStore(path: configPath).load() else { return fail("The settings can't be read (\(configPath)).") }
         guard let store = EventStore(path: config.storage.databasePath, readOnly: true) else { return fail("No events yet.") }
 
-        let cameraNames = config.cameras.map(\.name)
-        let zoneNames = Array(Set(config.cameras.flatMap { $0.zones.map(\.name) }))
+        // Asked of the service (search is done there, where what it takes is kept ready).
+        var request = ControlSocket.Request(camera: "", action: "search")
+        request.question = question
+        request.plain = plain
+        let client = ControlClient(path: ControlSocket.path(nextTo: configPath))
         let start = Date()
-        let (query, byModel) = blocking {
-            plain ? (PlainReader.read(question, cameras: cameraNames, zones: zoneNames), false)
-                : await QuestionReader.read(question, cameras: cameraNames, zones: zoneNames)
+        let asked = request
+        let reply = blocking { await client.ask(asked, timeout: 60) }
+        guard let result = reply.search else {
+            return fail(reply.error == .unreachable || reply.error == nil
+                ? "Search is done by Pond's service, which isn't running (pond service start)."
+                : "The search didn't go through: \(reply.error!.description)")
         }
+        let query = result.query, byModel = result.byModel
         let readIn = Date().timeIntervalSince(start)
-        print("Read \(byModel ? "by the Mac's own model" : "by the plain rules") in \(String(format: "%.1f", readIn)) s:")
+        print("Answered in \(String(format: "%.1f", readIn)) s, read \(byModel ? "by the Mac's own model" : "by the plain rules"):")
         if !query.kinds.isEmpty { print("  kinds: \(query.kinds.sorted().joined(separator: ", "))") }
         if !query.things.isEmpty { print("  things: \(query.things.sorted().joined(separator: ", "))") }
         if !query.cameras.isEmpty { print("  cameras: \(query.cameras.sorted().joined(separator: ", "))") }
@@ -42,22 +50,17 @@ enum SearchCommand {
         if let hours = query.time.hours { print("  between \(hours.from):00 and \(hours.to):00") }
         if let appearance = query.appearance { print("  looking like: \(appearance)") }
 
+        // (The events themselves, and their sentences, read here: to show them.)
         let since = Date().addingTimeInterval(-Double(config.retention.events.days) * 86400)
         let events = store.events(since: since).map(\.event)
-        let siglip = query.appearance == nil ? nil : SigLIP.builtIn.flatMap { try? SigLIP(folder: $0, pictures: false) }
-        let words = query.appearance.flatMap { try? siglip?.embed($0) }
-        let cameraIDs = Set(config.cameras.filter { query.cameras.contains($0.name) }.map(\.id))
-        let zoneIDs = Set(config.cameras.flatMap { $0.zones.filter { query.zones.contains($0.name) }.map(\.id) })
         let understood = store.understanding(since: since)
-        let answer = EventSearch.answer(query, events: events, understood: understood, cameraIDs: cameraIDs, zoneIDs: zoneIDs,
-                                        words: words, probability: siglip.map { s in { s.probability($0) } })
-        if answer.appearanceIgnored { print("  (how they looked isn't used: no picture model, and no sentences yet)") }
-        print("\n\(answer.hits.count) event\(answer.hits.count == 1 ? "" : "s"):")
+        if result.appearanceIgnored { print("  (how they looked isn't used: no picture model, and no sentences yet)") }
+        print("\n\(result.ids.count) event\(result.ids.count == 1 ? "" : "s"):")
         let byID = Dictionary(events.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let names = Dictionary(config.cameras.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-        for hit in answer.hits.prefix(top) {
-            guard let e = byID[hit.id] else { continue }
-            print("  \(format.string(from: e.start))  \(names[e.camera] ?? e.camera)  \(String(format: "%.2f", hit.score))  "
+        for id in result.ids.prefix(top) {
+            guard let e = byID[id] else { continue }
+            print("  \(format.string(from: e.start))  \(names[e.camera] ?? e.camera)  "
                 + (understood[e.id]?.description.flatMap { $0.isEmpty ? nil : $0 } ?? CameraEvent.words(e.labels)))
         }
         return 0

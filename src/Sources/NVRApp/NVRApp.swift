@@ -212,10 +212,6 @@ struct ContentView: View {
             }
         }
         .task {
-            // Search, ready before it's asked.
-            if model.config != nil { EventSearcher.prepare() }
-        }
-        .task {
             if launchArgument("--settings") != nil { openSettings() }
             // --camera ID: that camera's settings, open (for trying them out, and pictures of them).
             if let id = launchArgument("--camera") {

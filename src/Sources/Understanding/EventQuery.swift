@@ -6,7 +6,7 @@
 import Foundation
 import FoundationModels
 
-public struct EventQuery: Equatable, Sendable {
+public struct EventQuery: Equatable, Sendable, Codable {
     /// Pond's kinds: person, vehicle, bike, animal, package, item, ring.
     public var kinds: Set<String> = []
     /// The detector's words for particular things: cat, dog, car, truck, bus, bicycle…
@@ -31,6 +31,29 @@ public struct EventQuery: Equatable, Sendable {
     public var isEmpty: Bool { kinds.isEmpty && things.isEmpty && cameras.isEmpty && zones.isEmpty && time.isEmpty && appearance == nil }
 
     public static let kindNames = ["person", "vehicle", "bike", "animal", "package", "item", "ring"]
+}
+
+/// A search answered: the question, how it was read (and whether by the Mac's own model), and the events that answer
+/// it. What the service sends the app and `pond search`.
+public struct SearchResult: Equatable, Sendable, Codable {
+    public var question: String
+    public var query: EventQuery
+    public var byModel: Bool
+    /// The events' ids, best first (newest first, when only filters were asked).
+    public var ids: [String]
+    /// Whether they're ranked by how they looked (else by time).
+    public var ranked: Bool
+    /// How they looked was asked, and nothing could be judged by it yet (no picture model, no sentences).
+    public var appearanceIgnored: Bool
+
+    public init(question: String, query: EventQuery, byModel: Bool, ids: [String], ranked: Bool, appearanceIgnored: Bool) {
+        self.question = question
+        self.query = query
+        self.byModel = byModel
+        self.ids = ids
+        self.ranked = ranked
+        self.appearanceIgnored = appearanceIgnored
+    }
 }
 
 /// Words, to the kinds and things they name.

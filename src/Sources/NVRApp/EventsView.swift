@@ -46,7 +46,9 @@ struct EventsView: View {
     /// A question asked (the search field), its answer (the events shown are those it found), and whether it's
     /// being answered now.
     @State private var question = ""
-    @State private var search: EventSearchResult?
+    @State private var search: SearchResult?
+    /// Why the last question went unanswered (the service isn't running).
+    @State private var searchProblem: EventSearcher.Problem?
     @State private var searching = false
     /// It's taking a while (the models still being readied: the first search after an install or update).
     @State private var slow = false
@@ -149,7 +151,7 @@ struct EventsView: View {
         .overlay(alignment: .top) {
             EventsFilterBar(model: model, cameras: cameras, kinds: kinds,
                             counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count),
-                            question: $question, searching: searching, slow: slow, result: search,
+                            question: $question, searching: searching, slow: slow, problem: searchProblem, result: search,
                             submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
                 .padding(.top, 8)
                 .onGeometryChange(for: Double.self) { $0.size.height } action: { barHeight = $0 }
@@ -184,8 +186,6 @@ struct EventsView: View {
             return .handled
         }
         .task {
-            // (Search's words model, ready before it's needed.)
-            EventSearcher.prepare()
             // Opened with a question (`--search QUESTION`: for trying it, and pictures for the docs): asked at once.
             if let asked = launchArgument("--search"), question.isEmpty {
                 question = asked
@@ -238,21 +238,27 @@ struct EventsView: View {
     /// off it).
     func ask(reading: (EventQuery, Bool)? = nil) {
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let config = model.config else { return clearSearch() }
+        guard !text.isEmpty, model.config != nil else { return clearSearch() }
         searching = true
         slow = false
+        searchProblem = nil
         Task {
             try? await Task.sleep(for: .seconds(2))
             if searching { withAnimation(.easeOut(duration: 0.2)) { slow = true } }
         }
         Task {
-            let result = await EventSearcher.search(text, reading: reading, config: config)
+            let answer = await EventSearcher.search(text, reading: reading, client: model.controlClient)
             // (Answered after another was asked: not this one's to show.)
             guard question.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
             searching = false
             slow = false
-            withAnimation(.snappy(duration: 0.3)) { search = result }
-            request = GridScroll(kind: .top, animated: false)
+            switch answer {
+            case let .success(result):
+                withAnimation(.snappy(duration: 0.3)) { search = result }
+                request = GridScroll(kind: .top, animated: false)
+            case let .failure(problem):
+                searchProblem = problem
+            }
         }
     }
 
@@ -260,6 +266,7 @@ struct EventsView: View {
         question = ""
         searching = false
         slow = false
+        searchProblem = nil
         withAnimation(.snappy(duration: 0.3)) { search = nil }
     }
 
@@ -418,9 +425,10 @@ struct EventsFilterBar: View {
     /// done when it's asked, cleared, or a part's taken off.
     @Binding var question: String
     let searching: Bool
-    /// Searching's taking a while: said, so it doesn't look stuck.
+    /// Searching's taking a while: said, so it doesn't look stuck. Or it couldn't be done, and why.
     var slow = false
-    let result: EventSearchResult?
+    var problem: EventSearcher.Problem?
+    let result: SearchResult?
     let submit: () -> Void
     let clear: () -> Void
     let remove: (SearchPart) -> Void
@@ -428,8 +436,13 @@ struct EventsFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             filters
-            if searching && slow {
-                Label("Getting search ready\u{2026} The first search after Pond is installed or updated takes a little longer.",
+            if let problem {
+                Label(problem.words, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else if searching && slow {
+                Label("Getting search ready\u{2026} The first search after Pond starts takes a little longer.",
                       systemImage: "hourglass")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -511,7 +524,7 @@ enum SearchPart: Hashable {
 /// How a question was read, a chip a part (each one taken off with its ×): what kinds and things, which cameras
 /// and zones, when, and how they looked; marked when the Mac's own model read it.
 struct SearchReading: View {
-    let result: EventSearchResult
+    let result: SearchResult
     let remove: (SearchPart) -> Void
 
     var body: some View {

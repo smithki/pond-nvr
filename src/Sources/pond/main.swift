@@ -164,6 +164,15 @@ struct RecordingAndHomeKit: ServiceRunning {
             case let .failed(why): (why, false, true)
             }
         }
+        // Search, for the app and `pond search`: done here, where what it takes is kept ready.
+        if let events {
+            let search = SearchService(store: events, cameras: { cameras.cameras }, keptDays: { config.retention.events.days })
+            search.prepare()
+            controls.search = { request in
+                await search.search(request.question ?? "", reading: request.reading, byModel: request.byModel ?? false,
+                                    plain: request.plain ?? false)
+            }
+        }
         controls.start()
         recording.run(for: seconds)
         cameras.stopAll()

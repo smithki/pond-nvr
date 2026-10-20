@@ -13,6 +13,7 @@ import Darwin
 import Foundation
 import Ingest
 import NVRCore
+import Understanding
 
 public enum ControlSocket {
     public static func path(nextTo configPath: String) -> String {
@@ -23,13 +24,20 @@ public enum ControlSocket {
         public var camera: String
         /// "controls", "ptz.move", "ptz.stop", "ptz.presets", "ptz.goto", "ptz.save", "ptz.remove",
         /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
-        /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off).
+        /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
+        /// "search" (events that answer `question`; `camera` unused).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
         public var name: String?
         public var item: String?
         public var value: Config.Controls.Value?
+        /// "search": the question; how it was read already (a part taken off it: not read again) and whether by the
+        /// Mac's model; or read by the plain rules only (`plain`).
+        public var question: String?
+        public var reading: EventQuery?
+        public var byModel: Bool?
+        public var plain: Bool?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
                     name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {
@@ -62,6 +70,8 @@ public enum ControlSocket {
         /// "reload": what changed, in words; and whether the service must be restarted for it instead.
         public var reloaded: String?
         public var restartNeeded: Bool?
+        /// "search": the question answered.
+        public var search: SearchResult?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -272,6 +282,9 @@ public final class ControlServer: @unchecked Sendable {
     /// it failed.
     public var reload: (@Sendable () -> (summary: String, restart: Bool, failed: Bool))?
 
+    /// Search (set by the service): a question answered, as the request asks.
+    public var search: (@Sendable (ControlSocket.Request) async -> SearchResult)?
+
     /// A camera's controls worked out again when next asked (it changed, or was removed).
     public func forget(_ id: String) { _ = lock.withLock { controls.removeValue(forKey: id) } }
 
@@ -295,6 +308,16 @@ public final class ControlServer: @unchecked Sendable {
                 var reply = ControlSocket.Reply()
                 if let (summary, restart, failed) = reload?() {
                     if failed { reply.error = .failed(summary) } else { reply.reloaded = summary; reply.restartNeeded = restart }
+                } else {
+                    reply.error = .notSupported
+                }
+                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
+                continue
+            }
+            if request.action == "search" {
+                var reply = ControlSocket.Reply()
+                if let search {
+                    reply.search = blocking { await search(request) }
                 } else {
                     reply.error = .notSupported
                 }

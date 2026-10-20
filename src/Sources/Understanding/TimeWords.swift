@@ -4,14 +4,19 @@
 import Foundation
 
 /// A stretch of time, and/or a part of every day.
-public struct TimeFilter: Equatable, Sendable {
+public struct TimeFilter: Equatable, Sendable, Codable {
     public var range: ClosedRange<Date>?
     /// Hours of the day (from, to: 22, 6 runs over midnight), on any day of `range` (or any day at all).
     public var hours: Hours?
 
-    public struct Hours: Equatable, Sendable {
+    public struct Hours: Equatable, Sendable, Codable {
         public var from: Int
         public var to: Int
+
+        public init(from: Int, to: Int) {
+            self.from = from
+            self.to = to
+        }
 
         public func contains(_ hour: Int) -> Bool { from <= to ? (hour >= from && hour < to) : (hour >= from || hour < to) }
     }

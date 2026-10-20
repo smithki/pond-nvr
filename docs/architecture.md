@@ -29,7 +29,7 @@ One SwiftPM package, `src/`, with a module per responsibility:
 | `Storage` | SQLite index of segments, events, descriptions and embeddings | yes | later |
 | `Detection` | Motion gate, YOLO in Core ML, Vision, a multi-object tracker, zones, event lifecycle | no | later |
 | `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no | done |
-| Search (in `Watch`) | `Understander` (the service: each event described and embedded, older ones too), the understanding table in `EventStore`, and `EventSearch` (filters, then ranking by picture match and sentence words). See [search.md](search.md) | yes | done |
+| Search (in `Watch`) | `Understander` (the service: each event described and embedded, older ones too), the understanding table in `EventStore`, `EventSearch` (filters, then ranking by picture match and sentence words), and `SearchService` (the service answering questions for the app and `pond search` over the control socket, its models kept ready). See [search.md](search.md) | yes | done |
 
 The models sit behind small protocols (`DescriptionModel`, the query parser), so an MLX or cloud model could replace Apple's without touching the rest. The default is on-device only.
 

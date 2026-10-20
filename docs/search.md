@@ -24,6 +24,12 @@ An event is kept if either says it fits. With neither to go by yet (no picture m
 
 The sentences also stand for the events across the app: on their cards, in their details, on the timeline. Until an event has one (or without Apple Intelligence), it shows what was found ("A person and a dog.").
 
+## Where it's done
+
+In Pond's background service, which keeps what search takes ready: the words' model loaded, the Mac's language model warmed as it starts (with one question asked unseen, as being told to get ready isn't enough). The app's search field and `pond search` ask it over its control socket (`"action": "search"`), and get back how the question was read and the events' ids, best first. A search answers in well under a second, the first after the service starts too. With the service stopped, the search field says search needs it.
+
+The words' model runs on the CPU (half a second to load, milliseconds a question); the picture model on the Neural Engine, in the service only, where readying it for the Neural Engine (some seconds, the first time each program loads it after an install or update) keeps no one waiting.
+
 ## Understanding events
 
 The service describes and embeds each event once it ends, one at a time in the background, newest first, and works back through the events kept before, so search reaches as far back as events are kept. Settings › General › Descriptions and search says whether descriptions are being written (and why not: Apple Intelligence off, with Open Settings… to turn it on; still getting ready; a Mac that can't run it) and how many events are done. A sentence takes about a second on an M6; the first after starting, a few.
@@ -56,4 +62,4 @@ pond search "…" --plain          # read by the plain rules
 pond events                      # each event's sentence under it, once it has one
 ```
 
-`pond search` uses the app's picture model, or `POND_SEARCH_MODELS` (a folder, such as the repository's `models/search`).
+`pond search` asks the running service, as the app does. The service finds the models in the app, or in `POND_SEARCH_MODELS` (a folder, such as the repository's `models/search`, for running it from a build).

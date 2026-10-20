@@ -36,8 +36,8 @@ targets += [
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCore"]))
 // What cameras say they are and what they offer, brand by brand (Reolink, ONVIF).
-targets.append(.target(name: "Devices", dependencies: ["NVRCore", "Ingest"]))
-targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRCore"]))
+targets.append(.target(name: "Devices", dependencies: ["NVRCore", "Ingest", "Understanding"]))
+targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRCore", "Understanding"]))
 // Detection: a model (built in, or added) run on the Neural Engine, its answers in Pond's terms.
 targets.append(.target(name: "Detection"))
 targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
