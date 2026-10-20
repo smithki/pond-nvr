@@ -88,6 +88,9 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
     var snapshot: URL?
     /// Still going on (as last read): drawn up to the present.
     var ongoing = false
+    /// Its own clip (the service's copy of its stretch of the recording), once made, and the moment it begins.
+    var clip: URL?
+    var clipStart: Date?
     /// Where its subject was in its picture (fractions), for a box on it.
     var box: Detection.Box?
     /// How sure the model was of its subject, at best.
@@ -160,7 +163,9 @@ struct EventSource: Sendable {
             return TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
                                  end: kept.ongoing ? max(e.end, now) : max(e.end, e.start.addingTimeInterval(1)),
                                  summary: e.category == .ring ? summary(e) : described[e.id] ?? summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
-                                 ongoing: kept.ongoing, box: e.box,
+                                 ongoing: kept.ongoing,
+                                 clip: kept.clip.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
+                                 clipStart: kept.clipStart, box: e.box,
                                  confidence: e.category == .ring ? nil : e.confidence,
                                  labels: e.category == .ring ? [:] : e.labels,
                                  zones: e.zones.map { zoneNames["\(e.camera)/\($0)"] ?? $0 })

@@ -304,8 +304,7 @@ public final class CameraWatcher: @unchecked Sendable {
     /// The picture as a JPEG in the events folder (the same file for an event, written again as it gets better);
     /// its path relative to the folder, or nil.
     private func savePicture(_ picture: CVPixelBuffer, for event: CameraEvent) -> String? {
-        let relative = snapshots[event.id]
-            ?? "events/\(camera)/\(Self.dayFormatter.string(from: event.start))-\(event.id.prefix(8).lowercased()).jpg"
+        let relative = snapshots[event.id] ?? Self.eventFile(event, extension: "jpg")
         snapshots[event.id] = relative
         let path = (eventsFolder as NSString).appendingPathComponent(relative)
         let context = Self.context
@@ -320,6 +319,12 @@ public final class CameraWatcher: @unchecked Sendable {
             CGImageDestinationFinalize(out)
         }
         return relative
+    }
+
+    /// Where an event's files go, in the events folder: "events/<camera>/<day>/<time>-<id>.<extension>" (its
+    /// picture, its clip), dated by its start (retention's sweep reads it from the name).
+    public static func eventFile(_ event: CameraEvent, extension: String) -> String {
+        "events/\(event.camera)/\(dayFormatter.string(from: event.start))-\(event.id.prefix(8).lowercased()).\(`extension`)"
     }
 
     static let context = CIContext()

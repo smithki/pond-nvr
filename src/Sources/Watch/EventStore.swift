@@ -42,6 +42,9 @@ public final class EventStore: @unchecked Sendable {
             guard made else { return nil }
             // Added since the table was first made (fails, harmlessly, when it's there).
             sqlite3_exec(db, "ALTER TABLE events ADD COLUMN zones TEXT", nil, nil, nil)
+            // Its clip (in the events folder; "" when none could be made) and the moment the clip begins.
+            sqlite3_exec(db, "ALTER TABLE events ADD COLUMN clip TEXT", nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE events ADD COLUMN clip_start REAL", nil, nil, nil)
         }
     }
 
@@ -67,13 +70,14 @@ public final class EventStore: @unchecked Sendable {
     }
 
     /// Deleted (the user's doing), and noted as deleted, so the service, if it's still at one (going on, or taken
-    /// up again), doesn't write it back. The names of their pictures, to delete too.
+    /// up again), doesn't write it back. The names of their pictures and clips, to delete too.
     public func delete(_ ids: [String], now: Date = Date()) -> [String] {
         queue.sync {
             run("BEGIN", [])
             var pictures: [String] = []
             for id in ids {
-                pictures += rows("SELECT snapshot FROM events WHERE id = ?", [id]) { $0.text(0) }
+                pictures += rows("SELECT snapshot, clip FROM events WHERE id = ?", [id]) { [$0.text(0), $0.text(1)] }
+                    .flatMap { $0.compactMap { $0 }.filter { !$0.isEmpty } }
                 run("DELETE FROM events WHERE id = ?", [id])
                 run("DELETE FROM understanding WHERE id = ?", [id])
                 run("INSERT OR REPLACE INTO deleted (id, time) VALUES (?, ?)", [id, now.timeIntervalSince1970])
@@ -93,6 +97,23 @@ public final class EventStore: @unchecked Sendable {
             run("DELETE FROM sightings WHERE camera = ?", [camera])
             run("COMMIT", [])
         }
+    }
+
+    // MARK: Clips (the service writes them; the app plays them)
+
+    /// Ended events still without a clip (nor a try at one), that ended before `before` (the recording of their end
+    /// finished by then), newest first.
+    public func toClip(endedBefore before: Date, limit: Int) -> [CameraEvent] {
+        queue.sync {
+            rows("SELECT \(Self.columns) FROM events WHERE ongoing = 0 AND clip IS NULL AND end < ? ORDER BY start DESC LIMIT ?",
+                 [before.timeIntervalSince1970, limit], Self.kept)
+        }.map(\.event)
+    }
+
+    /// An event's clip kept (its file in the events folder, and the moment it begins); "" for none (no recording of
+    /// it), so it isn't tried again.
+    public func clipped(_ id: String, clip: String, start: Date?) {
+        queue.sync { _ = run("UPDATE events SET clip = ?, clip_start = ? WHERE id = ?", [clip, start?.timeIntervalSince1970, id]) }
     }
 
     // MARK: Understanding (the service writes it; the app reads it, for search)
@@ -231,6 +252,16 @@ public final class EventStore: @unchecked Sendable {
     public struct Kept: Sendable, Equatable {
         public var event: CameraEvent
         public var ongoing: Bool
+        /// Its clip (in the events folder), once there is one, and the moment it begins.
+        public var clip: String?
+        public var clipStart: Date?
+
+        public init(event: CameraEvent, ongoing: Bool, clip: String? = nil, clipStart: Date? = nil) {
+            self.event = event
+            self.ongoing = ongoing
+            self.clip = clip
+            self.clipStart = clipStart
+        }
     }
 
     /// Events begun since `since`, oldest first (one camera's, or all).
@@ -246,7 +277,7 @@ public final class EventStore: @unchecked Sendable {
         queue.sync { rows("SELECT \(Self.columns) FROM events WHERE id = ?", [id], Self.kept).first?.event }
     }
 
-    static let columns = "id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones"
+    static let columns = "id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones, clip, clip_start"
 
     static func kept(_ row: Row) -> Kept? {
         guard let id = row.text(0), let camera = row.text(1), let category = row.text(4).flatMap(DetectedCategory.init) else { return nil }
@@ -256,7 +287,8 @@ public final class EventStore: @unchecked Sendable {
                                 end: Date(timeIntervalSince1970: row.double(3)), category: category, labels: labels,
                                 confidence: row.double(6), snapshot: row.text(7), box: box, summary: row.text(9),
                                 zones: row.text(11).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? [])
-        return Kept(event: event, ongoing: row.int(10) != 0)
+        return Kept(event: event, ongoing: row.int(10) != 0, clip: row.text(12).flatMap { $0.isEmpty ? nil : $0 },
+                    clipStart: row.isNull(13) ? nil : Date(timeIntervalSince1970: row.double(13)))
     }
 
     // MARK: SQLite

@@ -36,8 +36,9 @@ struct EventDetail: View {
     @State private var origin: Date?
     @State private var sightings: [Sighting] = []
     @State private var noRecording = false
-    /// The recording file it begins in.
+    /// The recording file it begins in (or its clip, `isClip`).
     @State private var recording: String?
+    @State private var isClip = false
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
 
@@ -168,7 +169,9 @@ struct EventDetail: View {
                     Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
                 }
                 if let recording {
-                    Button("Show Recording in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording)]) }
+                    Button(isClip ? "Show Clip in Finder" : "Show Recording in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording)])
+                    }
                 }
                 Divider()
                 Button("Delete Event…", role: .destructive, action: delete)
@@ -228,15 +231,30 @@ struct EventDetail: View {
         }
     }
 
-    /// The clip (a composition of the recording from a little before to a little after), looping and muted, and
-    /// what was found in it.
+    /// Its clip (its own, once the service has made it; until then, the recording from a little before to a little
+    /// after), looping and muted, and what was found in it.
     func prepare() async {
         // Not while the panel's sliding in (or the arrows are stepping through): the player's made once it's still.
         try? await Task.sleep(for: .seconds(0.45))
         guard !Task.isCancelled else { return }
+        let camera = event.camera, source = self.source
+        // Its own clip, when the service has made it (kept as long as events are): played as it is.
+        if let clip = event.clip, let start = event.clipStart, FileManager.default.fileExists(atPath: clip.path) {
+            let asset = AVURLAsset(url: clip)
+            if let duration = try? await asset.load(.duration), duration.seconds > 0.5 {
+                let end = start.addingTimeInterval(duration.seconds)
+                let found = await Task.detached { source?.sightings(camera: camera, from: start, to: end) ?? [] }.value
+                guard !Task.isCancelled else { return }
+                recording = clip.path
+                isClip = true
+                play(AVPlayerItem(asset: asset), length: duration.seconds, from: start, sightings: found)
+                return
+            }
+        }
+        // Until then (or if it's gone): the recording round it.
         let from = event.start.addingTimeInterval(-Self.around)
         let to = (event.ongoing ? Date() : event.end).addingTimeInterval(Self.around)
-        let recordings = self.recordings, camera = event.camera, source = self.source
+        let recordings = self.recordings
         let spans = await Task.detached {
             RecordingIndex.spans(base: recordings, camera: camera, from: from, to: to, writing: true)
         }.value
@@ -252,7 +270,11 @@ struct EventDetail: View {
             return
         }
         guard !Task.isCancelled else { return }
-        let item = AVPlayerItem(asset: built.composition)
+        play(AVPlayerItem(asset: built.composition), length: length, from: from, sightings: found)
+    }
+
+    /// Played, looping and muted, from `from` (its first moment's time: the boxes follow it).
+    func play(_ item: AVPlayerItem, length: Double, from: Date, sightings found: [Sighting]) {
         let player = AVQueuePlayer()
         player.isMuted = true
         looper = AVPlayerLooper(player: player, templateItem: item,

@@ -42,7 +42,7 @@ targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRC
 targets.append(.target(name: "Detection"))
 targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
 // Watching the cameras: their pictures decoded, motion, the model, tracks, and events kept.
-targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore", "Understanding"],
+targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore", "Recorder", "Understanding"],
                       linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore", "Recorder", "Understanding"]))
 // Understanding what was seen: a sentence an event (the Mac's own language model), and embeddings of pictures and

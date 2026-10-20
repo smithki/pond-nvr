@@ -186,6 +186,33 @@ import Understanding
         #expect(store.understanding(since: t0)["e2"] == nil)
     }
 
+    /// Clips: asked for once an event's ended (and its minute's complete), kept with when they begin, and deleted with
+    /// it; one that couldn't be made isn't asked for again.
+    @Test func clipsAreAskedForKeptAndDeleted() throws {
+        let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for (i, id) in ["e1", "e2", "e3"].enumerated() {
+            store.save(CameraEvent(id: id, camera: "porch", start: t0.addingTimeInterval(Double(i) * 10), end: t0.addingTimeInterval(Double(i) * 10 + 5),
+                                   category: .person, labels: ["person": 1], confidence: 0.8, snapshot: "events/porch/\(id).jpg"),
+                       ongoing: id == "e3")
+        }
+        store.flush()
+        // Ended ones only, and only those ended before the time given; newest first.
+        #expect(store.toClip(endedBefore: t0.addingTimeInterval(100), limit: 10).map(\.id) == ["e2", "e1"])
+        #expect(store.toClip(endedBefore: t0.addingTimeInterval(10), limit: 10).map(\.id) == ["e1"])
+        store.clipped("e1", clip: "events/porch/e1.mp4", start: t0.addingTimeInterval(-3))
+        store.clipped("e2", clip: "", start: nil)
+        #expect(store.toClip(endedBefore: t0.addingTimeInterval(100), limit: 10).isEmpty)
+        let kept = store.events(since: t0.addingTimeInterval(-60))
+        #expect(kept.first { $0.event.id == "e1" }?.clip == "events/porch/e1.mp4")
+        #expect(kept.first { $0.event.id == "e1" }?.clipStart == t0.addingTimeInterval(-3))
+        #expect(kept.first { $0.event.id == "e2" }?.clip == nil)
+        // Deleted: its picture and its clip, to delete too.
+        #expect(Set(store.delete(["e1"], now: t0)) == ["events/porch/e1.jpg", "events/porch/e1.mp4"])
+    }
+
     /// A camera removed with its recordings: its events and sightings go, the others' stay.
     @Test func aRemovedCamerasEventsGo() throws {
         let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"

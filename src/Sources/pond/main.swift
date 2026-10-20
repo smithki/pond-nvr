@@ -138,6 +138,12 @@ struct RecordingAndHomeKit: ServiceRunning {
         let understander = events.map { Understander(store: $0, eventsFolder: config.storage.eventsPath) { line in log.log("pond", line) } }
         understander?.start()
         defer { understander?.stop() }
+        // Each event's own clip, copied out of the recording once its minute's complete (kept as long as events are).
+        let clips = events.map {
+            ClipKeeper(store: $0, recordings: config.storage.recordingsPath, eventsFolder: config.storage.eventsPath) { line in log.log("pond", line) }
+        }
+        clips?.start()
+        defer { clips?.stop() }
         cameras.startAll()
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")
