@@ -196,7 +196,9 @@ struct EventsView: View {
         }
     }
 
-    func name(_ camera: String) -> String { cameras.first { $0.id == camera }?.name ?? camera }
+    /// A camera's name; one that's been removed (its events kept, with its recordings, until retention lets them go)
+    /// is said to be.
+    func name(_ camera: String) -> String { cameras.first { $0.id == camera }?.name ?? "Removed camera" }
 
     /// Opens the panel on an event, or closes it (nil): the panel slides, the cards reshape and the chosen card's
     /// row glides to the middle of the grid, one animation (the grid scrolls in it).

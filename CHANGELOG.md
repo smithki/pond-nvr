@@ -27,6 +27,7 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 - **The activity rail**: every day kept (as long as event retention says), an hour a cell shaded by how much happened, the hours on screen outlined; a click on an hour goes there.
 - **Details** in a panel beside the grid: the event's recording looping with its boxes, what was seen, where, when and how sure, and the way to the timeline; the arrow keys step through events.
 - **Deleting events**, from a card's menu, the panel's or the Delete key: the event and its picture go; the recording and what was found in it stay.
+- **Removing a camera with its recordings removes its events too** (and what was found in its pictures). Removed without them, its events stay until retention lets them go, shown as from a removed camera.
 
 The first version: recording, the app and HomeKit.
 

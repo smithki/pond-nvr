@@ -172,6 +172,12 @@ struct EventSource: Sendable {
         }
     }
 
+    /// A camera's events and what was found in its pictures, all deleted (its pictures go with its folders).
+    func deleteCamera(_ camera: String) {
+        guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database) else { return }
+        store.deleteCamera(camera)
+    }
+
     /// What the service found in a camera's pictures within `from`…`to` (for boxes over the recording).
     func sightings(camera: String, from: Date, to: Date) -> [Sighting] {
         guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }

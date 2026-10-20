@@ -1155,7 +1155,7 @@ struct EditCameraSheet: View {
 
     var removeMessage: String {
         let size = recordingsSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "…"
-        return "Its settings and password are removed. Its recordings and event clips (\(size)) can stay until retention deletes them, or be deleted now, which cannot be undone."
+        return "Its settings and password are removed. Its recordings, events and their pictures (\(size)) can stay until retention deletes them, or be deleted now, which cannot be undone."
     }
 
     var header: some View {

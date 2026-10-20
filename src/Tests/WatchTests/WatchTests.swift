@@ -155,6 +155,25 @@ import Testing
         #expect(store.events(since: .distantPast).isEmpty)
     }
 
+    /// A camera removed with its recordings: its events and sightings go, the others' stay.
+    @Test func aRemovedCamerasEventsGo() throws {
+        let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for (id, camera) in [("e1", "porch"), ("e2", "drive"), ("e3", "porch")] {
+            store.save(CameraEvent(id: id, camera: camera, start: t0, end: t0, category: .person, labels: ["person": 1], confidence: 0.8),
+                       ongoing: false)
+        }
+        store.save([Sighting(camera: "porch", time: t0, label: "person", category: .person, confidence: 0.8, box: .init(x: 0, y: 0, width: 0.1, height: 0.2)),
+                    Sighting(camera: "drive", time: t0, label: "car", category: .vehicle, confidence: 0.7, box: .init(x: 0, y: 0, width: 0.2, height: 0.1))])
+        store.flush()
+        store.deleteCamera("porch")
+        #expect(store.events(since: .distantPast).map(\.event.id) == ["e2"])
+        #expect(store.sightings(camera: "porch", from: .distantPast, to: .distantFuture).isEmpty)
+        #expect(store.sightings(camera: "drive", from: .distantPast, to: .distantFuture).count == 1)
+    }
+
     /// Deleted, it stays deleted: the service, still at it (going on, or taken up again), doesn't write it back.
     @Test func aDeletedEventIsntWrittenBack() throws {
         let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"

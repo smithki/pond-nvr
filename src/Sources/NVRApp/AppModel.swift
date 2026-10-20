@@ -470,7 +470,11 @@ final class AppModel {
         reloadService()
         guard deleteRecordings else { return }
         Task {
-            let failed = await Task.detached { CameraRecordings.delete(of: id, config: before) }.value
+            let failed = await Task.detached {
+                // Its events too (their pictures are in its folders): kept, they'd point at what's gone.
+                EventSource(config: before)?.deleteCamera(id)
+                return CameraRecordings.delete(of: id, config: before)
+            }.value
             if !failed.isEmpty { alert = "Some recordings could not be deleted:\n" + failed.joined(separator: "\n") }
         }
     }

@@ -80,6 +80,17 @@ public final class EventStore: @unchecked Sendable {
         }
     }
 
+    /// A camera's events, and what was found in its pictures, all deleted (the camera's removed, its recordings
+    /// with it).
+    public func deleteCamera(_ camera: String) {
+        queue.sync {
+            run("BEGIN", [])
+            run("DELETE FROM events WHERE camera = ?", [camera])
+            run("DELETE FROM sightings WHERE camera = ?", [camera])
+            run("COMMIT", [])
+        }
+    }
+
     /// Events left ongoing by a service that stopped short: ended where they were last seen.
     public func endOngoing() {
         queue.async { [self] in run("UPDATE events SET ongoing = 0 WHERE ongoing = 1", []) }
