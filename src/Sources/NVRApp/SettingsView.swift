@@ -2,6 +2,8 @@
 import AppKit
 import NVRCore
 import SwiftUI
+import Understanding
+import Watch
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general, cameras, doctor, storage, retention, recorder
@@ -62,10 +64,65 @@ struct GeneralSettings: View {
             } footer: {
                 Text("Shared by the app and the pond command. Change it with POND_CONFIG or --config.").foregroundStyle(.secondary)
             }
+            UnderstandingSection()
             Section {
                 LabeledContent("Version", value: Brand.version)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Descriptions and search: whether the Mac's own model is writing sentences (and if not, why), whether there's a
+/// picture model, and how far the service has come through the events kept.
+struct UnderstandingSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var availability = Describer.availability
+    @State private var progress: (events: Int, described: Int, embedded: Int)?
+
+    var body: some View {
+        Section {
+            LabeledContent("Descriptions") {
+                HStack(spacing: 8) {
+                    Text(Self.words(availability)).foregroundStyle(availability == .available ? .primary : .secondary)
+                    if availability == .turnedOff {
+                        Button("Open Settings\u{2026}") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension")!)
+                        }
+                    }
+                }
+            }
+            LabeledContent("Pictures", value: SigLIP.builtIn == nil ? "No picture model in this copy of Pond" : "Matched to words by SigLIP 2")
+            if let progress, progress.events > 0 {
+                LabeledContent("Events understood") {
+                    Text("\(max(progress.described, progress.embedded)) of \(progress.events)").monospacedDigit()
+                }
+            }
+        } header: {
+            Text("Descriptions and search")
+        } footer: {
+            Text("Each event\u{2019}s picture is described in a sentence and matched to words, for searching events in plain words. On this Mac only: never in the cloud. Events from before are done too, in the background.")
+                .foregroundStyle(.secondary)
+        }
+        .task {
+            // (Kept up to date while it's shown: the service works through the events in the background.)
+            while !Task.isCancelled {
+                availability = Describer.availability
+                if let path = model.config?.storage.databasePath {
+                    progress = await Task.detached { EventStore(path: path, readOnly: true)?.understandingProgress() }.value
+                }
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    static func words(_ availability: Describer.Availability) -> String {
+        switch availability {
+        case .available: "By Apple Intelligence, on this Mac"
+        case .turnedOff: "Off: Apple Intelligence is turned off"
+        case .notReady: "Waiting: Apple Intelligence is still getting ready"
+        case .notEligible: "Not on this Mac: it can\u{2019}t run Apple Intelligence"
+        case .unavailable: "Not available now"
+        }
     }
 }

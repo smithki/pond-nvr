@@ -63,6 +63,14 @@ app: build
 	  xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Models" >/dev/null && \
 	  cp "$${m%.mlpackage}.json" "$(APP)/Contents/Resources/Models/"; \
 	done
+	@# Search's model (models/search/, made by scripts/convert-siglip.py; not in the repository), when it's there:
+	@# without it, search works on what was found and the descriptions alone.
+	@rm -rf "$(APP)/Contents/Resources/Search"
+	@if [ -e models/search/siglip2.json ]; then \
+	  mkdir -p "$(APP)/Contents/Resources/Search" && \
+	  for m in models/search/*.mlpackage; do xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Search" >/dev/null; done && \
+	  cp models/search/siglip2.json models/search/siglip2-tokenizer.json "$(APP)/Contents/Resources/Search/"; \
+	fi
 	@codesign --force --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
 	@codesign --force --sign "$(SIGN)" "$(APP)"
 	@echo "✓ $(APP)"

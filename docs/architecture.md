@@ -28,8 +28,8 @@ One SwiftPM package, `src/`, with a module per responsibility:
 | `NVRApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and H.264 depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events. The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done but Events |
 | `Storage` | SQLite index of segments, events, descriptions and embeddings | yes | later |
 | `Detection` | Motion gate, YOLO in Core ML, Vision, a multi-object tracker, zones, event lifecycle | no | later |
-| `Understanding` | Event descriptions (Foundation Models, image input) and MobileCLIP embeddings, one event at a time | no | later |
-| `Search` | A question becomes filters plus a semantic part (Foundation Models), then SQL, full-text search and cosine ranking | the execution | later |
+| `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no | done |
+| Search (in `Watch`) | `Understander` (the service: each event described and embedded, older ones too), the understanding table in `EventStore`, and `EventSearch` (filters, then ranking by picture match and sentence words). See [search.md](search.md) | yes | done |
 
 The models sit behind small protocols (`DescriptionModel`, the query parser), so an MLX or cloud model could replace Apple's without touching the rest. The default is on-device only.
 

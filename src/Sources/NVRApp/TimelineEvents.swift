@@ -152,11 +152,14 @@ struct EventSource: Sendable {
     /// The events begun within `from`…`to`, oldest first; the one going on now ends now.
     func events(from: Date, to: Date, now: Date = Date()) -> [TimelineEvent] {
         guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }
+        // Each one's sentence (the service's, once it's written one: what's in the picture, in words) stands for it;
+        // until then, what was found.
+        let described = store.understanding(since: from).compactMapValues { $0.description.flatMap { $0.isEmpty ? nil : $0 } }
         return store.events(since: from).filter { $0.event.start < to }.map { kept in
             let e = kept.event
             return TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
                                  end: kept.ongoing ? max(e.end, now) : max(e.end, e.start.addingTimeInterval(1)),
-                                 summary: summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
+                                 summary: e.category == .ring ? summary(e) : described[e.id] ?? summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
                                  ongoing: kept.ongoing, box: e.box,
                                  confidence: e.category == .ring ? nil : e.confidence,
                                  labels: e.category == .ring ? [:] : e.labels,

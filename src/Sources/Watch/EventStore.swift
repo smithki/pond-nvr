@@ -36,6 +36,8 @@ public final class EventStore: @unchecked Sendable {
                 track INTEGER, counted INTEGER NOT NULL DEFAULT 1);
             CREATE INDEX IF NOT EXISTS sightings_by_time ON sightings (camera, time);
             CREATE TABLE IF NOT EXISTS deleted (id TEXT PRIMARY KEY, time REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS understanding (
+                id TEXT PRIMARY KEY, description TEXT, scene BLOB, subject BLOB, embedder TEXT, time REAL NOT NULL);
             """, nil, nil, nil) == SQLITE_OK
             guard made else { return nil }
             // Added since the table was first made (fails, harmlessly, when it's there).
@@ -73,6 +75,7 @@ public final class EventStore: @unchecked Sendable {
             for id in ids {
                 pictures += rows("SELECT snapshot FROM events WHERE id = ?", [id]) { $0.text(0) }
                 run("DELETE FROM events WHERE id = ?", [id])
+                run("DELETE FROM understanding WHERE id = ?", [id])
                 run("INSERT OR REPLACE INTO deleted (id, time) VALUES (?, ?)", [id, now.timeIntervalSince1970])
             }
             run("COMMIT", [])
@@ -85,11 +88,94 @@ public final class EventStore: @unchecked Sendable {
     public func deleteCamera(_ camera: String) {
         queue.sync {
             run("BEGIN", [])
+            run("DELETE FROM understanding WHERE id IN (SELECT id FROM events WHERE camera = ?)", [camera])
             run("DELETE FROM events WHERE camera = ?", [camera])
             run("DELETE FROM sightings WHERE camera = ?", [camera])
             run("COMMIT", [])
         }
     }
+
+    // MARK: Understanding (the service writes it; the app reads it, for search)
+
+    /// What's known of an event beyond what was found: a sentence (or "" when one was asked for and none came), and
+    /// embeddings of its picture (the whole view) and of a close-up of its subject, by the model named.
+    public struct Understood: Sendable, Equatable {
+        public var description: String?
+        public var scene: [Float]?
+        public var subject: [Float]?
+        public var embedder: String?
+
+        public init(description: String? = nil, scene: [Float]? = nil, subject: [Float]? = nil, embedder: String? = nil) {
+            self.description = description
+            self.scene = scene
+            self.subject = subject
+            self.embedder = embedder
+        }
+    }
+
+    /// Kept for an event (what's given; what isn't, left as it was).
+    public func understood(_ id: String, _ u: Understood, now: Date = Date()) {
+        queue.sync {
+            _ = run("""
+            INSERT INTO understanding (id, description, scene, subject, embedder, time) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET description = COALESCE(excluded.description, description),
+                scene = COALESCE(excluded.scene, scene), subject = COALESCE(excluded.subject, subject),
+                embedder = COALESCE(excluded.embedder, embedder), time = excluded.time
+            """, [id, u.description, u.scene.map(Self.data), u.subject.map(Self.data), u.embedder, now.timeIntervalSince1970])
+        }
+    }
+
+    /// Ended events with a picture still to understand, newest first: without a sentence (if sentences are being
+    /// written), or without embeddings by `embedder` (if there's one).
+    public func toUnderstand(describing: Bool, embedder: String?, limit: Int) -> [CameraEvent] {
+        guard describing || embedder != nil else { return [] }
+        return queue.sync {
+            let wanted = [describing ? "u.description IS NULL" : nil, embedder != nil ? "u.embedder IS NOT ?" : nil]
+                .compactMap { $0 }.joined(separator: " OR ")
+            return rows("""
+            SELECT e.id FROM events e LEFT JOIN understanding u ON u.id = e.id
+            WHERE e.ongoing = 0 AND e.snapshot IS NOT NULL AND (u.id IS NULL OR \(wanted))
+            ORDER BY e.start DESC LIMIT ?
+            """, (embedder.map { [$0] } ?? []) + [limit]) { $0.text(0) }
+        }.compactMap { event($0) }
+    }
+
+    /// How far understanding's come: the ended events with a picture, and how many of those have a sentence (or a
+    /// try at one), and embeddings.
+    public func understandingProgress() -> (events: Int, described: Int, embedded: Int) {
+        queue.sync {
+            rows("""
+            SELECT COUNT(*), SUM(u.description IS NOT NULL), SUM(u.scene IS NOT NULL)
+            FROM events e LEFT JOIN understanding u ON u.id = e.id WHERE e.ongoing = 0 AND e.snapshot IS NOT NULL
+            """, []) { row in (row.int(0), row.int(1), row.int(2)) }.first ?? (0, 0, 0)
+        }
+    }
+
+    /// What's known of one event, if anything.
+    public func understanding(of id: String) -> Understood? {
+        queue.sync {
+            rows("SELECT description, scene, subject, embedder FROM understanding WHERE id = ?", [id]) { row in
+                Understood(description: row.text(0), scene: row.floats(1), subject: row.floats(2), embedder: row.text(3))
+            }.first
+        }
+    }
+
+    /// What's known of events begun since `since`, by id.
+    public func understanding(since: Date) -> [String: Understood] {
+        queue.sync {
+            var out: [String: Understood] = [:]
+            for (id, u) in rows("""
+            SELECT u.id, u.description, u.scene, u.subject, u.embedder FROM understanding u JOIN events e ON e.id = u.id
+            WHERE e.start >= ?
+            """, [since.timeIntervalSince1970], { row -> (String, Understood)? in
+                guard let id = row.text(0) else { return nil }
+                return (id, Understood(description: row.text(1), scene: row.floats(2), subject: row.floats(3), embedder: row.text(4)))
+            }) { out[id] = u }
+            return out
+        }
+    }
+
+    static func data(_ floats: [Float]) -> Data { floats.withUnsafeBufferPointer { Data(buffer: $0) } }
 
     /// Events left ongoing by a service that stopped short: ended where they were last seen.
     public func endOngoing() {
@@ -116,6 +202,7 @@ public final class EventStore: @unchecked Sendable {
         let before = now.addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
         queue.async { [self] in
             run("DELETE FROM events WHERE start < ?", [before])
+            run("DELETE FROM understanding WHERE id NOT IN (SELECT id FROM events)", [])
             run("DELETE FROM sightings WHERE time < ?", [before])
             // (A deleted one's note is needed only while the service might be at it still.)
             run("DELETE FROM deleted WHERE time < ?", [now.addingTimeInterval(-86400).timeIntervalSince1970])
@@ -149,20 +236,27 @@ public final class EventStore: @unchecked Sendable {
     /// Events begun since `since`, oldest first (one camera's, or all).
     public func events(since: Date, camera: String? = nil) -> [Kept] {
         queue.sync {
-            rows("""
-            SELECT id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones FROM events
-            WHERE start >= ? AND (? IS NULL OR camera = ?) ORDER BY start
-            """, [since.timeIntervalSince1970, camera, camera]) { row in
-                guard let id = row.text(0), let camera = row.text(1), let category = row.text(4).flatMap(DetectedCategory.init) else { return nil }
-                let labels = row.text(5).flatMap { try? JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) } ?? [:]
-                let box = row.text(8).flatMap { try? JSONDecoder().decode(Detection.Box.self, from: Data($0.utf8)) }
-                let event = CameraEvent(id: id, camera: camera, start: Date(timeIntervalSince1970: row.double(2)),
-                                        end: Date(timeIntervalSince1970: row.double(3)), category: category, labels: labels,
-                                        confidence: row.double(6), snapshot: row.text(7), box: box, summary: row.text(9),
-                                        zones: row.text(11).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? [])
-                return Kept(event: event, ongoing: row.int(10) != 0)
-            }
+            rows("SELECT \(Self.columns) FROM events WHERE start >= ? AND (? IS NULL OR camera = ?) ORDER BY start",
+                 [since.timeIntervalSince1970, camera, camera], Self.kept)
         }
+    }
+
+    /// One event, by its id.
+    public func event(_ id: String) -> CameraEvent? {
+        queue.sync { rows("SELECT \(Self.columns) FROM events WHERE id = ?", [id], Self.kept).first?.event }
+    }
+
+    static let columns = "id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones"
+
+    static func kept(_ row: Row) -> Kept? {
+        guard let id = row.text(0), let camera = row.text(1), let category = row.text(4).flatMap(DetectedCategory.init) else { return nil }
+        let labels = row.text(5).flatMap { try? JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) } ?? [:]
+        let box = row.text(8).flatMap { try? JSONDecoder().decode(Detection.Box.self, from: Data($0.utf8)) }
+        let event = CameraEvent(id: id, camera: camera, start: Date(timeIntervalSince1970: row.double(2)),
+                                end: Date(timeIntervalSince1970: row.double(3)), category: category, labels: labels,
+                                confidence: row.double(6), snapshot: row.text(7), box: box, summary: row.text(9),
+                                zones: row.text(11).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? [])
+        return Kept(event: event, ongoing: row.int(10) != 0)
     }
 
     // MARK: SQLite
@@ -173,6 +267,12 @@ public final class EventStore: @unchecked Sendable {
         func double(_ i: Int32) -> Double { sqlite3_column_double(statement, i) }
         func int(_ i: Int32) -> Int { Int(sqlite3_column_int64(statement, i)) }
         func isNull(_ i: Int32) -> Bool { sqlite3_column_type(statement, i) == SQLITE_NULL }
+        /// A blob of 32-bit floats (an embedding); nil when there's none.
+        func floats(_ i: Int32) -> [Float]? {
+            guard !isNull(i), let bytes = sqlite3_column_blob(statement, i) else { return nil }
+            let count = Int(sqlite3_column_bytes(statement, i)) / MemoryLayout<Float>.size
+            return Array(UnsafeBufferPointer(start: bytes.assumingMemoryBound(to: Float.self), count: count))
+        }
     }
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -186,6 +286,7 @@ public final class EventStore: @unchecked Sendable {
             case let text as String: sqlite3_bind_text(statement, i, text, -1, Self.transient)
             case let number as Double: sqlite3_bind_double(statement, i, number)
             case let number as Int: sqlite3_bind_int64(statement, i, Int64(number))
+            case let data as Data: data.withUnsafeBytes { _ = sqlite3_bind_blob(statement, i, $0.baseAddress, Int32($0.count), Self.transient) }
             default: sqlite3_bind_null(statement, i)
             }
         }

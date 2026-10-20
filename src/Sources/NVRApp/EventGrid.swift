@@ -178,6 +178,8 @@ struct EventGrid: View {
     let fresh: Set<String>
     @Binding var request: GridScroll?
     let name: (String) -> String
+    /// A section's title, by its day (a day's own; or, for a search's best matches, theirs).
+    var title: (Date) -> String = { EventsView.dayTitle($0) }
     let choose: (TimelineEvent) -> Void
     let open: (TimelineEvent) -> Void
     let delete: (TimelineEvent) -> Void
@@ -334,7 +336,7 @@ struct EventGrid: View {
         HStack(spacing: 8) {
             // Frosted glass, so it reads over the pictures scrolling under it; lifted off them by a shadow.
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(EventsView.dayTitle(day)).font(.title3.weight(.bold))
+                Text(title(day)).font(.title3.weight(.bold))
                 Text(count == 1 ? "1 event" : "\(count) events")
                     .font(.callout.monospacedDigit().weight(.medium))
                     .foregroundStyle(.secondary)

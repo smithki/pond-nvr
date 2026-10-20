@@ -2,6 +2,7 @@ import Detection
 import Foundation
 import NVRCore
 import Testing
+import Understanding
 @testable import Watch
 
 @Suite struct MotionGateTests {
@@ -153,6 +154,36 @@ import Testing
         store.prune(days: 1, now: t0.addingTimeInterval(2 * 86400))
         store.flush()
         #expect(store.events(since: .distantPast).isEmpty)
+    }
+
+    /// What's understood of events: kept piece by piece, found when it's still to do, and gone with the event.
+    @Test func understandingIsKeptAndFoundWhenItsDue() throws {
+        let path = NSTemporaryDirectory() + "pond-events-\(UUID().uuidString).sqlite"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try #require(EventStore(path: path))
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for (i, id) in ["e1", "e2", "e3"].enumerated() {
+            store.save(CameraEvent(id: id, camera: "porch", start: t0.addingTimeInterval(Double(i)), end: t0.addingTimeInterval(Double(i)),
+                                   category: .person, labels: ["person": 1], confidence: 0.8, snapshot: "porch/\(id).jpg"),
+                       ongoing: id == "e3")
+        }
+        store.flush()
+        // Ended ones with pictures, newest first (the ongoing one, not yet).
+        #expect(store.toUnderstand(describing: true, embedder: "siglip", limit: 10).map(\.id) == ["e2", "e1"])
+        // A sentence for e2: still to embed; embeddings for it later don't lose the sentence.
+        store.understood("e2", .init(description: "A person at the door."))
+        #expect(store.toUnderstand(describing: true, embedder: "siglip", limit: 10).map(\.id) == ["e2", "e1"])
+        store.understood("e2", .init(scene: [0.6, 0.8], subject: [1, 0], embedder: "siglip"))
+        #expect(store.toUnderstand(describing: true, embedder: "siglip", limit: 10).map(\.id) == ["e1"])
+        #expect(store.understanding(since: t0)["e2"] == .init(description: "A person at the door.", scene: [0.6, 0.8], subject: [1, 0],
+                                                            embedder: "siglip"))
+        // Asked and none came (""): not asked again. Another embedder: all to embed again.
+        store.understood("e1", .init(description: "", embedder: "siglip"))
+        #expect(store.toUnderstand(describing: true, embedder: "siglip", limit: 10).isEmpty)
+        #expect(store.toUnderstand(describing: false, embedder: "siglip-3", limit: 10).map(\.id) == ["e2", "e1"])
+        // Deleted, its understanding goes too.
+        _ = store.delete(["e2"], now: t0)
+        #expect(store.understanding(since: t0)["e2"] == nil)
     }
 
     /// A camera removed with its recordings: its events and sightings go, the others' stay.
@@ -593,5 +624,59 @@ import Testing
         store.prune(days: 1, now: t.addingTimeInterval(2 * 86400))
         store.flush()
         #expect(store.sightings(camera: "porch", from: .distantPast, to: .distantFuture).isEmpty)
+    }
+}
+
+@Suite struct EventSearchTests {
+    static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    static func event(_ id: String, _ category: DetectedCategory, _ labels: [String: Int], camera: String = "porch", at: Double = 0) -> CameraEvent {
+        CameraEvent(id: id, camera: camera, start: t0.addingTimeInterval(at), end: t0.addingTimeInterval(at), category: category,
+                    labels: labels, confidence: 0.8)
+    }
+    static let events = [event("p1", .person, ["person": 1], at: 1), event("p2", .person, ["person": 1, "dog": 1], at: 2),
+                         event("c1", .vehicle, ["car": 1], camera: "drive", at: 3)]
+
+    @Test func filtersAreKindsThingsCamerasAndTime() {
+        func ids(_ q: EventQuery, cameras: Set<String> = []) -> [String] {
+            EventSearch.answer(q, events: Self.events, understood: [:], cameraIDs: cameras, zoneIDs: [], words: nil, probability: nil).hits.map(\.id)
+        }
+        // A dog seen while someone was there: an animal event too. Newest first.
+        #expect(ids(EventQuery(kinds: ["animal"])) == ["p2"])
+        #expect(ids(EventQuery(kinds: ["person"])) == ["p2", "p1"])
+        #expect(ids(EventQuery(things: ["car"])) == ["c1"])
+        #expect(ids(EventQuery(), cameras: ["drive"]) == ["c1"])
+        #expect(ids(EventQuery(time: TimeFilter(range: Self.t0 ... Self.t0.addingTimeInterval(1.5)))) == ["p1"])
+    }
+
+    @Test func howTheyLookedRanksByPictureAndSentence() {
+        // Embeddings in two dimensions: the words point at "red", p1's picture is red, p2's isn't.
+        let understood: [String: EventStore.Understood] = [
+            "p1": .init(description: "A person walks by.", scene: [1, 0], embedder: "m"),
+            "p2": .init(description: "A person in a red jacket with a dog.", scene: [0, 1], embedder: "m"),
+        ]
+        let answer = EventSearch.answer(EventQuery(kinds: ["person"], appearance: "a person in a red jacket"), events: Self.events,
+                                        understood: understood, cameraIDs: [], zoneIDs: [], words: [1, 0],
+                                        probability: { $0 > 0.5 ? 0.05 : 0.0001 })
+        // p1 by its picture, p2 by its sentence's words (person, red, jacket: all there).
+        #expect(Set(answer.hits.map(\.id)) == ["p1", "p2"])
+        #expect(!answer.appearanceIgnored)
+        // A picture that doesn't look it and a sentence without its words: left out.
+        let none = EventSearch.answer(EventQuery(kinds: ["person"], appearance: "a woman in a green coat"), events: Self.events,
+                                      understood: understood, cameraIDs: [], zoneIDs: [], words: [0, -1], probability: { _ in 0.0001 })
+        #expect(none.hits.isEmpty)
+    }
+
+    @Test func aSentenceWithThePhrasesWordsTogetherMatchesBest() {
+        let telling = EventSearch.telling("carrying a white bag")
+        let exact = EventSearch.sentenceMatch(telling, "A person is walking on a path, carrying a white bag.")
+        let apart = EventSearch.sentenceMatch(telling, "A person in white trousers, carrying a large bag.")
+        #expect(exact == 1 && apart < exact && apart >= 0.6)
+        #expect(EventSearch.sentenceMatch(telling, "A dog on the sofa.") == 0)
+    }
+
+    @Test func withNothingToJudgeByHowTheyLookedIsSaidToBeUnused() {
+        let answer = EventSearch.answer(EventQuery(kinds: ["person"], appearance: "a red jacket"), events: Self.events, understood: [:],
+                                        cameraIDs: [], zoneIDs: [], words: nil, probability: nil)
+        #expect(answer.appearanceIgnored && answer.hits.map(\.id) == ["p2", "p1"])
     }
 }

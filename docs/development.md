@@ -26,7 +26,7 @@ make app           # dist/Pond NVR.app
 open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots "dist/Pond NVR.app"
 ```
 
-(Liquid Glass comes out flatter in these pictures than on screen.) For the real thing, `scripts/capture-window.swift` opens a fresh copy of the app in the background, captures only its main window and quits it; it needs screen-recording permission for the terminal:
+(Liquid Glass comes out flatter in these pictures than on screen.) `--search QUESTION` opens Events with that question asked. For the real thing, `scripts/capture-window.swift` opens a fresh copy of the app in the background, captures only its main window and quits it; it needs screen-recording permission for the terminal:
 
 ```sh
 swift scripts/capture-window.swift /tmp/events.png --mode events --appearance light

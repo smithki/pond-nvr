@@ -42,13 +42,19 @@ targets.append(.testTarget(name: "DevicesTests", dependencies: ["Devices", "NVRC
 targets.append(.target(name: "Detection"))
 targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
 // Watching the cameras: their pictures decoded, motion, the model, tracks, and events kept.
-targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
-targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore", "Recorder"]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch"]
+targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore", "Understanding"],
+                      linkerSettings: [.linkedLibrary("sqlite3")]))
+targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore", "Recorder", "Understanding"]))
+// Understanding what was seen: a sentence an event (the Mac's own language model), and embeddings of pictures and
+// words alike (SigLIP 2), for search.
+targets.append(.target(name: "Understanding"))
+targets.append(.testTarget(name: "UnderstandingTests", dependencies: ["Understanding"], resources: [.copy("Fixtures")]))
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
-                                                               "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection"]))
-targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control", "Watch"],
+                                                               "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection",
+                                                               "Understanding"]))
+targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control", "Watch", "Understanding"],
                            resources: [.copy("Fixtures")]))
 #endif
 

@@ -1,0 +1,59 @@
+{
+ "version": "1.0",
+ "added_tokens": [],
+ "normalizer": {
+  "type": "Replace",
+  "pattern": {
+   "String": " "
+  },
+  "content": "▁"
+ },
+ "post_processor": {
+  "type": "TemplateProcessing",
+  "special_tokens": {
+   "<eos>": {
+    "id": "<eos>",
+    "ids": [
+     1
+    ],
+    "tokens": [
+     "<eos>"
+    ]
+   }
+  }
+ },
+ "model": {
+  "type": "BPE",
+  "unk_token": "<unk>",
+  "byte_fallback": true,
+  "vocab": {
+   "<pad>": 0,
+   "<eos>": 1,
+   "<unk>": 3,
+   "a": 10,
+   "▁": 11,
+   "c": 12,
+   "t": 13,
+   "ca": 14,
+   "cat": 15,
+   "▁cat": 16,
+   "s": 17,
+   "<0xC3>": 20,
+   "<0xA9>": 21
+  },
+  "merges": [
+   [
+    "c",
+    "a"
+   ],
+   [
+    "ca",
+    "t"
+   ],
+   [
+    "▁",
+    "cat"
+   ]
+  ]
+ }
+}

@@ -49,7 +49,7 @@ pond service install                               # record whenever you are log
 
 - **Live**: a rail of every camera beside a stage showing the chosen cameras live, as large as the window allows. Click a camera to add it or take it off, double-click it to watch it alone, drag to reorder. Large tiles play the main stream, small ones the sub-stream; one camera is heard at a time. A camera that is offline, sends no picture or has stopped being recorded is marked, and a tile without a picture says why.
 - **Timeline**: the recordings of any day, a lane per camera. Click or drag to move, space to play or pause, ← and → for 10 seconds, ½× to 16×, zoom from a whole day to 15 minutes; scroll back across midnight into earlier days. **LIVE** (L) shows the selected camera as it is now.
-- **Events**: comes with detection. `POND_MOCK_EVENTS=1` puts made-up events on the timeline to try it.
+- **Events**: what the cameras saw, a card each, by day, beside a rail of every day kept; details in a panel. **Search** in plain words ("a man in a red jacket last night"), on the Mac only ([docs/search.md](docs/search.md)).
 
 Settings (⌘,) has **Cameras**, **Storage**, **Retention** and **Recorder**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
 
@@ -88,6 +88,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 - [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
 - [docs/controls.md](docs/controls.md): camera controls, and how each goes through the best way Pond has for a camera.
 - [docs/detection.md](docs/detection.md): detection models: the one built in, adding another, `pond detect`.
+- [docs/search.md](docs/search.md): searching events in plain words, the sentences and the picture model behind it.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.

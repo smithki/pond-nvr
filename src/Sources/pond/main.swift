@@ -134,6 +134,10 @@ struct RecordingAndHomeKit: ServiceRunning {
             log.log("pond", "! detection is off: no model in \(ModelStore.userFolder.path) or the app")
         }
         pruning.setEventHandler { health?.prune(); events?.prune(days: config.retention.events.days) }
+        // Events understood for search, in the background: a sentence each, and their pictures embedded.
+        let understander = events.map { Understander(store: $0, eventsFolder: config.storage.eventsPath) { line in log.log("pond", line) } }
+        understander?.start()
+        defer { understander?.stop() }
         cameras.startAll()
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")
@@ -345,6 +349,10 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// `pond detect …`: a detection model run over recordings (see DetectCommand).
 #if canImport(NVRMac)
 if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()), configPath: configPath)) }
+/// `pond describe [EVENT-ID | PICTURE …] [--last N]`: the sentence the Mac's own model writes for an event.
+if args.first == "describe" { exit(DescribeCommand.run(Array(args.dropFirst()), configPath: configPath)) }
+/// `pond search QUESTION [--plain] [--top N]`: events that answer a question in plain words, best first.
+if args.first == "search" { exit(SearchCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 
 /// `pond events [CAMERA] [--hours N]`: the events the service made from what it saw (the last 24 hours), oldest
 /// first: when, how long, what, and its picture.
@@ -363,7 +371,9 @@ if args.first == "events" {
         print("No events yet (\(config.storage.databasePath)).")
         exit(0)
     }
-    let kept = store.events(since: Date().addingTimeInterval(-hours * 3600), camera: rest.first)
+    let since = Date().addingTimeInterval(-hours * 3600)
+    let kept = store.events(since: since, camera: rest.first)
+    let understood = store.understanding(since: since)
     if kept.isEmpty { print("No events in the last \(hours.formatted()) hours.") }
     let format = DateFormatter()
     format.dateFormat = "MMM d HH:mm:ss"
@@ -378,6 +388,8 @@ if args.first == "events" {
         }
         print("\(format.string(from: e.start))  \(e.camera)  \(e.category.rawValue) \(Int((e.confidence * 100).rounded()))%  "
             + "\(k.ongoing ? "ongoing" : "\(Int(e.seconds.rounded())) s")  \(seen)\(zones)\(picture)")
+        // Its sentence, once the service has written one.
+        if let sentence = understood[e.id]?.description, !sentence.isEmpty { print("    \(sentence)") }
     }
     exit(0)
 }

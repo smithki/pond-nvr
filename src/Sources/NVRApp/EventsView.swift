@@ -5,6 +5,7 @@
 // they're made (read again every ten seconds).
 import NVRCore
 import SwiftUI
+import Understanding
 
 struct EventsView: View {
     @Environment(AppModel.self) private var model
@@ -42,6 +43,13 @@ struct EventsView: View {
     @State private var scrolled = false
     /// Whether any card's in the strip at the grid's bottom (its glass shows).
     @State private var underBottom = false
+    /// A question asked (the search field), its answer (the events shown are those it found), and whether it's
+    /// being answered now.
+    @State private var question = ""
+    @State private var search: EventSearchResult?
+    @State private var searching = false
+    /// It's taking a while (the models still being readied: the first search after an install or update).
+    @State private var slow = false
     @Environment(\.openSettings) private var openSettingsWindow
 
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
@@ -50,12 +58,22 @@ struct EventsView: View {
 
     /// The camera's, newest first.
     var forCamera: [TimelineEvent] { events.filter { camera == nil || $0.camera == camera } }
-    var shown: [TimelineEvent] { forCamera.filter { !hidden.contains($0.kind) } }
+    /// Shown: the camera's, of the kinds on; of a search, those it found (best first, when it ranks them).
+    var shown: [TimelineEvent] {
+        let all = forCamera.filter { !hidden.contains($0.kind) }
+        guard let search else { return all }
+        let rank = Dictionary(search.ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let found = all.filter { rank[$0.id] != nil }
+        return search.ranked ? found.sorted { rank[$0.id]! < rank[$1.id]! } : found
+    }
+    /// The section a search's ranked answer is in (its own, not a day's).
+    static let bestMatches = Date.distantFuture
     /// The kinds there are (for the chips), in the timeline's order.
     var kinds: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { k in forCamera.contains { $0.kind == k } } }
 
-    /// Shown, by day: newest day first.
+    /// Shown, by day: newest day first (or a search's ranked answer, best first, as one).
     var days: [(day: Date, events: [TimelineEvent])] {
+        if search?.ranked == true { return shown.isEmpty ? [] : [(Self.bestMatches, shown)] }
         let calendar = Calendar.current
         return Dictionary(grouping: shown) { calendar.startOfDay(for: $0.start) }
             .map { ($0.key, $0.value) }
@@ -130,7 +148,9 @@ struct EventsView: View {
         }
         .overlay(alignment: .top) {
             EventsFilterBar(model: model, cameras: cameras, kinds: kinds,
-                            counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count))
+                            counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count),
+                            question: $question, searching: searching, slow: slow, result: search,
+                            submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
                 .padding(.top, 8)
                 .onGeometryChange(for: Double.self) { $0.size.height } action: { barHeight = $0 }
         }
@@ -164,6 +184,13 @@ struct EventsView: View {
             return .handled
         }
         .task {
+            // (Search's words model, ready before it's needed.)
+            EventSearcher.prepare()
+            // Opened with a question (`--search QUESTION`: for trying it, and pictures for the docs): asked at once.
+            if let asked = launchArgument("--search"), question.isEmpty {
+                question = asked
+                ask()
+            }
             // New ones as they're made: read again every ten seconds.
             while !Task.isCancelled {
                 await load()
@@ -184,11 +211,18 @@ struct EventsView: View {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if shown.isEmpty {
             ContentUnavailableView {
-                Label(events.isEmpty ? "No events yet" : "No events here", systemImage: "figure.walk.motion")
+                Label(events.isEmpty ? "No events yet" : search != nil ? "Nothing found" : "No events here",
+                      systemImage: search != nil ? "magnifyingglass" : "figure.walk.motion")
             } description: {
-                Text(events.isEmpty
-                     ? "People, vehicles, bikes and animals your cameras see appear here, each with its picture. Detection is on for each camera in its settings."
-                     : "Nothing matches these filters.")
+                if let search {
+                    Text("No events match \u{201C}\(search.question)\u{201D}." + (search.appearanceIgnored
+                        ? " How things looked can't be searched yet: events are still being described."
+                        : " Try fewer words, or take off one of the parts it was read as."))
+                } else {
+                    Text(events.isEmpty
+                         ? "People, vehicles, bikes and animals your cameras see appear here, each with its picture. Detection is on for each camera in its settings."
+                         : "Nothing matches these filters.")
+                }
             }
             .padding(.top, barHeight)
         } else {
@@ -198,6 +232,52 @@ struct EventsView: View {
 
     /// A camera's name; one that's been removed (its events kept, with its recordings, until retention lets them go)
     /// is said to be.
+    // MARK: Search
+
+    /// The question in the search field answered (or, `reading` given, a reading of it answered again: a part taken
+    /// off it).
+    func ask(reading: (EventQuery, Bool)? = nil) {
+        let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let config = model.config else { return clearSearch() }
+        searching = true
+        slow = false
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if searching { withAnimation(.easeOut(duration: 0.2)) { slow = true } }
+        }
+        Task {
+            let result = await EventSearcher.search(text, reading: reading, config: config)
+            // (Answered after another was asked: not this one's to show.)
+            guard question.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+            searching = false
+            slow = false
+            withAnimation(.snappy(duration: 0.3)) { search = result }
+            request = GridScroll(kind: .top, animated: false)
+        }
+    }
+
+    func clearSearch() {
+        question = ""
+        searching = false
+        slow = false
+        withAnimation(.snappy(duration: 0.3)) { search = nil }
+    }
+
+    /// A part of how the question was read taken off it; the rest answered again (not read again).
+    func remove(_ part: SearchPart) {
+        guard var query = search?.query, let byModel = search?.byModel else { return }
+        switch part {
+        case let .kind(k): query.kinds.remove(k)
+        case let .thing(t): query.things.remove(t)
+        case let .camera(c): query.cameras.remove(c)
+        case let .zone(z): query.zones.remove(z)
+        case .time: query.time = TimeFilter()
+        case .appearance: query.appearance = nil
+        }
+        if query.isEmpty { return clearSearch() }
+        ask(reading: (query, byModel))
+    }
+
     func name(_ camera: String) -> String { cameras.first { $0.id == camera }?.name ?? "Removed camera" }
 
     /// Opens the panel on an event, or closes it (nil): the panel slides, the cards reshape and the chosen card's
@@ -288,7 +368,7 @@ struct EventsView: View {
                          columns: columnCount(geo.size.width + (open ? EventDetail.width + 14 : 0)),
                          panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: EventDetail.width + 14,
                          focus: focus, selected: selected?.id, fresh: fresh, request: $request,
-                         name: name,
+                         name: name, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
                          onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },
@@ -300,7 +380,7 @@ struct EventsView: View {
     /// change how many there are a row).
     func columnCount(_ available: Double) -> Int { max(1, Int((available + 14) / (300 + 14))) }
 
-    static func dayTitle(_ day: Date) -> String {
+    nonisolated static func dayTitle(_ day: Date) -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(day) { return "Today" }
         if calendar.isDateInYesterday(day) { return "Yesterday" }
@@ -334,8 +414,35 @@ struct EventsFilterBar: View {
     let cameras: [Config.Camera]
     let kinds: [TimelineEvent.Kind]
     let counts: [TimelineEvent.Kind: Int]
+    /// The search: its field, whether it's being answered, how it was read (its parts, a chip each), and what's
+    /// done when it's asked, cleared, or a part's taken off.
+    @Binding var question: String
+    let searching: Bool
+    /// Searching's taking a while: said, so it doesn't look stuck.
+    var slow = false
+    let result: EventSearchResult?
+    let submit: () -> Void
+    let clear: () -> Void
+    let remove: (SearchPart) -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            filters
+            if searching && slow {
+                Label("Getting search ready\u{2026} The first search after Pond is installed or updated takes a little longer.",
+                      systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else if let result {
+                SearchReading(result: result, remove: remove)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    var filters: some View {
         HStack(spacing: 10) {
             Picker("Camera", selection: Binding(get: { model.eventsState.camera }, set: { model.eventsState.camera = $0 })) {
                 Text("All Cameras").tag(String?.none)
@@ -367,8 +474,101 @@ struct EventsFilterBar: View {
                 .help(on ? "Hide \(kind.title.lowercased()) events" : "Show \(kind.title.lowercased()) events")
             }
             Spacer()
+            searchField
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+    }
+
+    /// A question in plain words: what, where, when, how it looked.
+    var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search, like \u{201C}a man in a red jacket last night\u{201D}", text: $question)
+                .textFieldStyle(.plain)
+                .onSubmit(submit)
+            if searching {
+                ProgressView().controlSize(.small)
+            } else if !question.isEmpty || result != nil {
+                Button(action: clear) {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the search")
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(minWidth: 220, idealWidth: 340, maxWidth: 380)
+        .glassEffect(.regular, in: .capsule)
+    }
+}
+
+/// A part of how a question was read (a chip under the search field), to take off it.
+enum SearchPart: Hashable {
+    case kind(String), thing(String), camera(String), zone(String), time, appearance
+}
+
+/// How a question was read, a chip a part (each one taken off with its ×): what kinds and things, which cameras
+/// and zones, when, and how they looked; marked when the Mac's own model read it.
+struct SearchReading: View {
+    let result: EventSearchResult
+    let remove: (SearchPart) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: result.byModel ? "sparkles" : "text.magnifyingglass")
+                .foregroundStyle(.secondary)
+                .help(result.byModel ? "Read by Apple Intelligence, on this Mac" : "Read by plain rules (Apple Intelligence isn\u{2019}t on)")
+            Text("\(result.ids.count) found:").foregroundStyle(.secondary).monospacedDigit()
+            ForEach(parts, id: \.part) { item in
+                HStack(spacing: 4) {
+                    Text(item.title)
+                    Button { remove(item.part) } label: {
+                        Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Take this off the search")
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.fill.tertiary, in: Capsule())
+            }
+            if result.appearanceIgnored {
+                Text("How things looked can\u{2019}t be searched yet: events are still being described.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .lineLimit(1)
+    }
+
+    var parts: [(part: SearchPart, title: String)] {
+        let q = result.query
+        var out: [(SearchPart, String)] = q.kinds.sorted().map { (.kind($0), TimelineEvent.Kind(rawValue: $0)?.title ?? $0.capitalized) }
+        out += q.things.sorted().map { (.thing($0), $0.capitalized) }
+        out += q.cameras.sorted().map { (.camera($0), $0) }
+        out += q.zones.sorted().map { (.zone($0), $0) }
+        if !q.time.isEmpty { out.append((.time, Self.describe(q.time))) }
+        if let appearance = q.appearance { out.append((.appearance, "Looking like \u{201C}\(appearance)\u{201D}")) }
+        return out
+    }
+
+    /// When, in words: "Oct 19, 8:00 PM – Oct 20, 6:00 AM", or "8 PM – 6 AM, any day".
+    static func describe(_ time: TimeFilter) -> String {
+        var words: [String] = []
+        if let range = time.range {
+            let format = DateIntervalFormatter()
+            format.dateStyle = .medium
+            format.timeStyle = .short
+            words.append(format.string(from: range.lowerBound, to: range.upperBound))
+        }
+        if let hours = time.hours {
+            let day = Calendar.current.startOfDay(for: Date())
+            func hour(_ h: Int) -> String {
+                (Calendar.current.date(byAdding: .hour, value: h, to: day) ?? day).formatted(.dateTime.hour())
+            }
+            words.append("\(hour(hours.from)) \u{2013} \(hour(hours.to))" + (time.range == nil ? ", any day" : ""))
+        }
+        return words.joined(separator: ", ")
     }
 }

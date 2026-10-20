@@ -3,7 +3,7 @@
 // Needs screen-recording permission for the terminal it runs in.
 //
 //   swift scripts/capture-window.swift OUT.png [--mode live|timeline|events] [--appearance dark|light|system]
-//                                              [--inactive] [--wait SECONDS]
+//                                              [--search QUESTION] [--inactive] [--wait SECONDS]
 //
 // --inactive takes the focus from it first (a small window of this script's own, briefly), for how it looks behind
 // another app's window. For checks that can't be tests: the glass at the Events view's edges, the toolbar's look.
@@ -22,6 +22,7 @@ func flag(_ name: String) -> Bool {
 }
 let mode = option("--mode") ?? "events"
 let appearance = option("--appearance")
+let search = option("--search")
 let wait = option("--wait").flatMap(Double.init) ?? 5
 let inactive = flag("--inactive")
 guard let out = arguments.first else {
@@ -39,7 +40,7 @@ let configuration = NSWorkspace.OpenConfiguration()
 configuration.createsNewApplicationInstance = true
 configuration.activates = false
 // (The app's settings read the launch's own arguments first: -appearance light is that one launch's, not saved.)
-configuration.arguments = ["--mode", mode] + (appearance.map { ["-appearance", $0] } ?? [])
+configuration.arguments = ["--mode", mode] + (appearance.map { ["-appearance", $0] } ?? []) + (search.map { ["--search", $0] } ?? [])
 
 var launched: NSRunningApplication?
 let opened = DispatchSemaphore(value: 0)

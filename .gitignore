@@ -1,5 +1,7 @@
 # generated
 dist/
+# search's model, too big for the repository: made by scripts/convert-siglip.py
+models/search/
 
 # editors and the OS
 .DS_Store
@@ -9,6 +11,9 @@ dist/
 
 # leftovers from an interrupted build
 *.tmp.*
+
+# Python (scripts/)
+__pycache__/
 
 # Swift
 .build/
