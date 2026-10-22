@@ -54,6 +54,9 @@ targets.append(.testTarget(name: "DetectionTests", dependencies: ["Detection"]))
 targets.append(.target(name: "Watch", dependencies: ["Detection", "Ingest", "NVRCore", "Recorder", "Understanding"],
                       linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detection", "NVRCore", "Recorder", "Understanding"]))
+// The soak: video decoding's memory with many cameras (4K, made up) for minutes at a time. Off in the usual tests;
+// scripts/soak.sh runs it, with a watchdog.
+targets.append(.testTarget(name: "SoakTests", dependencies: ["Watch", "HAPCamera", "NVRCore"]))
 // Understanding what was seen: a sentence an event (the Mac's own language model), and embeddings of pictures and
 // words alike (SigLIP 2), for search.
 targets.append(.target(name: "Understanding"))
