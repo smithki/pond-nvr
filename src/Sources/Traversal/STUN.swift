@@ -1,7 +1,7 @@
-// STUN messages (RFC 5389, and RFC 8445's ICE attributes): what a device sends to learn the address the world sees
+// STUN messages (RFC 5389, and RFC 8445's attributes for checks): what a device sends to learn the address the world sees
 // it at, and what two devices send each other to check a path between them works (and only they: their checks carry
 // MESSAGE-INTEGRITY, an HMAC under a password exchanged in their sealed offer and answer). Plain Swift: the signaling
-// service (on Linux) answers binding requests with it, and Pond's ICE agent speaks it.
+// service (on Linux) answers binding requests with it, and Pond's PathFinder speaks it.
 import Foundation
 
 public struct STUNMessage: Equatable, Sendable {

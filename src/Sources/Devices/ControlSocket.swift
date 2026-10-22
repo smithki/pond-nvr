@@ -26,7 +26,8 @@ public enum ControlSocket {
         /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
         /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
         /// "search" (events that answer `question`; `camera` unused);
-        /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`).
+        /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`),
+        /// "remote.connect" (`device`: a path found to it, and how).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
@@ -82,6 +83,8 @@ public enum ControlSocket {
         public var pairingExpires: Date?
         public var devices: [RemoteDevice]?
         public var paired: RemoteDevice?
+        /// "remote.connect": how it went, in words (no addresses).
+        public var connection: String?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,

@@ -73,6 +73,103 @@ import Traversal
         #expect(home.devices().isEmpty)
     }
 
+    @Test func twoPairedPondsFindAPathAndPing() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let stun = STUNResponder(port: 0)
+        try stun.start()
+        defer { stun.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(server.boundPort)")!
+        var settings = PathSessions.Settings()
+        settings.stun = [STUNAddress(ip: [127, 0, 0, 1], port: stun.boundPort)]
+        let home = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Home", signaling: url, paths: settings) { _ in }
+        let away = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Away", signaling: url, paths: settings) { _ in }
+        home.start()
+        away.start()
+        defer { home.stop(); away.stop() }
+        let code = try #require(PairingCode(text: home.newCode().text))
+        _ = try #require(await away.join(code))
+        for _ in 0 ..< 50 where home.devices().isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+
+        // By name: offered, answered, checked, chosen, pinged; both sealed through the signaling service.
+        let outcome = try #require(await away.connect(to: "Home"))
+        #expect(outcome.problem == nil, "\(outcome.summary)")
+        #expect(outcome.pair != nil && outcome.roundTrip != nil)
+        #expect(outcome.summary.hasPrefix("connected over"))
+        // Not paired: nothing to connect to.
+        #expect(await away.connect(to: "Nobody") == nil)
+    }
+
+    @Test func aRestartedPathCarriesOn() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(server.boundPort)")!
+        let home = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Home", signaling: url) { _ in }
+        let away = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Away", signaling: url) { _ in }
+        home.start()
+        away.start()
+        defer { home.stop(); away.stop() }
+        let code = try #require(PairingCode(text: home.newCode().text))
+        let peer = try #require(await away.join(code))
+        for _ in 0 ..< 50 where home.devices().isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+
+        let (outcome, opened) = await away.paths.open(to: peer)
+        let session = try #require(opened, "\(outcome.summary)")
+        defer { away.paths.close(session) }
+        let before = session.finder.local
+        // As if this Mac's network had changed: found again, with new credentials on both sides.
+        await away.paths.restart(session)
+        #expect(session.finder.local != before)
+        for _ in 0 ..< 100 { try await Task.sleep(for: .milliseconds(20)) }
+        guard case .connected = session.finder.state else { Issue.record("\(session.finder.state)"); return }
+        // Still carrying: a ping answered.
+        final class Pong: @unchecked Sendable { let lock = NSLock(); var got = false }
+        let pong = Pong()
+        session.finder.received = { bytes in if bytes.first == PathSessions.pong { pong.lock.withLock { pong.got = true } } }
+        session.finder.send([PathSessions.ping, 1])
+        for _ in 0 ..< 50 where !pong.lock.withLock({ pong.got }) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(pong.lock.withLock { pong.got })
+    }
+
+    @Test func noPathSaysWhy() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(server.boundPort)")!
+        // Neither side offers its own addresses, and there's no STUN to learn public ones: nothing to check.
+        var settings = PathSessions.Settings()
+        settings.shareLocalAddresses = false
+        settings.timing.giveUp = 1
+        let home = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Home", signaling: url, paths: settings) { _ in }
+        let away = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Away", signaling: url, paths: settings) { _ in }
+        home.start()
+        away.start()
+        defer { home.stop(); away.stop() }
+        let code = try #require(PairingCode(text: home.newCode().text))
+        _ = try #require(await away.join(code))
+        let outcome = try #require(await away.connect(to: "Home"))
+        #expect(outcome.pair == nil)
+        #expect(outcome.summary.hasPrefix("This Mac couldn't learn its public address"), "\(outcome.summary)")
+        #expect(outcome.summary.contains("To fix it:"))
+    }
+
+    @Test func aStrangersOfferGoesUnanswered() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(server.boundPort)")!
+        var settings = PathSessions.Settings()
+        settings.timing.giveUp = 2
+        let home = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Home", signaling: url, paths: settings) { _ in }
+        let stranger = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Stranger", signaling: url, paths: settings) { _ in }
+        home.start()
+        stranger.start()
+        defer { home.stop(); stranger.stop() }
+        await Self.waitConnected()
+        for _ in 0 ..< 100 { try await Task.sleep(for: .milliseconds(20)); if server.connected == 2 { break } }
+        // The stranger knows the home Pond's keys (as anyone shown its code might), but isn't paired with it.
+        let outcome = await stranger.paths.connect(to: home.identity.peer)
+        #expect(outcome.pair == nil && outcome.problem?.contains("didn't answer") == true, "\(outcome.summary)")
+    }
+
     @Test func aMailboxIsOnlyItsOwners() async throws {
         let server = try Self.server()
         defer { server.stop() }

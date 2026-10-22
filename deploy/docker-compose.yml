@@ -17,6 +17,7 @@ services:
       - "8080"
     ports:
       - "3478:3478/udp"
+      - "3479:3479/udp"
 
   # HTTPS for the signaling service (wss://your-domain), with a certificate from Let's Encrypt.
   caddy:

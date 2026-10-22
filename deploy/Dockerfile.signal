@@ -8,5 +8,5 @@ RUN swift build -c release --package-path src --product pond-signal \
 FROM swift:6.2-noble-slim
 COPY --from=build /pond-signal /usr/local/bin/pond-signal
 USER nobody
-EXPOSE 8080/tcp 3478/udp
-ENTRYPOINT ["pond-signal", "--port", "8080", "--stun", "3478"]
+EXPOSE 8080/tcp 3478/udp 3479/udp
+ENTRYPOINT ["pond-signal", "--port", "8080", "--stun", "3478", "--stun-alternate", "3479"]

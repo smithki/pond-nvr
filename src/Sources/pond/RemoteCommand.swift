@@ -1,4 +1,4 @@
-// `pond remote pair|devices|unpair ID|join CODE`: remote access's pairing, asked of the service (it keeps this Mac
+// `pond remote pair|devices|unpair ID|join CODE|connect DEVICE`: remote access's pairing, asked of the service (it keeps this Mac
 // reachable, so it has to be running, with remote access on). `pair` shows a code and its QR code, for a device or
 // another Pond to pair with this one; `join` pairs this one with another, by the code it showed.
 #if canImport(NVRMac)
@@ -16,9 +16,23 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
         log("! remote access is off: no signaling service set (remote.signaling, a wss:// address)")
         return nil
     }
+    // How connections are made: where to learn this Mac's public address (the signaling host's STUN, unless one's
+    // given), the port to answer from, whether its own addresses are offered, and the mesh.
+    var paths = PathSessions.Settings()
+    paths.port = settings.port
+    paths.shareLocalAddresses = settings.shareLocalAddresses
+    if settings.mesh {
+        let subnets = settings.meshSubnets?.compactMap(Subnet.init) ?? []
+        paths.mode = .mesh(subnets: subnets.isEmpty ? Gatherer.tailnet : subnets)
+    } else {
+        // ("host:port", or a host alone: port 3478.)
+        let server = settings.stun ?? url.host() ?? ""
+        paths.stun = PathSessions.resolve(server)
+        if paths.stun.isEmpty { log("! remote: \(server) couldn't be looked up: only this Mac's own addresses will be offered") }
+    }
     do {
         let host = try RemoteHost(keys: RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService)),
-                                  name: Host.current().localizedName ?? "Pond", signaling: url, log: log)
+                                  name: Host.current().localizedName ?? "Pond", signaling: url, paths: paths, log: log)
         host.start()
         log("remote: reachable through \(url.host() ?? address), \(host.devices().count) paired")
         return host
@@ -59,6 +73,12 @@ enum RemoteCommand {
             } else {
                 reply.error = .failed("\(code.pond.name) didn't answer (is its service running, and the code unused?)")
             }
+        case "remote.connect":
+            guard let device = request.device, let outcome = await host.connect(to: device) else {
+                reply.error = .failed("no device \(request.device ?? "") (pond remote devices)")
+                break
+            }
+            if outcome.pair == nil { reply.error = .failed(outcome.summary) } else { reply.connection = outcome.summary }
         default:
             reply.error = .notSupported
         }
@@ -77,8 +97,11 @@ enum RemoteCommand {
         case "join" where args.count == 2:
             request.action = "remote.join"
             request.code = args[1]
+        case "connect" where args.count == 2:
+            request.action = "remote.connect"
+            request.device = args[1]
         default:
-            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE")
+            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE | connect DEVICE")
         }
         let client = ControlClient(path: ControlSocket.path(nextTo: configPath))
         let asked = request
@@ -101,6 +124,8 @@ enum RemoteCommand {
             for d in devices { print("\(d.id)  \(d.name)") }
         case "remote.unpair":
             print("✓ Removed: it can't reach this Mac any more.")
+        case "remote.connect":
+            print("✓ \(reply.connection ?? "connected")")
         default:
             print("✓ Paired with \(reply.paired?.name ?? "it").")
         }

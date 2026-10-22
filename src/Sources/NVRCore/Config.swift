@@ -35,16 +35,39 @@ public struct Config: Codable, Equatable, Sendable {
     public struct Remote: Codable, Equatable, Sendable {
         public var enabled: Bool
         public var signaling: String?
+        /// Where this Mac asks for the address the world sees it at ("host:port"): left out, the signaling host's
+        /// port 3478 (pond-signal answers there).
+        public var stun: String?
+        /// A fixed UDP port for connections (one to forward on the router, when no other path works); left out, any.
+        public var port: UInt16?
+        /// Whether this Mac's own addresses are offered (they find a device on the same network, or one an IPv6
+        /// path reaches); off, only the public address the router shows.
+        public var shareLocalAddresses: Bool
+        /// Connections over a mesh only (Tailscale, Headscale): its tunnel's addresses, no public address, no relay.
+        public var mesh: Bool
+        /// The mesh's ranges, if not Tailscale's (100.64.0.0/10, fd7a:115c:a1e0::/48).
+        public var meshSubnets: [String]?
 
-        public init(enabled: Bool = false, signaling: String? = nil) {
+        public init(enabled: Bool = false, signaling: String? = nil, stun: String? = nil, port: UInt16? = nil,
+                    shareLocalAddresses: Bool = true, mesh: Bool = false, meshSubnets: [String]? = nil) {
             self.enabled = enabled
             self.signaling = signaling
+            self.stun = stun
+            self.port = port
+            self.shareLocalAddresses = shareLocalAddresses
+            self.mesh = mesh
+            self.meshSubnets = meshSubnets
         }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
             signaling = try c.decodeIfPresent(String.self, forKey: .signaling)
+            stun = try c.decodeIfPresent(String.self, forKey: .stun)
+            port = try c.decodeIfPresent(UInt16.self, forKey: .port)
+            shareLocalAddresses = try c.decodeIfPresent(Bool.self, forKey: .shareLocalAddresses) ?? true
+            mesh = try c.decodeIfPresent(Bool.self, forKey: .mesh) ?? false
+            meshSubnets = try c.decodeIfPresent([String].self, forKey: .meshSubnets)
         }
     }
 

@@ -149,10 +149,3 @@ public final class SignalServer: @unchecked Sendable {
     static func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
 }
 
-#if canImport(Glibc)
-let SOCK_STREAM_VALUE = Int32(SOCK_STREAM.rawValue)
-let SOCK_DGRAM_VALUE = Int32(SOCK_DGRAM.rawValue)
-#else
-let SOCK_STREAM_VALUE = SOCK_STREAM
-let SOCK_DGRAM_VALUE = SOCK_DGRAM
-#endif

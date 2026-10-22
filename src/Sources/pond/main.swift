@@ -377,7 +377,7 @@ if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()), conf
 if args.first == "describe" { exit(DescribeCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 /// `pond search QUESTION [--plain] [--top N]`: events that answer a question in plain words, best first.
 if args.first == "search" { exit(SearchCommand.run(Array(args.dropFirst()), configPath: configPath)) }
-/// `pond remote pair|devices|unpair ID|join CODE`: pairing for remote access.
+/// `pond remote pair|devices|unpair ID|join CODE|connect DEVICE`: pairing for remote access, and trying a connection.
 if args.first == "remote" { exit(RemoteCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 
 /// `pond events [CAMERA] [--hours N]`: the events the service made from what it saw (the last 24 hours), oldest

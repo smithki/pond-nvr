@@ -1,6 +1,6 @@
 // Remote access in the service: this Mac's identity, its connection to the signaling service, pairing (codes made,
 // devices kept), and pairing with another Pond by its code. What arrives in its mailbox is opened here: requests to
-// pair from anyone with a good code, everything else only from those paired (and passed on: connecting, later).
+// pair from anyone with a good code, everything else only from those paired (paths to connect over: PathSessions).
 import Foundation
 import NVRCore
 
@@ -11,6 +11,8 @@ public final class RemoteHost: @unchecked Sendable {
     let pairing: PairingHost
     let replay = ReplayGuard()
     let log: @Sendable (String) -> Void
+    /// Connections with paired peers: paths found, offered and answered through the signaling service.
+    public private(set) var paths: PathSessions!
     private var client: SignalClient?
     /// Joins under way: the code each was made with (by the Pond's signing key), and who's waiting for its answer.
     private var joining: [Data: (code: PairingCode, answer: CheckedContinuation<RemotePeer?, Never>)] = [:]
@@ -18,12 +20,24 @@ public final class RemoteHost: @unchecked Sendable {
 
     /// Over a credential store (the Keychain's, service `pond-remote`), named as this Mac is, using a signaling
     /// service (its WebSocket address).
-    public init(keys: RemoteKeys, name: String, signaling: URL, log: @escaping @Sendable (String) -> Void) throws {
+    public init(keys: RemoteKeys, name: String, signaling: URL, paths settings: PathSessions.Settings = .init(),
+                log: @escaping @Sendable (String) -> Void) throws {
         self.keys = keys
         identity = try keys.identity(name: name)
         self.signaling = signaling
         pairing = PairingHost(keys: keys, identity: identity)
         self.log = log
+        paths = PathSessions(settings: settings, send: { [weak self] kind, body, peer in
+            guard let self, let envelope = try? Envelope.seal(kind: kind, body: body, from: identity, to: peer),
+                  let client = lock.withLock({ self.client }) else { return false }
+            return await client.send(envelope)
+        }, log: log)
+    }
+
+    /// A path to a paired device or Pond (by its id or its name) found, and how it went.
+    public func connect(to device: String) async -> PathSessions.Outcome? {
+        guard let peer = devices().first(where: { $0.id == device || $0.name == device }) else { return nil }
+        return await paths.connect(to: peer)
     }
 
     public func start() {
@@ -99,6 +113,9 @@ public final class RemoteHost: @unchecked Sendable {
             guard let code = lock.withLock({ joining[opened.sender]?.code }),
                   let pond = PairingGuest.accepted(kind: opened.kind, body: opened.body, sender: opened.sender, code: code) else { return }
             finish(code.pond.signingKey, pond)
+        case let kind where kind.hasPrefix("path."):
+            guard let peer = keys.peer(signingKey: opened.sender) else { return }
+            paths.handle(kind: kind, body: opened.body, from: peer)
         default:
             break
         }
