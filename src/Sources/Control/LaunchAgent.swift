@@ -126,8 +126,14 @@ public enum LaunchAgent {
 /// Installing, restarting and removing the login service; used by `pond service` and the app.
 public struct ServiceControl: Sendable {
     public let launchd: Launchd
+    /// Where the agent's plist goes: the real one in ~/Library/LaunchAgents, or a test's own (a test with a stand-in
+    /// launchd must never write or remove the real file: the installed service would be gone at the next login).
+    public let plistPath: String
 
-    public init(launchd: Launchd) { self.launchd = launchd }
+    public init(launchd: Launchd, plistPath: String = LaunchAgent.plistPath) {
+        self.launchd = launchd
+        self.plistPath = plistPath
+    }
 
     public enum State: Equatable, Sendable {
         case notInstalled
@@ -145,19 +151,19 @@ public struct ServiceControl: Sendable {
     /// Writes the agent's plist for `program` and (re)starts it.
     public func install(program: String, configPath: String?) throws {
         let fm = FileManager.default
-        try fm.createDirectory(atPath: (LaunchAgent.plistPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: (plistPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try fm.createDirectory(atPath: (LaunchAgent.logPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try launchd.bootout(label: LaunchAgent.label)   // an older version, if any
         try Data(LaunchAgent.plist(program: program, configPath: configPath).utf8)
-            .write(to: URL(fileURLWithPath: LaunchAgent.plistPath), options: .atomic)
+            .write(to: URL(fileURLWithPath: plistPath), options: .atomic)
         // launchd stops the old one in the background, and refuses to load the new one until it has
         // ("Bootstrap failed: 5: Input/output error"): wait for it, and try once more if it still refuses.
         waitUntilUnloaded(seconds: 10)
         do {
-            try launchd.bootstrap(plist: LaunchAgent.plistPath)
+            try launchd.bootstrap(plist: plistPath)
         } catch {
             Thread.sleep(forTimeInterval: 2)
-            try launchd.bootstrap(plist: LaunchAgent.plistPath)
+            try launchd.bootstrap(plist: plistPath)
         }
     }
 
@@ -170,8 +176,8 @@ public struct ServiceControl: Sendable {
 
     public func uninstall() throws {
         try launchd.bootout(label: LaunchAgent.label)
-        if FileManager.default.fileExists(atPath: LaunchAgent.plistPath) {
-            try FileManager.default.removeItem(atPath: LaunchAgent.plistPath)
+        if FileManager.default.fileExists(atPath: plistPath) {
+            try FileManager.default.removeItem(atPath: plistPath)
         }
     }
 

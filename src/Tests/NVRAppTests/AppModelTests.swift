@@ -30,7 +30,7 @@ final class StubLaunchd: Launchd, @unchecked Sendable {
 
     func model(_ probe: Result<ProbeReport, RTSPError> = .failure(.unauthorized)) -> AppModel {
         let m = AppModel(store: ConfigStore(path: dir + "/config.json"), passwords: StorePasswordKeeper(store: credentials, probe: { _ in probe }), prober: StubProber(probe),
-                         service: ServiceControl(launchd: launchd), helperPath: "/Applications/Pond.app/Contents/MacOS/pond")
+                         service: ServiceControl(launchd: launchd, plistPath: dir + "/LaunchAgents/agent.plist"), helperPath: "/Applications/Pond.app/Contents/MacOS/pond")
         m.localNetworkAccess = { _, _, _ in .allowed }
         return m
     }
