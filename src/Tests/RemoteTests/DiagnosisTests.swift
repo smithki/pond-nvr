@@ -60,4 +60,20 @@ import Traversal
         lost.lost = true
         #expect(Diagnosis.explain(mine: facts(), theirs: facts(), report: lost, peer: "Home").hasPrefix("The connection was made, then lost"))
     }
+
+    @Test func aRelayThatGaveNoAddressSaysWhy() {
+        var mine = facts()
+        mine.relay = true
+        mine.relayProblem = "the relay refused this Mac's credentials (is the secret right?)"
+        let why = Diagnosis.explain(mine: mine, theirs: facts(), report: nothingWorked, peer: "Home")
+        #expect(why.contains("This Mac's relay gave it no address: the relay refused this Mac's credentials"))
+        #expect(why.contains("check the relay") && !why.contains("run a relay of your own"))
+    }
+
+    @Test func aRelaySetIsntSuggested() {
+        var mine = facts(changesPort: true)
+        mine.relay = true
+        let why = Diagnosis.explain(mine: mine, theirs: facts(changesPort: true), report: nothingWorked, peer: "Home")
+        #expect(!why.contains("run a relay of your own"))
+    }
 }

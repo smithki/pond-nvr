@@ -80,14 +80,20 @@ GB here are 1,000,000,000 bytes, as drives are sold. One camera recording its 25
 
 ## Remote access
 
-Optional, and off unless set: reaching this Mac from outside its network, through a signaling service you run (`deploy/`). Video goes directly between the two ends; the signaling service passes on only sealed messages it can't read.
+Optional, and off unless set: reaching this Mac from outside its network, through a signaling service you run (`deploy/`). The two ends find a path between them and connect directly where they can; the signaling service passes on only sealed messages it can't read. How it works, and what to do when it can't connect: [remote.md](remote.md).
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `remote.enabled` | `false` | `true` to keep this Mac reachable: the service stays connected to the signaling service, and answers pairing. |
+| `remote.enabled` | `false` | `true` to keep this Mac reachable: the service stays connected to the signaling service, and answers pairing and connections. |
 | `remote.signaling` | none | The signaling service's address: `wss://HOST` (or `ws://` on your own network, for testing). |
+| `remote.stun` | the signaling host, port 3478 | Where this Mac learns the address the world sees it at: `HOST[:PORT]`. pond-signal answers there (and on the next port, for telling what kind of router this Mac is behind). |
+| `remote.port` | any | A fixed UDP port to be reached on: forward it on the router when no other path works (the diagnosis says so). |
+| `remote.shareLocalAddresses` | `true` | `false` to offer only the public address the router shows, never this Mac's own (devices on the same network then meet through the router). |
+| `remote.mesh` | `false` | `true` to connect only over a mesh (Tailscale or Headscale): only the tunnel's addresses are offered, no public address is learned, no relay is used. |
+| `remote.meshSubnets` | Tailscale's | The mesh's ranges, if not `100.64.0.0/10` and `fd7a:115c:a1e0::/48`. |
+| `remote.relay` | none | A relay of your own (coturn, `deploy/`'s relay profile), `HOST[:PORT]`, for when no direct path works. Its shared secret is kept in the Keychain: `pond remote relay-secret` (read from standard input). |
 
-Pair devices from the command line, with the service running: `pond remote pair` shows a code and QR code (good once, for ten minutes); `pond remote devices` lists those paired; `pond remote unpair ID` removes one; `pond remote join CODE` pairs this Mac with another Pond, by the code that one showed. This Mac's keys and its devices' are kept in the Keychain (service `pond-remote`).
+From the command line, with the service running: `pond remote pair` shows a code and QR code (good once, for ten minutes); `pond remote devices` lists those paired; `pond remote unpair ID` removes one; `pond remote join CODE` pairs this Mac with another Pond, by the code that one showed; `pond remote connect DEVICE` finds a path to a paired device or Pond and says how it went (or why it couldn't, and what would fix it). This Mac's keys and its devices' are kept in the Keychain (service `pond-remote`).
 
 ## Cameras
 

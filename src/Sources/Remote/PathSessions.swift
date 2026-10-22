@@ -22,6 +22,10 @@ public final class PathSessions: @unchecked Sendable {
         public var port: UInt16?
         public var shareLocalAddresses = true
         public var mode: Gatherer.Mode = .direct
+        /// A relay of one's own: its addresses, and the shared secret this side's credentials are made from.
+        public var relay: (addresses: [STUNAddress], secret: String)?
+        /// This side's name in the relay's usernames.
+        public var name = "pond"
         public var timing = PathFinder.Timing()
 
         public init() {}
@@ -81,6 +85,9 @@ public final class PathSessions: @unchecked Sendable {
         let finder: PathFinder
         /// The socket's port (its candidates gathered again on it after a restart).
         let port: UInt16
+        /// Its relayed address, once the relay's given one (offered again after a restart).
+        var relayed: Candidate? { get { lock.withLock { _relayed } } set { lock.withLock { _relayed = newValue } } }
+        private var _relayed: Candidate?
         /// The other's answer (nil: none came, or the session ended first); and to the latest restart.
         let answer = OneShot<Message.Offer?>()
         var restartAnswer: OneShot<Message.Offer?> { get { lock.withLock { _restartAnswer } } set { lock.withLock { _restartAnswer = newValue } } }
@@ -244,6 +251,25 @@ public final class PathSessions: @unchecked Sendable {
             let more = Message.More(session: session.id, candidates: [Candidate(kind: .srflx, address: address)])
             _ = await send(Message.candidates, Self.encode(more), session.peer)
         }
+        // A relayed address, asked of the relay once a session (and offered whatever else is shared: it's the relay's).
+        if let relay = settings.relay, case .direct = settings.mode {
+            facts.relay = true
+            if let relayed = session.relayed {
+                session.finder.addLocal([relayed])
+                _ = await send(Message.candidates, Self.encode(Message.More(session: session.id, candidates: [relayed])), session.peer)
+            } else {
+                let (username, password) = TURNClient.credentials(secret: relay.secret, name: settings.name)
+                for address in relay.addresses {
+                    guard let (relayed, _) = await session.finder.allocate(.init(address: address, username: username, password: password))
+                    else { continue }
+                    session.relayed = relayed
+                    session.finder.addLocal([relayed])
+                    _ = await send(Message.candidates, Self.encode(Message.More(session: session.id, candidates: [relayed])), session.peer)
+                    break
+                }
+                if session.relayed == nil { facts.relayProblem = session.finder.relayProblem ?? "the relay didn't answer" }
+            }
+        }
         session.mine = facts
         _ = await send(Message.candidates, Self.encode(Message.More(session: session.id, candidates: [], facts: facts)), session.peer)
     }
@@ -396,8 +422,8 @@ public final class PathSessions: @unchecked Sendable {
 
     static func encode(_ value: some Encodable) -> Data { (try? JSONEncoder().encode(value)) ?? Data() }
 
-    /// Where to ask STUN: "host:port" (a name looked up, IPv4 and IPv6 alike).
-    public static func resolve(_ server: String) -> [STUNAddress] {
+    /// Where to ask STUN (or a relay): "host:port", or a host alone (`port`), a name looked up, IPv4 and IPv6 alike.
+    public static func resolve(_ server: String, port fallback: UInt16 = 3478) -> [STUNAddress] {
         let host: String, port: String
         if server.hasPrefix("["), let close = server.lastIndex(of: "]") {
             host = String(server[server.index(after: server.startIndex) ..< close])
@@ -407,7 +433,7 @@ public final class PathSessions: @unchecked Sendable {
             port = String(server[server.index(after: colon)...])
         } else {
             host = server
-            port = "3478"
+            port = String(fallback)
         }
         var hints = addrinfo()
         hints.ai_socktype = SOCK_DGRAM

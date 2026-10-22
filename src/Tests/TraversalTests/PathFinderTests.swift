@@ -6,7 +6,7 @@ import Testing
     /// Two agents, home (controlling) and away, each told the other's credentials and candidates (its host ones, and
     /// its public one from `stun`, if given), then started; their states once both have settled.
     static func connect(_ home: PacketTransport, homeHost: [UInt8], _ away: PacketTransport, awayHost: [UInt8],
-                        stun: STUNAddress? = nil, timing: PathFinder.Timing = fast,
+                        stun: STUNAddress? = nil, relay: (address: STUNAddress, secret: String)? = nil, timing: PathFinder.Timing = fast,
                         settle: Double = 8) async -> (home: PathFinder.State, away: PathFinder.State, agents: (PathFinder, PathFinder)) {
         let a = PathFinder(role: .controlling, transport: home, timing: timing)
         let b = PathFinder(role: .controlled, transport: away, timing: timing)
@@ -14,6 +14,12 @@ import Testing
             var found = [Candidate(kind: .host, address: STUNAddress(ip: ip, port: transport.port))]
             if let stun, let seen = await agent.probe(stun, timeout: 1), seen != found[0].address {
                 found.append(Candidate(kind: .srflx, address: seen))
+            }
+            if let relay {
+                let (username, password) = TURNClient.credentials(secret: relay.secret, name: "test")
+                if let (relayed, _) = await agent.allocate(.init(address: relay.address, username: username, password: password)) {
+                    found.append(relayed)
+                }
             }
             return found
         }
@@ -242,6 +248,65 @@ import Testing
             let a = try #require(await finder.probe(first)), b = try #require(await finder.probe(second))
             #expect(a.ip == b.ip && (a.port != b.port) == changes)
         }
+    }
+
+    // MARK: Through a relay
+
+    @Test func bothSymmetricConnectThroughARelayOfTheirOwn() async throws {
+        let net = FakeNetwork()
+        let stun = net.stunServer([198, 51, 100, 1])
+        let relay = net.relay([198, 51, 100, 2], secret: "shared secret")
+        let one = FakeNetwork.Router(publicIP: [100, 64, 0, 1], mapping: .perDestination, filtering: .addressAndPort)
+        let other = FakeNetwork.Router(publicIP: [100, 64, 0, 2], mapping: .perDestination, filtering: .addressAndPort)
+        let home = net.host([192, 168, 1, 5], behind: one), away = net.host([10, 0, 0, 7], behind: other)
+        let (h, a, (homeFinder, awayFinder)) = await Self.connect(home, homeHost: home.ip, away, awayHost: away.ip, stun: stun,
+                                                                   relay: (relay.address, "shared secret"))
+        defer { homeFinder.close(); awayFinder.close() }
+        let chosen = try #require(Self.pair(h), "home: \(h)")
+        #expect(Self.pair(a) != nil, "away: \(a)")
+        #expect(chosen.local.kind == .relay || chosen.remote.kind == .relay)
+        // What's sent goes through it, both ways.
+        final class Got: @unchecked Sendable { let lock = NSLock(); var bytes: [[UInt8]] = [] }
+        let atHome = Got(), away_ = Got()
+        homeFinder.received = { b in atHome.lock.withLock { atHome.bytes.append(b) } }
+        awayFinder.received = { b in away_.lock.withLock { away_.bytes.append(b) } }
+        homeFinder.send([0x80, 1])
+        awayFinder.send([0x80, 2])
+        for _ in 0 ..< 100 where atHome.lock.withLock({ atHome.bytes.isEmpty }) || away_.lock.withLock({ away_.bytes.isEmpty }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(atHome.lock.withLock { atHome.bytes } == [[0x80, 2]] && away_.lock.withLock { away_.bytes } == [[0x80, 1]])
+    }
+
+    @Test func aWrongSecretIsRefusedAndSaysSo() async throws {
+        let net = FakeNetwork()
+        let relay = net.relay([198, 51, 100, 2], secret: "the right one")
+        let finder = PathFinder(role: .controlled, transport: net.host([203, 0, 113, 9]))
+        defer { finder.close() }
+        let (username, password) = TURNClient.credentials(secret: "a wrong one", name: "test")
+        #expect(await finder.allocate(.init(address: relay.address, username: username, password: password)) == nil)
+        #expect(finder.relayProblem?.contains("credentials") == true)
+        #expect(relay.lock.withLock { relay.refused } >= 1)
+    }
+
+    @Test func aDirectPathIsChosenOverTheRelay() async throws {
+        let net = FakeNetwork()
+        let stun = net.stunServer([198, 51, 100, 1])
+        let relay = net.relay([198, 51, 100, 2], secret: "s")
+        let homeRouter = FakeNetwork.Router(publicIP: [203, 0, 113, 10], mapping: .endpointIndependent, filtering: .addressAndPort)
+        let awayRouter = FakeNetwork.Router(publicIP: [203, 0, 113, 20], mapping: .endpointIndependent, filtering: .addressAndPort)
+        let home = net.host([192, 168, 1, 5], behind: homeRouter), away = net.host([10, 0, 0, 7], behind: awayRouter)
+        let (h, _, agents) = await Self.connect(home, homeHost: home.ip, away, awayHost: away.ip, stun: stun, relay: (relay.address, "s"))
+        defer { agents.0.close(); agents.1.close() }
+        let chosen = try #require(Self.pair(h), "home: \(h)")
+        #expect(chosen.local.kind != .relay && chosen.remote.kind != .relay)
+    }
+
+    @Test func coturnsCredentials() {
+        // username "expiry:name", password base64(HMAC-SHA1(secret, username)).
+        let (username, password) = TURNClient.credentials(secret: "secret", name: "pond", lifetime: 100, now: Date(timeIntervalSince1970: 1000))
+        #expect(username == "1100:pond")
+        #expect(password == Data(Hashes.hmac(Array("secret".utf8), Array("1100:pond".utf8))).base64EncodedString())
     }
 
     // MARK: Pieces

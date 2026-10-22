@@ -47,9 +47,12 @@ public struct Config: Codable, Equatable, Sendable {
         public var mesh: Bool
         /// The mesh's ranges, if not Tailscale's (100.64.0.0/10, fd7a:115c:a1e0::/48).
         public var meshSubnets: [String]?
+        /// A relay of one's own (coturn), "host:port" (port 3480 if left out), for when no direct path works. Its
+        /// shared secret is in the Keychain (`pond remote relay-secret`).
+        public var relay: String?
 
         public init(enabled: Bool = false, signaling: String? = nil, stun: String? = nil, port: UInt16? = nil,
-                    shareLocalAddresses: Bool = true, mesh: Bool = false, meshSubnets: [String]? = nil) {
+                    shareLocalAddresses: Bool = true, mesh: Bool = false, meshSubnets: [String]? = nil, relay: String? = nil) {
             self.enabled = enabled
             self.signaling = signaling
             self.stun = stun
@@ -57,6 +60,7 @@ public struct Config: Codable, Equatable, Sendable {
             self.shareLocalAddresses = shareLocalAddresses
             self.mesh = mesh
             self.meshSubnets = meshSubnets
+            self.relay = relay
         }
 
         public init(from decoder: any Decoder) throws {
@@ -68,6 +72,7 @@ public struct Config: Codable, Equatable, Sendable {
             shareLocalAddresses = try c.decodeIfPresent(Bool.self, forKey: .shareLocalAddresses) ?? true
             mesh = try c.decodeIfPresent(Bool.self, forKey: .mesh) ?? false
             meshSubnets = try c.decodeIfPresent([String].self, forKey: .meshSubnets)
+            relay = try c.decodeIfPresent(String.self, forKey: .relay)
         }
     }
 

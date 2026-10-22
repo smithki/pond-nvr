@@ -75,7 +75,7 @@ public struct RemotePeer: Codable, Equatable, Sendable, Identifiable {
 public final class RemoteKeys: @unchecked Sendable {
     let store: CredentialStore
     private let lock = NSLock()
-    static let identityAccount = "identity", peersAccount = "peers"
+    static let identityAccount = "identity", peersAccount = "peers", relayAccount = "relay-secret"
 
     /// Over a credential store (the Keychain's, service `pond-remote`, in Pond; a memory one in tests).
     public init(store: CredentialStore) { self.store = store }
@@ -110,6 +110,15 @@ public final class RemoteKeys: @unchecked Sendable {
     }
 
     public func peer(signingKey: Data) -> RemotePeer? { peers().first { $0.signingKey == signingKey } }
+
+    /// The relay's shared secret (coturn's static-auth-secret), if one's been given.
+    public func relaySecret() -> String? { lock.withLock { (try? store.password(for: Self.relayAccount)).flatMap { $0 } } }
+
+    public func setRelaySecret(_ secret: String?) throws {
+        try lock.withLock {
+            if let secret { try store.setPassword(secret, for: Self.relayAccount) } else { try store.removePassword(for: Self.relayAccount) }
+        }
+    }
 
     private func save(_ peers: [RemotePeer]) throws {
         try lock.withLock {

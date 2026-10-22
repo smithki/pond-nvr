@@ -2,10 +2,19 @@ import Foundation
 import Testing
 @testable import Traversal
 
-/// The published test vectors (FIPS 180, RFC 2202, RFC 4231, the CRC-32 check value).
+/// The published test vectors (FIPS 180, RFC 1321, RFC 2202, RFC 4231, the CRC-32 check value).
 @Suite struct HashesTests {
     static func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
     static func bytes(_ s: String) -> [UInt8] { Array(s.utf8) }
+
+    @Test func md5() {
+        // RFC 1321's test suite.
+        #expect(Self.hex(Hashes.md5([])) == "d41d8cd98f00b204e9800998ecf8427e")
+        #expect(Self.hex(Hashes.md5(Array("abc".utf8))) == "900150983cd24fb0d6963f7d28e17f72")
+        #expect(Self.hex(Hashes.md5(Array("message digest".utf8))) == "f96b697d7cb7938d525a2f31aaf161d0")
+        #expect(Self.hex(Hashes.md5(Array("12345678901234567890123456789012345678901234567890123456789012345678901234567890".utf8)))
+            == "57edf4a22be3c955ac49da2e2107b67a")
+    }
 
     @Test func sha1() {
         #expect(Self.hex(Hashes.sha1(Self.bytes("abc"))) == "a9993e364706816aba3e25717850c26c9cd0d89d")

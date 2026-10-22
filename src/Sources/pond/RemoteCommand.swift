@@ -30,9 +30,19 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
         paths.stun = PathSessions.resolve(server)
         if paths.stun.isEmpty { log("! remote: \(server) couldn't be looked up: only this Mac's own addresses will be offered") }
     }
+    let keys = RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService))
+    paths.name = (Host.current().localizedName ?? "Pond").filter { $0.isLetter || $0.isNumber }
+    if let relay = settings.relay, !settings.mesh {
+        let addresses = PathSessions.resolve(relay, port: 3480)
+        if let secret = keys.relaySecret(), !addresses.isEmpty {
+            paths.relay = (addresses, secret)
+        } else {
+            log(addresses.isEmpty ? "! remote: the relay \(relay) couldn't be looked up"
+                                  : "! remote: no secret for the relay (pond remote relay-secret): it isn't used")
+        }
+    }
     do {
-        let host = try RemoteHost(keys: RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService)),
-                                  name: Host.current().localizedName ?? "Pond", signaling: url, paths: paths, log: log)
+        let host = try RemoteHost(keys: keys, name: Host.current().localizedName ?? "Pond", signaling: url, paths: paths, log: log)
         host.start()
         log("remote: reachable through \(url.host() ?? address), \(host.devices().count) paired")
         return host
@@ -87,6 +97,8 @@ enum RemoteCommand {
 
     /// The command line's side.
     static func run(_ args: [String], configPath: String) -> Int32 {
+        // The relay's secret: kept in the Keychain here (the service reads it when it starts).
+        if args.first == "relay-secret" { return relaySecret(Array(args.dropFirst())) }
         var request = ControlSocket.Request(camera: "", action: "")
         switch args.first {
         case "pair" where args.count == 1: request.action = "remote.pair"
@@ -101,7 +113,7 @@ enum RemoteCommand {
             request.action = "remote.connect"
             request.device = args[1]
         default:
-            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE | connect DEVICE")
+            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE | connect DEVICE | relay-secret [--remove]")
         }
         let client = ControlClient(path: ControlSocket.path(nextTo: configPath))
         let asked = request
@@ -129,6 +141,25 @@ enum RemoteCommand {
         default:
             print("✓ Paired with \(reply.paired?.name ?? "it").")
         }
+        return 0
+    }
+
+    /// `pond remote relay-secret [--remove]`: the relay's shared secret (coturn's static-auth-secret), read from
+    /// standard input (never an argument, where other programs could see it), kept in the Keychain.
+    static func relaySecret(_ args: [String]) -> Int32 {
+        let keys = RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService))
+        if args == ["--remove"] {
+            do { try keys.setRelaySecret(nil) } catch { return SearchCommand.fail("It couldn't be removed: \(error)") }
+            print("✓ The relay's secret removed.")
+            return 0
+        }
+        guard args.isEmpty else { return SearchCommand.fail("pond remote relay-secret [--remove] (the secret on standard input)") }
+        if isatty(STDIN_FILENO) != 0 { FileHandle.standardError.write(Data("The relay's secret (then Return): ".utf8)) }
+        guard let secret = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespaces), !secret.isEmpty else {
+            return SearchCommand.fail("No secret given.")
+        }
+        do { try keys.setRelaySecret(secret) } catch { return SearchCommand.fail("It couldn't be kept: \(error)") }
+        print("✓ Kept in the Keychain. Restart the service to use it: pond service restart")
         return 0
     }
 }

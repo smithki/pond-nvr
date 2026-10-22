@@ -130,4 +130,86 @@ final class FakeNetwork: @unchecked Sendable {
         guard !host.closed, let handler = host.handler else { return }
         queue.asyncAfter(deadline: .now() + latency * Double.random(in: 0.5 ... 1.5)) { handler(bytes, from) }
     }
+
+    // MARK: A relay
+
+    /// A TURN server on the internet, as coturn with a shared secret answers: unauthorized at first (its realm and
+    /// a nonce), then requests signed with the long-term key of a username and password made from the secret.
+    /// Allocations, permissions and refreshes; what's sent through it goes out from the relayed address, and what
+    /// comes in from a permitted peer is passed back as a Data indication.
+    final class Relay: @unchecked Sendable {
+        let network: FakeNetwork
+        let secret: String
+        let control: Host
+        let realm = Array("pond".utf8), nonce = Array("n0nce".utf8)
+        let lock = NSLock()
+        /// Each client's allocation: its relayed host, and the addresses it may hear from.
+        var allocations: [STUNAddress: (relayed: Host, permitted: Set<[UInt8]>)] = [:]
+        var refused = 0
+
+        init(network: FakeNetwork, ip: [UInt8], secret: String) {
+            self.network = network
+            self.secret = secret
+            control = network.host(ip)
+            control.receive { [weak self] bytes, from in self?.handle(bytes, from: from) }
+        }
+
+        var address: STUNAddress { control.address }
+
+        /// The key a username's requests are signed with (its password made from the secret, as the client makes it).
+        func key(for username: [UInt8]) -> [UInt8] {
+            let password = Data(Hashes.hmac(Array(secret.utf8), username)).base64EncodedString()
+            return Hashes.md5(username + Array(":".utf8) + realm + Array(":\(password)".utf8))
+        }
+
+        func handle(_ bytes: [UInt8], from client: STUNAddress) {
+            guard let message = try? STUNMessage(bytes) else { return }
+            if message.type == TURNClient.sendIndication {
+                guard let peer = message.attribute(TURNClient.xorPeerAddress).flatMap({ STUNAddress(xorEncoded: $0, transaction: message.transaction) }),
+                      let data = message.attribute(TURNClient.data),
+                      let allocation = lock.withLock({ allocations[client] }), allocation.permitted.contains(peer.ip) else { return }
+                allocation.relayed.send(data, to: peer)
+                return
+            }
+            let method = message.type
+            // Unsigned (or signed with the wrong key): unauthorized, with the realm and a nonce to sign with.
+            guard let username = message.attribute(STUNMessage.Attribute.username),
+                  let key = Optional(key(for: username)), (try? STUNMessage(bytes, integrity: key)) != nil else {
+                if message.attribute(STUNMessage.Attribute.username) != nil { lock.withLock { refused += 1 } }
+                control.send(STUNMessage(type: method | 0x0110, transaction: message.transaction, attributes: [
+                    .init(STUNMessage.Attribute.errorCode, [0, 0, 4, 1] + Array("Unauthorized".utf8)),
+                    .init(TURNClient.realm, realm), .init(TURNClient.nonce, nonce),
+                ]).encoded(), to: client)
+                return
+            }
+            var answer: [STUNMessage.Attribute] = []
+            switch method {
+            case TURNClient.allocate:
+                let relayed = lock.withLock { allocations[client]?.relayed } ?? network.host(control.ip)
+                lock.withLock { if allocations[client] == nil { allocations[client] = (relayed, []) } }
+                relayed.receive { [weak self] data, peer in
+                    guard let self, let allocation = lock.withLock({ allocations[client] }), allocation.permitted.contains(peer.ip) else { return }
+                    let indication = STUNMessage(type: TURNClient.dataIndication)
+                    var message = indication
+                    message.attributes = [.init(TURNClient.xorPeerAddress, peer.xorEncoded(transaction: indication.transaction)),
+                                          .init(TURNClient.data, data)]
+                    control.send(message.encoded(), to: client)
+                }
+                answer = [.init(TURNClient.xorRelayedAddress, relayed.address.xorEncoded(transaction: message.transaction)),
+                          .init(STUNMessage.Attribute.xorMappedAddress, client.xorEncoded(transaction: message.transaction)),
+                          .init(TURNClient.lifetime, STUNMessage.be32(600))]
+            case TURNClient.createPermission:
+                guard let peer = message.attribute(TURNClient.xorPeerAddress).flatMap({ STUNAddress(xorEncoded: $0, transaction: message.transaction) })
+                else { return }
+                _ = lock.withLock { allocations[client]?.permitted.insert(peer.ip) }
+            case TURNClient.refresh:
+                answer = [.init(TURNClient.lifetime, message.attribute(TURNClient.lifetime) ?? STUNMessage.be32(600))]
+            default:
+                return
+            }
+            control.send(STUNMessage(type: method | 0x0100, transaction: message.transaction, attributes: answer).encoded(integrity: key), to: client)
+        }
+    }
+
+    func relay(_ ip: [UInt8], secret: String) -> Relay { Relay(network: self, ip: ip, secret: secret) }
 }

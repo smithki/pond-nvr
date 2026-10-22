@@ -15,6 +15,9 @@ public struct NetworkFacts: Codable, Equatable, Sendable {
     public var globalIPv6 = false
     /// It's in mesh mode, and whether it has a mesh address there.
     public var mesh = false, meshAddress = false
+    /// It has a relay set, and why the relay gave it no address (if it didn't).
+    public var relay = false
+    public var relayProblem: String?
 
     public init() {}
 }
@@ -26,6 +29,8 @@ public enum Diagnosis {
         // The mesh: either end without an address in it.
         if mine.mesh && !mine.meshAddress { causes.append("This Mac has no address in the mesh: is Tailscale (or your Headscale client) connected?") }
         if let theirs, theirs.mesh && !theirs.meshAddress { causes.append("\(peer) has no address in the mesh: is its Tailscale (or Headscale client) connected?") }
+        if let problem = mine.relayProblem { causes.append("This Mac's relay gave it no address: \(problem).") }
+        if let problem = theirs?.relayProblem { causes.append("\(peer)'s relay gave it no address: \(problem).") }
         if !mine.mesh && !mine.learnedPublic {
             causes.append("This Mac couldn't learn its public address: the signaling server's STUN (UDP 3478) didn't answer. Is it open on the server's firewall?")
         }
@@ -60,7 +65,11 @@ public enum Diagnosis {
         if theirs != nil, !theirIPv6 { fixes.append("turn on IPv6 at \(peer)'s router") }
         fixes.append("forward a UDP port to the Pond being reached: set remote.port on it (45000, say) and forward that port on its router")
         if !mine.mesh { fixes.append("use a mesh (Tailscale or Headscale) on both, with remote.mesh") }
-        fixes.append("run a relay of your own (deploy/, docker compose --profile relay)")
+        if !mine.relay && !(theirs?.relay ?? false) {
+            fixes.append("run a relay of your own (deploy/, docker compose --profile relay)")
+        } else if mine.relayProblem != nil || theirs?.relayProblem != nil {
+            fixes.append("check the relay: its address (remote.relay), its secret (pond remote relay-secret), and that its port is open")
+        }
         return causes.joined(separator: " ") + " To fix it: " + fixes.joined(separator: "; ") + "."
     }
 }

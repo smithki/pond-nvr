@@ -1,6 +1,6 @@
 // The hashes STUN and WebSocket need, in plain Swift, so what uses them builds on Linux with nothing added (Apple's
 // CryptoKit is macOS's and iOS's only): SHA-1 (WebSocket's handshake, STUN's MESSAGE-INTEGRITY with HMAC), SHA-256
-// (mailbox secrets), HMAC over either, and CRC-32 (STUN's FINGERPRINT).
+// (mailbox secrets), HMAC over either, CRC-32 (STUN's FINGERPRINT), and MD5 (TURN's long-term credentials).
 import Foundation
 
 public enum Hashes {
@@ -40,6 +40,46 @@ public enum Hashes {
         0x19A4_C116, 0x1E37_6C08, 0x2748_774C, 0x34B0_BCB5, 0x391C_0CB3, 0x4ED8_AA4A, 0x5B9C_CA4F, 0x682E_6FF3,
         0x748F_82EE, 0x78A5_636F, 0x84C8_7814, 0x8CC7_0208, 0x90BE_FFFA, 0xA450_6CEB, 0xBEF9_A3F7, 0xC671_78F2,
     ]
+
+    /// MD5 (RFC 1321): only for TURN's long-term credentials, whose key is MD5(username:realm:password) by its
+    /// RFC. Never for anything that needs it to be strong.
+    public static func md5(_ data: [UInt8]) -> [UInt8] {
+        let s: [UInt32] = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+                           5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+                           4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+                           6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
+        let k: [UInt32] = (0 ..< 64).map { UInt32(truncatingIfNeeded: Int64(abs(sin(Double($0 + 1))) * 4_294_967_296)) }
+        var h: [UInt32] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476]
+        var message = data + [0x80]
+        while message.count % 64 != 56 { message.append(0) }
+        let bits = UInt64(data.count) * 8
+        message += (0 ..< 8).map { UInt8((bits >> (8 * UInt64($0))) & 0xFF) }   // little-endian, unlike SHA's
+        for chunk in stride(from: 0, to: message.count, by: 64) {
+            let m = (0 ..< 16).map { i in
+                (0 ..< 4).reduce(UInt32(0)) { $0 | UInt32(message[chunk + i * 4 + $1]) << (8 * UInt32($1)) }
+            }
+            var (a, b, c, d) = (h[0], h[1], h[2], h[3])
+            for i in 0 ..< 64 {
+                var f: UInt32, g: Int
+                switch i {
+                case 0 ..< 16: f = (b & c) | (~b & d); g = i
+                case 16 ..< 32: f = (d & b) | (~d & c); g = (5 * i + 1) % 16
+                case 32 ..< 48: f = b ^ c ^ d; g = (3 * i + 5) % 16
+                default: f = c ^ (b | ~d); g = (7 * i) % 16
+                }
+                f = f &+ a &+ k[i] &+ m[g]
+                a = d
+                d = c
+                c = b
+                b = b &+ (f << s[i] | f >> (32 - s[i]))
+            }
+            h[0] = h[0] &+ a
+            h[1] = h[1] &+ b
+            h[2] = h[2] &+ c
+            h[3] = h[3] &+ d
+        }
+        return h.flatMap { v in (0 ..< 4).map { UInt8((v >> (8 * UInt32($0))) & 0xFF) } }
+    }
 
     public static func sha256(_ data: [UInt8]) -> [UInt8] {
         var h: [UInt32] = [0x6A09_E667, 0xBB67_AE85, 0x3C6E_F372, 0xA54F_F53A, 0x510E_527F, 0x9B05_688C, 0x1F83_D9AB, 0x5BE0_CD19]

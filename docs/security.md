@@ -17,6 +17,16 @@ To learn what a camera is (model, serial number, firmware, doorbell or not), pon
 - A camera is served to HomeKit only once chosen (in the app, or `pond camera set ID --homekit on`). Its setup code is generated with its HomeKit identity and kept in the Keychain (service `pond-homekit`), which only the service reads. While the camera is not yet in a home, the service also puts the code in `homekit-status.json` (readable only by you) for the app to show; once added, it is taken out.
 - Everything after pairing is encrypted (ChaCha20-Poly1305 sessions, SRTP for video, encrypted data streams for HKSV), as HAP requires.
 
+## Remote access
+
+Off unless set (`remote.enabled`). See [remote.md](remote.md) for how a connection is made.
+
+- **Keys.** This Mac has an Ed25519 key to sign with and an X25519 key to receive sealed messages, kept in the Keychain (service `pond-remote`), as are the keys of each device or Pond paired with it.
+- **Pairing.** Only with a code this Mac showed (`pond remote pair`): good once, for ten minutes, proved with an HMAC of the device's keys under the code's secret, never sent. Paired devices can be removed (`pond remote unpair`).
+- **The signaling service** (one's own, `deploy/`) passes on sealed envelopes between mailboxes and keeps nothing. Each envelope is encrypted to its recipient (HPKE: X25519, HKDF-SHA256, ChaCha20-Poly1305) and signed by its sender inside, within five minutes of being sent, never accepted twice. The service sees mailbox ids (hashes) and sizes, never what's in them: not the offers, the addresses or the credentials of a connection. Only paired devices' offers are answered; anyone else's go unopened.
+- **Connections** are checked with STUN signed with a password each side made for that attempt and sent the other sealed, so nobody else can answer them. Only this Mac's temporary IPv6 addresses are offered, never its stable one, and its own addresses can be left out (`remote.shareLocalAddresses`). The public address it learns comes from the signaling host's own STUN, not a third party's. A relay (coturn, one's own) sees the two ends' public addresses and passes their packets on; credentials for it are made from a shared secret kept in the Keychain, and last a day.
+- **What a connection carries** is, so far, only its checks and a few pings to time it; the encrypted session for video and control comes next (M4 on the roadmap).
+
 ## What listens on the network
 
 | Port | What | Who can use it |
@@ -25,6 +35,8 @@ To learn what a camera is (model, serial number, firmware, doorbell or not), pon
 | UDP ports per live stream | SRTP to the viewing device | the device that set up the stream |
 | One TCP port per camera recording to HKSV | HomeKit Data Stream | the home hub, with keys from its HAP session |
 | (Outgoing) TCP 9000 to each Reolink camera | Baichuan, Reolink's own protocol: privacy mode, events pushed | the camera's login, hashed and encrypted |
+| (Outgoing) a WebSocket to the signaling service, while remote access is on | Sealed envelopes to and from paired devices | (it can't read them) |
+| A UDP port per remote connection (any, or `remote.port`), while one is being made or used | Connection checks signed with that connection's password; then its traffic | the paired device or Pond it was offered to |
 | A Unix socket, `streams.sock` | Live video for the app (`StreamRelay`) | this user only (next to the settings file) |
 | A Unix socket, `controls.sock` | Camera controls for the app and the CLI (`ControlServer`): moving, positions, settings, privacy, talking through a camera's speaker | this user only (next to the settings file) |
 
