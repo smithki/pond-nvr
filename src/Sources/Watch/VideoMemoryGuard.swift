@@ -11,7 +11,8 @@
 //   seconds of recording; a frozen Mac costs everything until someone notices.
 //
 // (What's measured is every decoder service of this user's: the app's live views' too, which only makes it
-// warier. Pond's own memory isn't where the pictures are.) Hourly, the size and the decoders open are logged.
+// warier. Pond's own memory isn't where the pictures are.) Hourly, the size and the decoders open are logged, with
+// how hard the closer looks were worked that hour (they're what leaked before: a flat size after many is the proof).
 import Darwin
 import Foundation
 import NVRCore
@@ -83,7 +84,9 @@ public final class VideoMemoryGuard: @unchecked Sendable {
         if looks.count > Self.leakLooks { looks.removeFirst() }
         if now.timeIntervalSince(reported) >= Self.reportEvery {
             reported = now
-            log("video decoding: \(held) MB held, \(open) decoder\(open == 1 ? "" : "s") open")
+            let (looks, taps) = CloserLook.Count.take()
+            log("video decoding: \(held) MB held, \(open) decoder\(open == 1 ? "" : "s") open; this hour, \(looks) closer look"
+                + "\(looks == 1 ? "" : "s") from \(taps) main stream\(taps == 1 ? "" : "s") opened")
         }
         if held >= stopAt {
             halt("the video decoder holds \(held) MB (more than a quarter of this Mac's memory)")

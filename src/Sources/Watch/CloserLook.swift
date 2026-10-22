@@ -9,6 +9,24 @@ import Detection
 import Foundation
 
 public enum CloserLook {
+    /// How many closer looks there were (detection with a main-stream picture), and main streams opened for them,
+    /// since last asked: for the hourly line that says how hard they've been worked (see VideoMemoryGuard).
+    public enum Count {
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var looks = 0, taps = 0
+
+        static func looked() { lock.withLock { looks += 1 } }
+        static func opened() { lock.withLock { taps += 1 } }
+
+        /// The counts since last asked (and from now, none).
+        public static func take() -> (looks: Int, taps: Int) {
+            lock.withLock {
+                defer { looks = 0; taps = 0 }
+                return (looks, taps)
+            }
+        }
+    }
+
     /// A crop is at least this many pixels a side (the model's input: smaller would only be enlarged).
     public static let minimumSide = 640.0
     /// Moving areas this much of the picture (wide or high) are seen well enough whole.

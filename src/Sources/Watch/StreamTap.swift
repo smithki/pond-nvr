@@ -78,6 +78,7 @@ final class StreamTap: @unchecked Sendable {
             slots.release(self)
         }
         guard let source = try? StreamHub.shared.open(url: url, username: username, password: password, replay: true) else { return }
+        CloserLook.Count.opened()
         defer { source.close() }
         guard source.video.encoding.uppercased() == "H264" else {
             lock.withLock { unusable = true }

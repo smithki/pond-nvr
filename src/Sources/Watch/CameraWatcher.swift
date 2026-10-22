@@ -219,6 +219,7 @@ public final class CameraWatcher: @unchecked Sendable {
                     // decoding: it starts with the motion).
                     let closer = mask.isMoving
                         ? tap?.picture(priority: tracker.following(EventBuilder.important) ? .following : .motion) : nil
+                    if closer != nil { CloserLook.Count.looked() }
                     guard let found = CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
                     else { return }
                     // What counts by the zones, with the zones it's in.
