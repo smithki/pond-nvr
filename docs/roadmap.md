@@ -8,6 +8,7 @@ Status: **done**, **in progress**, **next**, **later**.
 
 | Goal | Status | Notes |
 |---|---|---|
+| The service, watched | next | Saying so when Pond isn't recording and nobody's looking: after a restart or a login, the app (and later a small login item of its own, with the window closed) checks that the service is installed and running, and recording; if not, a notification says what's wrong and offers the fix (Install, Start, plug in the drive). A Mac that restarts unattended (a power cut, a panic) is the case: the service gone or stuck stays unseen until someone opens the app. With remote access, a paired device is told when its Pond goes quiet. |
 | Narrow windows | later | Rethink the timeline (and the app around it) at small window sizes: today the video, controls, filters and lanes squeeze together and the whole interface gets janky on narrow windows. Likely a compact layout: fewer controls inline (the rest in a menu), filters folded into one control, the hint text dropped, lanes shorter. |
 | Recording the sub-stream instead | later | For a camera that doesn't fit at full resolution: keep the main stream for live view and HomeKit, record the sub-stream. |
 | Live frames in transitions | later | When tiles change rows quickly, the fading stand-in shows the camera's latest recorded still, up to a minute old. It should show the tile's last live frame (`AVSampleBufferVideoRenderer.copyDisplayedPixelBuffer()` with the clock briefly paused, or decoding in the app and keeping the last frame). |

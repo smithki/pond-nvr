@@ -395,6 +395,26 @@ final class AppModel {
     /// When a camera was added (and its recording began), for the time its first minute takes to be saved.
     var recordingStarted: [String: Date] = [:]
 
+    /// When the running service started (its process's start): after a gap, its cameras' first minutes aren't
+    /// saved yet for a minute or so, which isn't "not recording".
+    var serviceStarted: Date? {
+        guard case let .running(pid) = serviceState, let pid = pid_t(pid) else { return nil }
+        if let known = serviceStart, known.pid == pid { return known.date }
+        let date = Self.processStart(pid)
+        serviceStart = date.map { (pid, $0) }
+        return date
+    }
+    @ObservationIgnored private var serviceStart: (pid: pid_t, date: Date)?
+
+    nonisolated static func processStart(_ pid: pid_t) -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&name, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
+    }
+
     func setPassword(_ password: String, for id: String) -> Bool {
         do {
             try passwords.save(password, for: id)

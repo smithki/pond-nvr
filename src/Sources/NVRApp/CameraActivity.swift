@@ -91,7 +91,7 @@ enum CameraHealth: Equatable {
         case let .notRecording(since?):
             "Nothing recorded since \(since.formatted(date: .omitted, time: .shortened))."
         case .notRecording(nil): "Nothing recorded yet."
-        case .startingToRecord: "Just added. The first minute of recording is saved about a minute after it starts."
+        case .startingToRecord: "Recording has just started. Its first minute is saved about a minute after it starts."
         case .keptPrivate: "Private: not recorded, shown live or in the Home app."
         }
     }
@@ -107,7 +107,7 @@ enum CameraHealth: Equatable {
     ///   - lastRecorded: when its newest recording was made.
     ///   - recordingAsOf: the time recordings should be current to (now, while the recorder runs), or nil if
     ///     staleness says nothing (the recorder is stopped).
-    ///   - startedRecording: when the camera was added, if it was lately.
+    ///   - startedRecording: when its recording began, if lately: the camera added, or the service started.
     static func of(live: TileStatus?, lastRecorded: Date?, recordingAsOf: Date?, startedRecording: Date? = nil) -> CameraHealth {
         switch live {
         case let .failed(reason)?: return .offline(reason)
@@ -115,12 +115,12 @@ enum CameraHealth: Equatable {
         default: break
         }
         guard let recordingAsOf else { return .ok }
-        guard let lastRecorded else {
-            if let started = startedRecording, recordingAsOf.timeIntervalSince(started) < firstRecordingWithin {
-                return .startingToRecord
-            }
-            return .notRecording(since: nil)
-        }
-        return recordingAsOf.timeIntervalSince(lastRecorded) > staleAfter ? .notRecording(since: lastRecorded) : .ok
+        let started = startedRecording.flatMap { recordingAsOf.timeIntervalSince($0) < firstRecordingWithin ? $0 : nil }
+        guard let lastRecorded else { return started == nil ? .notRecording(since: nil) : .startingToRecord }
+        guard recordingAsOf.timeIntervalSince(lastRecorded) > staleAfter else { return .ok }
+        // Nothing lately, but recording began again since (the service started after a gap): its first minute
+        // isn't saved yet.
+        if let started, lastRecorded < started { return .startingToRecord }
+        return .notRecording(since: lastRecorded)
     }
 }

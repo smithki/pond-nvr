@@ -267,7 +267,7 @@ struct LiveView: View {
             : MockEvents.enabled ? cameras.compactMap { snapshots[$0.id]?.time }.max() : nil
         return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
                                lastRecorded: snapshots[id]?.time, recordingAsOf: asOf,
-                               startedRecording: model.recordingStarted[id])
+                               startedRecording: [model.recordingStarted[id], model.serviceStarted].compactMap { $0 }.max())
     }
 
     static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)
