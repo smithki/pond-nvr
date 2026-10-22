@@ -97,4 +97,20 @@ import Testing
         #expect(target.fitting(width: 2560, height: 1440) == (1280, 720))
         #expect(target.fitting(width: 640, height: 480) == (640, 480))     // never larger than the camera's
     }
+
+    @Test func aClockLeapIsNotFilledPictureByPicture() throws {
+        // A recording's clock leaping 13 hours (a camera's stream opened again on a new clock): at most a few
+        // fragments' worth of the last picture again, not one for every 2 s in between (23,400, gigabytes at once).
+        let (sps, pps, units) = try Self.frames()
+        let collected = Collected()
+        let transcoder = VideoTranscoder(target: .init(width: 160, height: 120, bitrate: 500, fps: 10, profile: 1),
+                                         realTime: false, keyframeInterval: 2 * 90000) { collected.add($0) }
+        let leap: Int64 = 13 * 3600 * 90000
+        for (i, unit) in units.enumerated() {
+            transcoder.push(unit.nalus, sps: sps, pps: pps, time: unit.time + (i >= 25 ? leap : 0), encode: true)
+        }
+        transcoder.finish()
+        #expect(collected.all.count < 100)
+        #expect(collected.all.count > 30)
+    }
 }

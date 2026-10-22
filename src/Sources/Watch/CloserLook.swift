@@ -3,7 +3,7 @@
 // to be sure of. Where the motion gate saw movement, the part of the picture around it, at full resolution (the
 // main stream's, when it's at hand), is given to the model as well: a close-up of what moved. What it finds there
 // is put back in the whole picture's terms and merged with the whole picture's findings.
-import CoreImage
+import CoreGraphics
 import CoreVideo
 import Detection
 import Foundation
@@ -62,18 +62,46 @@ public enum CloserLook {
         return CGRect(x: x.rounded(), y: y.rounded(), width: side.rounded(), height: side.rounded())
     }
 
-    /// That part of a picture, as a picture of its own (32BGRA).
-    public static func picture(_ buffer: CVPixelBuffer, cropped rect: CGRect, context: CIContext) -> CVPixelBuffer? {
-        let height = Double(CVPixelBufferGetHeight(buffer))
-        // (Core Image's y runs up from the bottom.)
-        let flipped = CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
-        let image = CIImage(cvPixelBuffer: buffer).cropped(to: flipped)
-            .transformed(by: CGAffineTransform(translationX: -flipped.minX, y: -flipped.minY))
+    /// That part of a picture (32BGRA, or the decoder's 4:2:0), as a picture of its own in the same format: its
+    /// rows copied out, so the decoder's picture is let go as soon as this returns. (Through Core Image, the
+    /// decoder's pictures were kept by its cache of what it had drawn from, and the decoder made new ones for every
+    /// look: the main stream's, 14–19 MB each, a few a second while something moved, until the Mac ran out of
+    /// memory.) For 4:2:0, the crop's corner and sides are made even (its colour is one sample per 2×2 pixels).
+    public static func picture(_ buffer: CVPixelBuffer, cropped rect: CGRect) -> CVPixelBuffer? {
+        let format = CVPixelBufferGetPixelFormatType(buffer)
+        let biplanar = format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        guard format == kCVPixelFormatType_32BGRA || biplanar else { return nil }
+        let even = biplanar ? ~1 : ~0
+        let x = Int(rect.minX) & even, y = Int(rect.minY) & even
+        let width = Int(rect.width) & even, height = Int(rect.height) & even
+        guard x >= 0, y >= 0, width > 0, height > 0, x + width <= CVPixelBufferGetWidth(buffer),
+              y + height <= CVPixelBufferGetHeight(buffer) else { return nil }
         var out: CVPixelBuffer?
         let attributes = [kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]] as CFDictionary
-        guard CVPixelBufferCreate(nil, Int(rect.width), Int(rect.height), kCVPixelFormatType_32BGRA, attributes, &out) == kCVReturnSuccess,
-              let out else { return nil }
-        context.render(image, to: out)
+        guard CVPixelBufferCreate(nil, width, height, format, attributes, &out) == kCVReturnSuccess, let out else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        CVPixelBufferLockBaseAddress(out, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(out, [])
+            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+        }
+        /// One plane's rows: `rows` of `bytes`, from (`left` bytes, `top` rows).
+        func copy(_ plane: Int?, left: Int, top: Int, bytes: Int, rows: Int) -> Bool {
+            let from = plane.map { CVPixelBufferGetBaseAddressOfPlane(buffer, $0) } ?? CVPixelBufferGetBaseAddress(buffer)
+            let to = plane.map { CVPixelBufferGetBaseAddressOfPlane(out, $0) } ?? CVPixelBufferGetBaseAddress(out)
+            guard let from, let to else { return false }
+            let fromRow = plane.map { CVPixelBufferGetBytesPerRowOfPlane(buffer, $0) } ?? CVPixelBufferGetBytesPerRow(buffer)
+            let toRow = plane.map { CVPixelBufferGetBytesPerRowOfPlane(out, $0) } ?? CVPixelBufferGetBytesPerRow(out)
+            for row in 0 ..< rows { memcpy(to + row * toRow, from + (top + row) * fromRow + left, bytes) }
+            return true
+        }
+        if biplanar {
+            // Brightness, a byte a pixel; then colour, a pair of bytes for each 2×2.
+            guard copy(0, left: x, top: y, bytes: width, rows: height),
+                  copy(1, left: x, top: y / 2, bytes: width, rows: height / 2) else { return nil }
+        } else {
+            guard copy(nil, left: x * 4, top: y, bytes: width * 4, rows: height) else { return nil }
+        }
         return out
     }
 
@@ -91,13 +119,13 @@ public enum CloserLook {
     /// The whole picture's findings, and the closer looks' at what moved (in `closer`, the same view at a higher
     /// resolution, if there is one; else in the picture itself), duplicates merged. Nil if the model failed.
     public static func look(_ detect: (CVPixelBuffer) -> [Detection]?, whole: CVPixelBuffer, closer: CVPixelBuffer?,
-                            mask: MotionMask, context: CIContext) -> [Detection]? {
+                            mask: MotionMask) -> [Detection]? {
         guard var found = detect(whole) else { return nil }
         let source = closer ?? whole
         let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
         for area in areas(mask) {
             guard let rect = crop(area, width: width, height: height),
-                  let part = picture(source, cropped: rect, context: context),
+                  let part = picture(source, cropped: rect),
                   let near = detect(part) else { continue }
             found += mapped(near, from: rect, width: width, height: height)
         }

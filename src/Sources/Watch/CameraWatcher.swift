@@ -2,7 +2,6 @@
 // HomeKit) decoded picture by picture; a few times a second, whether anything moved; while something did, the
 // detection model on the picture; what it finds followed (Tracker) and made into events (EventBuilder), kept in
 // the database with a picture of each. Nothing is watched while the camera is private.
-import CoreImage
 import CoreVideo
 import Detection
 import Foundation
@@ -173,68 +172,73 @@ public final class CameraWatcher: @unchecked Sendable {
             }
             guard packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { continue }
             for unit in depacketizer.push(rtp) {
-                // Every picture decoded (each needs the ones before), only some looked at.
-                guard let picture = decoder.decode(unit.nalus, keyframe: unit.isKeyframe, damaged: unit.damaged,
-                                                   sps: depacketizer.sps, pps: depacketizer.pps) else { continue }
-                answerRings(picture)
-                if !told {
-                    say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")
-                    told = true
-                }
-                // On the recording's clock: when the picture arrived (smoothed, by the sub-stream's own times, so the
-                // watcher's own pauses don't show), less how long after their place in the recording the recorder's
-                // pictures arrive. Before the recorder has said: the sub-stream's own reports; before those, now.
-                let arrived = Date()
-                let taken = clock.wallTime(unit.timestamp).map { Date(timeIntervalSince1970: $0) }
-                if let taken { arrivalLag = arrivalLag.map { $0 * 0.95 + arrived.timeIntervalSince(taken) * 0.05 } ?? arrived.timeIntervalSince(taken) }
-                let now: Date
-                if let taken, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
-                    now = taken.addingTimeInterval(lag - recorded)
-                } else {
-                    now = taken ?? arrived
-                }
-                if !toldDelay, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
-                    say(String(format: "on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
-                    toldDelay = true
-                }
-                guard now.timeIntervalSince(lastLook) >= Self.lookEvery else { continue }
-                lastLook = now
-                let mask = motion(in: picture)
-                if mask.isMoving { lastMotion = now }
-                let moving = now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion
-                // While something is followed (a dog lying down), or put down and waiting to be seen again, the model
-                // looks now and then though nothing moves: so it's known to be still there.
-                let present = tracker.following(EventBuilder.important) || builder.current != nil
-                let checking = (present && now.timeIntervalSince(lastDetect) >= Self.presenceLookEvery)
-                    || (leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery)
-                guard moving || checking else {
-                    apply(builder.quiet(at: now))
-                    continue
-                }
-                guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { continue }
-                lastDetect = now
-                // The whole picture, and a closer look at what moves (at the main stream's resolution, once it's
-                // decoding: it starts with the motion).
-                let closer = mask.isMoving ? tap?.picture() : nil
-                guard let found = CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask, context: Self.context)
-                else { continue }
-                // What counts by the zones, with the zones it's in.
-                let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
-                let sightings = tracker.update(counted.map(\.0), mask: mask, at: now) { d in
-                    counted.first { $0.0 == d }?.1 ?? []
-                }
-                apply(builder.update(sightings, at: now), picture: picture)
-                // Kept, for drawing over the recording when it's played back: what matters, counted or not (an
-                // ignored one shows the zones at work), each with the track it was followed as.
-                store?.save(found.filter { Self.kept.contains($0.category) }.map { d in
-                    Sighting(camera: camera, time: now, label: d.label, category: d.category, confidence: d.confidence, box: d.box,
-                             track: sightings.first { $0.track.box == d.box }?.track.id,
-                             counted: counted.contains { $0.0 == d })
-                })
-                let items = counted.filter { $0.0.category == .item }
-                    .map { (detection: $0.0, zones: $0.1, moved: mask.overlaps(($0.0.box.x, $0.0.box.y, $0.0.box.width, $0.0.box.height))) }
-                for event in leftItems.update(items, people: found.filter { $0.category == .person }, at: now) {
-                    left(event, picture: picture)
+                // Each picture's leftovers let go with it (this thread runs for as long as the camera's watched: its
+                // own pool would keep them all, and with them the decoder's pictures).
+                autoreleasepool {
+                    // Every picture decoded (each needs the ones before), only some looked at.
+                    guard let picture = decoder.decode(unit.nalus, keyframe: unit.isKeyframe, damaged: unit.damaged,
+                                                       sps: depacketizer.sps, pps: depacketizer.pps) else { return }
+                    answerRings(picture)
+                    if !told {
+                        say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")
+                        told = true
+                    }
+                    // On the recording's clock: when the picture arrived (smoothed, by the sub-stream's own times, so the
+                    // watcher's own pauses don't show), less how long after their place in the recording the recorder's
+                    // pictures arrive. Before the recorder has said: the sub-stream's own reports; before those, now.
+                    let arrived = Date()
+                    let taken = clock.wallTime(unit.timestamp).map { Date(timeIntervalSince1970: $0) }
+                    if let taken { arrivalLag = arrivalLag.map { $0 * 0.95 + arrived.timeIntervalSince(taken) * 0.05 } ?? arrived.timeIntervalSince(taken) }
+                    let now: Date
+                    if let taken, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
+                        now = taken.addingTimeInterval(lag - recorded)
+                    } else {
+                        now = taken ?? arrived
+                    }
+                    if !toldDelay, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
+                        say(String(format: "on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
+                        toldDelay = true
+                    }
+                    guard now.timeIntervalSince(lastLook) >= Self.lookEvery else { return }
+                    lastLook = now
+                    let mask = motion(in: picture)
+                    if mask.isMoving { lastMotion = now }
+                    let moving = now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion
+                    // While something is followed (a dog lying down), or put down and waiting to be seen again, the model
+                    // looks now and then though nothing moves: so it's known to be still there.
+                    let present = tracker.following(EventBuilder.important) || builder.current != nil
+                    let checking = (present && now.timeIntervalSince(lastDetect) >= Self.presenceLookEvery)
+                        || (leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery)
+                    guard moving || checking else {
+                        apply(builder.quiet(at: now))
+                        return
+                    }
+                    guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { return }
+                    lastDetect = now
+                    // The whole picture, and a closer look at what moves (at the main stream's resolution, once it's
+                    // decoding: it starts with the motion).
+                    let closer = mask.isMoving
+                        ? tap?.picture(priority: tracker.following(EventBuilder.important) ? .following : .motion) : nil
+                    guard let found = CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
+                    else { return }
+                    // What counts by the zones, with the zones it's in.
+                    let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
+                    let sightings = tracker.update(counted.map(\.0), mask: mask, at: now) { d in
+                        counted.first { $0.0 == d }?.1 ?? []
+                    }
+                    apply(builder.update(sightings, at: now), picture: picture)
+                    // Kept, for drawing over the recording when it's played back: what matters, counted or not (an
+                    // ignored one shows the zones at work), each with the track it was followed as.
+                    store?.save(found.filter { Self.kept.contains($0.category) }.map { d in
+                        Sighting(camera: camera, time: now, label: d.label, category: d.category, confidence: d.confidence, box: d.box,
+                                 track: sightings.first { $0.track.box == d.box }?.track.id,
+                                 counted: counted.contains { $0.0 == d })
+                    })
+                    let items = counted.filter { $0.0.category == .item }
+                        .map { (detection: $0.0, zones: $0.1, moved: mask.overlaps(($0.0.box.x, $0.0.box.y, $0.0.box.width, $0.0.box.height))) }
+                    for event in leftItems.update(items, people: found.filter { $0.category == .person }, at: now) {
+                        left(event, picture: picture)
+                    }
                 }
             }
         }
@@ -307,13 +311,11 @@ public final class CameraWatcher: @unchecked Sendable {
         let relative = snapshots[event.id] ?? Self.eventFile(event, extension: "jpg")
         snapshots[event.id] = relative
         let path = (eventsFolder as NSString).appendingPathComponent(relative)
-        let context = Self.context
-        nonisolated(unsafe) let picture = picture
+        // Copied out now: the decoder's picture isn't kept while the file waits to be written (see CloserLook).
+        guard let image = Self.image(picture) else { return nil }
         Self.writing.async {
             try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            guard let image = context.createCGImage(CIImage(cvPixelBuffer: picture), from: CGRect(
-                x: 0, y: 0, width: CVPixelBufferGetWidth(picture), height: CVPixelBufferGetHeight(picture))),
-                let out = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
+            guard let out = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
             else { return }
             CGImageDestinationAddImage(out, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
             CGImageDestinationFinalize(out)
@@ -327,7 +329,21 @@ public final class CameraWatcher: @unchecked Sendable {
         "events/\(event.camera)/\(dayFormatter.string(from: event.start))-\(event.id.prefix(8).lowercased()).\(`extension`)"
     }
 
-    static let context = CIContext()
+    /// A 32BGRA picture as an image of its own (its pixels copied).
+    static func image(_ picture: CVPixelBuffer) -> CGImage? {
+        guard CVPixelBufferGetPixelFormatType(picture) == kCVPixelFormatType_32BGRA else { return nil }
+        CVPixelBufferLockBaseAddress(picture, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(picture, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(picture) else { return nil }
+        let width = CVPixelBufferGetWidth(picture), height = CVPixelBufferGetHeight(picture)
+        let row = CVPixelBufferGetBytesPerRow(picture)
+        guard let provider = CGDataProvider(data: Data(bytes: base, count: row * height) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: row,
+                       space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
     static let writing = DispatchQueue(label: "pond.watch.pictures", qos: .utility)
 
     static func percent(_ confidence: Double) -> String { "\(Int((confidence * 100).rounded()))%" }

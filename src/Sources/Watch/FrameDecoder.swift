@@ -1,19 +1,38 @@
-// A camera's H.264 pictures decoded one after another (VideoToolbox, on the media engine), as 32BGRA. Every
+// A camera's H.264 pictures decoded one after another (VideoToolbox, on the media engine): as 32BGRA at the
+// camera's size (the sub-stream, for the motion gate), or in the decoder's own 4:2:0 scaled down as it decodes
+// (the main stream, for a closer look: a 4K picture is 33 MB as 32BGRA, 3 MB as 4:2:0 at 2560 wide). Every
 // picture is decoded, as each needs the ones before it; after a damaged one, nothing until the next keyframe.
 import CoreMedia
 import Foundation
+import NVRCore
 import VideoToolbox
 
 final class FrameDecoder {
+    /// What it decodes to: its pixel format, and the largest size (the camera's shape kept; nil: the camera's own).
+    let pixelFormat: OSType
+    let largest: (width: Int, height: Int)?
     private var session: VTDecompressionSession?
     private var format: CMVideoFormatDescription?
     private var parameters: (sps: [UInt8], pps: [UInt8])?
     private var waitingForKeyframe = true
 
+    init(pixelFormat: OSType = kCVPixelFormatType_32BGRA, largest: (width: Int, height: Int)? = nil) {
+        self.pixelFormat = pixelFormat
+        self.largest = largest
+    }
+
+    /// For a closer look: the decoder's own 4:2:0, at most 2560×1920.
+    static func closeUp() -> FrameDecoder {
+        FrameDecoder(pixelFormat: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, largest: (2560, 1920))
+    }
+
     deinit { close() }
 
     func close() {
-        if let session { VTDecompressionSessionInvalidate(session) }
+        if let session {
+            VTDecompressionSessionInvalidate(session)
+            DecoderCount.closed()
+        }
         session = nil
         format = nil
         parameters = nil
@@ -62,16 +81,31 @@ final class FrameDecoder {
             }
         }
         guard let format else { return false }
+        var attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+                                         kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]]
+        if let largest {
+            // Scaled by the decoder as it decodes (no picture at full size made first).
+            let camera = CMVideoFormatDescriptionGetDimensions(format)
+            let size = Self.fitting(width: Int(camera.width), height: Int(camera.height), within: largest)
+            attributes[kCVPixelBufferWidthKey as String] = size.width
+            attributes[kCVPixelBufferHeightKey as String] = size.height
+        }
         var session: VTDecompressionSession?
-        let attributes = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                          kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]] as CFDictionary
         guard VTDecompressionSessionCreate(allocator: nil, formatDescription: format, decoderSpecification: nil,
-                                           imageBufferAttributes: attributes, outputCallback: nil,
+                                           imageBufferAttributes: attributes as CFDictionary, outputCallback: nil,
                                            decompressionSessionOut: &session) == noErr, let session else { return false }
+        DecoderCount.opened()
         self.session = session
         self.format = format
         parameters = (sps, pps)
         return true
+    }
+
+    /// A picture `width`×`height` scaled to fit inside `within`, its shape kept (even sides, never larger).
+    static func fitting(width: Int, height: Int, within: (width: Int, height: Int)) -> (width: Int, height: Int) {
+        let scale = min(1, min(Double(within.width) / Double(max(1, width)), Double(within.height) / Double(max(1, height))))
+        func even(_ v: Double) -> Int { max(2, Int(v.rounded(.down)) & ~1) }
+        return (even(Double(width) * scale), even(Double(height) * scale))
     }
 
     /// The NAL units with 4-byte lengths, as a sample.

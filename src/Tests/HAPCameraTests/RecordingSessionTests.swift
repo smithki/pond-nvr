@@ -64,12 +64,47 @@ import Testing
     }
 
     @Test func aRecordingComesBackAsFragmentedMP4() async throws {
+        let data = try await Self.record(clockFrom: nil)
+        // The initialization segment and the first fragment (the next ends at a keyframe the clip runs out
+        // before; a camera's stream always has one).
+        try #require(data.count >= 2)
+        struct Missing: Error {}
+        func packet(_ m: DataStream.Message) throws -> (bytes: [UInt8], meta: Opack) {
+            guard let p = m.body["packets"]?.array?.first, let bytes = p["data"]?.data, let meta = p["metadata"] else {
+                throw Missing()
+            }
+            return (bytes, meta)
+        }
+        let initialization = try packet(data[0])
+        #expect(data[0].body["streamId"]?.int == 1)
+        #expect(initialization.meta["dataType"]?.string == "mediaInitialization")
+        #expect(initialization.meta["dataSequenceNumber"]?.int == 1)
+        #expect(initialization.meta["isLastDataChunk"]?.bool == true)
+        #expect(initialization.meta["dataTotalSize"]?.int == Int64(initialization.bytes.count))
+        #expect(String(decoding: initialization.bytes[4 ..< 8], as: UTF8.self) == "ftyp")
+        let fragment = try packet(data[1])
+        #expect(fragment.meta["dataType"]?.string == "mediaFragment")
+        #expect(fragment.meta["dataSequenceNumber"]?.int == 2)
+        #expect(String(decoding: fragment.bytes[4 ..< 8], as: UTF8.self) == "moof")
+    }
+
+    @Test func aRecordingGoesOnWhenTheCamerasClockJumps() async throws {
+        // The stream opened again mid-recording, its clock starting 13 hours earlier: the recording placed again by
+        // wall time, so its fragments go on (before, nothing more came: every picture was "before" the last).
+        let data = try await Self.record(clockFrom: 30)
+        #expect(data.count >= 3)
+    }
+
+    /// The hub's data events for a recording of the fixture: 3 s kept before the hub asks, the rest live; from
+    /// frame `clockFrom` on, the camera's clock moved back 13 hours (as a stream opened again starts anywhere).
+    static func record(clockFrom: Int?) async throws -> [DataStream.Message] {
         let (sps, pps, units) = try VideoTranscoderTests.frames()
         let prebuffer = Prebuffer(source: ("rtsp://test", "u", "p"), seconds: 10) { _ in }
         func feed(_ i: Int) {
             let keyframe = units[i].nalus.first.map { $0[0] & 0x1F == 5 } ?? false
+            let moved: Int64 = clockFrom.map { i >= $0 ? -13 * 3600 * 90000 : 0 } ?? 0
             prebuffer.keep(.video(.init(nalus: units[i].nalus, keyframe: keyframe, sps: sps, pps: pps,
-                                        time: units[i].time, wall: 1000 + Double(i) / 10)))
+                                        time: units[i].time + moved, wall: 1000 + Double(i) / 10)))
         }
         for i in 0 ..< 30 { feed(i) }   // 3 s kept before the hub asks
 
@@ -98,33 +133,11 @@ import Testing
         try await Task.sleep(for: .milliseconds(300))
         for i in 30 ..< 50 { feed(i) }   // the rest, live
 
-        let messages = try await hub.receive(for: 10) { got in
-            got.filter { $0.topic == "data" }.count >= 2
+        let messages = try await hub.receive(for: 3) { got in
+            got.filter { $0.topic == "data" }.count >= 3
         }
         let opened = try #require(messages.first { $0.topic == "open" })
         #expect(opened.kind == .response && opened.status == 0 && opened.body["status"]?.int == 0)
-
-        let data = messages.filter { $0.kind == .event && $0.protocol == "dataSend" && $0.topic == "data" }
-        // The initialization segment and the first fragment (the next ends at a keyframe the clip runs out
-        // before; a camera's stream always has one).
-        try #require(data.count >= 2)
-        struct Missing: Error {}
-        func packet(_ m: DataStream.Message) throws -> (bytes: [UInt8], meta: Opack) {
-            guard let p = m.body["packets"]?.array?.first, let bytes = p["data"]?.data, let meta = p["metadata"] else {
-                throw Missing()
-            }
-            return (bytes, meta)
-        }
-        let initialization = try packet(data[0])
-        #expect(data[0].body["streamId"]?.int == 1)
-        #expect(initialization.meta["dataType"]?.string == "mediaInitialization")
-        #expect(initialization.meta["dataSequenceNumber"]?.int == 1)
-        #expect(initialization.meta["isLastDataChunk"]?.bool == true)
-        #expect(initialization.meta["dataTotalSize"]?.int == Int64(initialization.bytes.count))
-        #expect(String(decoding: initialization.bytes[4 ..< 8], as: UTF8.self) == "ftyp")
-        let fragment = try packet(data[1])
-        #expect(fragment.meta["dataType"]?.string == "mediaFragment")
-        #expect(fragment.meta["dataSequenceNumber"]?.int == 2)
-        #expect(String(decoding: fragment.bytes[4 ..< 8], as: UTF8.self) == "moof")
+        return messages.filter { $0.kind == .event && $0.protocol == "dataSend" && $0.topic == "data" }
     }
 }

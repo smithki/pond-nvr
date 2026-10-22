@@ -7,6 +7,7 @@
 import CoreMedia
 import CoreVideo
 import Foundation
+import NVRCore
 import VideoToolbox
 
 public final class VideoTranscoder: @unchecked Sendable {
@@ -86,7 +87,10 @@ public final class VideoTranscoder: @unchecked Sendable {
     }
 
     deinit {
-        if let decoder { VTDecompressionSessionInvalidate(decoder) }
+        if let decoder {
+            VTDecompressionSessionInvalidate(decoder)
+            DecoderCount.closed()
+        }
         if let encoder { VTCompressionSessionInvalidate(encoder) }
         if let transfer { VTPixelTransferSessionInvalidate(transfer) }
     }
@@ -149,11 +153,19 @@ public final class VideoTranscoder: @unchecked Sendable {
     /// camera does. (On a clock at the asked rate instead, a 20 fps doorbell's every third picture was repeated
     /// to make 30, and its recordings juddered.)
     private var held: (picture: CVImageBuffer, from: Int64)?
+    /// The most fragments a missing stretch is filled with (the picture before it, again).
+    static let longestFill: Int64 = 8
     private var nextKeyframe: Int64?
     private var lastPlaced: Int64?
 
     private func onClock(_ picture: CVImageBuffer, time: Int64, spacing: Int64, interval: Int64) {
         if nextKeyframe == nil { nextKeyframe = time }
+        // Far beyond the next fragment's start (a clock that moved): a fragment starts here, rather than the last
+        // picture placed again on every one in between (thousands, for a leap of hours).
+        if let boundary = nextKeyframe, time - boundary > Self.longestFill * interval {
+            nextKeyframe = time
+            held = nil
+        }
         // A picture is placed once the next is known (it lasts until then).
         if let held, var boundary = nextKeyframe {
             if held.from == boundary {
@@ -181,7 +193,10 @@ public final class VideoTranscoder: @unchecked Sendable {
     // MARK: - Decoding
 
     private func makeDecoder(sps: [UInt8], pps: [UInt8]) {
-        if let decoder { VTDecompressionSessionInvalidate(decoder) }
+        if let decoder {
+            VTDecompressionSessionInvalidate(decoder)
+            DecoderCount.closed()
+        }
         decoder = nil
         var made: CMVideoFormatDescription?
         sps.withUnsafeBufferPointer { s in
@@ -192,12 +207,18 @@ public final class VideoTranscoder: @unchecked Sendable {
             }
         }
         guard let made else { return }
+        // Decoded at the size it's encoded at (scaled by the decoder as it decodes: a 4K camera's pictures are
+        // never made at 4K only to be made smaller). A later change of size is scaled after (see `scale`).
+        let camera = CMVideoFormatDescriptionGetDimensions(made)
+        let size = target.fitting(width: Int(camera.width), height: Int(camera.height))
         let attributes = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                          kCVPixelBufferWidthKey as String: size.width, kCVPixelBufferHeightKey as String: size.height,
                           kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary
         var session: VTDecompressionSession?
         guard VTDecompressionSessionCreate(allocator: nil, formatDescription: made, decoderSpecification: nil,
                                            imageBufferAttributes: attributes, outputCallback: nil,
-                                           decompressionSessionOut: &session) == noErr else { return }
+                                           decompressionSessionOut: &session) == noErr, session != nil else { return }
+        DecoderCount.opened()
         decoder = session
         format = made
         decoderSPS = sps

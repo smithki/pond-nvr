@@ -144,6 +144,11 @@ struct RecordingAndHomeKit: ServiceRunning {
         }
         clips?.start()
         defer { clips?.stop() }
+        // The video decoding's memory watched (it lives in macOS's decoder service, not Pond's own): too much, and
+        // the closer looks pause, then Pond restarts, rather than the Mac running out.
+        let videoMemory = VideoMemoryGuard { line in log.log("pond", line) }
+        videoMemory.start()
+        defer { videoMemory.stopWatching() }
         cameras.startAll()
         for r in host.running where !r.record.isPaired {
             log.log("homekit", "\(r.camera.name) is not in the Home app yet; `pond homekit code` shows its setup code")

@@ -26,6 +26,11 @@ final class RecordingSession: @unchecked Sendable {
     /// The recording's start on the camera's clocks, and in wall time.
     private var videoStart: Int64?
     private var startWall = 0.0
+    /// The last frame's time on the camera's clock: a jump from it (the stream opened again, on a new clock) is
+    /// taken up by placing the recording's clock again by wall time.
+    private var lastVideo: Int64?
+    /// Further than this from the last frame (or back from it) is a new clock, not a late frame.
+    static let clockJump: Int64 = 5 * 90000
     private var audioOffset: Int64?
     /// Sound that came before the first encoded frame, to add once the writer exists.
     private var heldAudio: [(time: Int64, data: [UInt8])] = []
@@ -115,7 +120,16 @@ final class RecordingSession: @unchecked Sendable {
                     guard v.keyframe else { return nil }
                     videoStart = v.time
                     startWall = v.wall
+                } else if let last = lastVideo, v.time <= last - Self.clockJump || v.time > last + Self.clockJump {
+                    // A new clock (the camera's stream opened again, its times starting anywhere): this frame placed by
+                    // wall time, as long after the start as it really is; the sound placed again the same way. Left
+                    // as it was, the time leapt by up to 13 hours, and the encoder was given a picture for every
+                    // fragment in between (gigabytes at once), or nothing more at all for a leap back.
+                    videoStart = v.time - Int64(((v.wall - startWall) * 90000).rounded())
+                    audioOffset = nil
+                    log("HomeKit: recording stream \(streamID): the camera's clock jumped; placed again by wall time")
                 }
+                lastVideo = v.time
                 return v.time - videoStart!
             }
             guard let time, let transcoder = lock.withLock({ self.transcoder }) else { return }

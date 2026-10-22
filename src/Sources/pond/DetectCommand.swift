@@ -40,7 +40,6 @@ enum DetectCommand {
         let closer = args.contains("--closer")
         args.removeAll { $0 == "--closer" }
         var gate = MotionGate()
-        let context = CIContext()
         if let id = option("--camera") {
             guard let camera = (try? ConfigStore(path: configPath).load())?.cameras.first(where: { $0.id == id }) else {
                 FileHandle.standardError.write(Data("✗ No camera \(id).\n".utf8))
@@ -93,7 +92,7 @@ enum DetectCommand {
                     } ?? []
                     CVPixelBufferUnlockBaseAddress(picture, .readOnly)
                     let mask = gate.moving(cells)
-                    guard let looked = CloserLook.look({ try? detector.detect($0) }, whole: picture, closer: nil, mask: mask, context: context)
+                    guard let looked = CloserLook.look({ try? detector.detect($0) }, whole: picture, closer: nil, mask: mask)
                     else {
                         FileHandle.standardError.write(Data("✗ the model failed\n".utf8))
                         return 1
