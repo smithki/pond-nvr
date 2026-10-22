@@ -48,15 +48,23 @@ public enum Hashes {
                            5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
                            4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
                            6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
-        let k: [UInt32] = (0 ..< 64).map { UInt32(truncatingIfNeeded: Int64(abs(sin(Double($0 + 1))) * 4_294_967_296)) }
+        // (Plain loops: Linux's compiler can't type-check these as one expression in reasonable time.)
+        var k = [UInt32](repeating: 0, count: 64)
+        for i in 0 ..< 64 {
+            let fraction: Double = abs(sin(Double(i + 1))) * 4_294_967_296
+            k[i] = UInt32(truncatingIfNeeded: Int64(fraction))
+        }
         var h: [UInt32] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476]
         var message = data + [0x80]
         while message.count % 64 != 56 { message.append(0) }
         let bits = UInt64(data.count) * 8
-        message += (0 ..< 8).map { UInt8((bits >> (8 * UInt64($0))) & 0xFF) }   // little-endian, unlike SHA's
+        for byte in 0 ..< 8 { message.append(UInt8((bits >> UInt64(8 * byte)) & 0xFF)) }   // little-endian, unlike SHA's
         for chunk in stride(from: 0, to: message.count, by: 64) {
-            let m = (0 ..< 16).map { i in
-                (0 ..< 4).reduce(UInt32(0)) { $0 | UInt32(message[chunk + i * 4 + $1]) << (8 * UInt32($1)) }
+            var m = [UInt32](repeating: 0, count: 16)
+            for i in 0 ..< 16 {
+                var word: UInt32 = 0
+                for byte in 0 ..< 4 { word |= UInt32(message[chunk + i * 4 + byte]) << UInt32(8 * byte) }
+                m[i] = word
             }
             var (a, b, c, d) = (h[0], h[1], h[2], h[3])
             for i in 0 ..< 64 {
@@ -78,7 +86,9 @@ public enum Hashes {
             h[2] = h[2] &+ c
             h[3] = h[3] &+ d
         }
-        return h.flatMap { v in (0 ..< 4).map { UInt8((v >> (8 * UInt32($0))) & 0xFF) } }
+        var digest: [UInt8] = []
+        for v in h { for byte in 0 ..< 4 { digest.append(UInt8((v >> UInt32(8 * byte)) & 0xFF)) } }
+        return digest
     }
 
     public static func sha256(_ data: [UInt8]) -> [UInt8] {

@@ -27,7 +27,9 @@ public struct SDP: Sendable, Equatable {
 
     public init(_ text: String) {
         var media: [Media] = []
-        for raw in text.components(separatedBy: "\n") {
+        // Lines end in CRLF (or LF): split where any line ends. (Not on "\n": in Swift, CRLF is one character,
+        // which Linux's Foundation doesn't split inside, and every SDP came out as a single line there.)
+        for raw in text.split(whereSeparator: \.isNewline) {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.hasPrefix("m=") {
                 let parts = line.dropFirst(2).split(separator: " ")
