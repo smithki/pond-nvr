@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import NVRCore
@@ -116,6 +117,11 @@ import Traversal
         let (outcome, opened) = await away.paths.open(to: peer)
         let session = try #require(opened, "\(outcome.summary)")
         defer { away.paths.close(session) }
+        // Both ends have the session's keys, and they match: what one sends with, the other reads with.
+        let mine = try #require(session.keys), theirs = try #require(home.paths.session(session.id)?.keys)
+        func bytes(_ key: SymmetricKey) -> [UInt8] { key.withUnsafeBytes { [UInt8]($0) } }
+        #expect(bytes(mine.controlSend) == bytes(theirs.controlReceive) && bytes(mine.controlReceive) == bytes(theirs.controlSend))
+        #expect(mine.videoSend.key == theirs.videoReceive.key && mine.videoReceive.key == theirs.videoSend.key)
         let before = session.finder.local
         // As if this Mac's network had changed: found again, with new credentials on both sides.
         await away.paths.restart(session)
@@ -129,6 +135,37 @@ import Traversal
         session.finder.send([PathSessions.ping, 1])
         for _ in 0 ..< 50 where !pong.lock.withLock({ pong.got }) { try await Task.sleep(for: .milliseconds(10)) }
         #expect(pong.lock.withLock { pong.got })
+    }
+
+    @Test func askingOverTheSessionsControlChannel() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(server.boundPort)")!
+        let home = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Home", signaling: url) { _ in }
+        let away = try RemoteHost(keys: RemoteKeys(store: MemoryCredentialStore()), name: "Away", signaling: url) { _ in }
+        home.start()
+        away.start()
+        defer { home.stop(); away.stop() }
+        let code = try #require(PairingCode(text: home.newCode().text))
+        let peer = try #require(await away.join(code))
+        for _ in 0 ..< 50 where home.devices().isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        // The home Pond answers one action of its own: what's asked, backwards.
+        home.paths.requests = { _, action, body in
+            guard action == "reverse", let body else { return (nil, "not supported: \(action)") }
+            return (Data(body.reversed()), nil)
+        }
+
+        let (outcome, opened) = await away.paths.open(to: peer)
+        let session = try #require(opened, "\(outcome.summary)")
+        defer { away.paths.close(session) }
+        let ping = try #require(await session.ask("ping"))
+        #expect(ping.error == nil)
+        let reversed = try #require(await session.ask("reverse", Data("pond".utf8)))
+        #expect(reversed.body == Data("dnop".utf8))
+        // A big one: many frames, in order.
+        let big = Data((0 ..< 200_000).map { UInt8(truncatingIfNeeded: $0) })
+        #expect(await session.ask("reverse", big)?.body == Data(big.reversed()))
+        #expect(await session.ask("fly")?.error == "not supported: fly")
     }
 
     @Test func noPathSaysWhy() async throws {

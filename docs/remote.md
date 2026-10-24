@@ -1,6 +1,6 @@
 # Remote access
 
-Reaching a Pond from outside its network: another Mac first (another Pond, the start of "sites"), then the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. It's still being built: pairing and finding a path between two Ponds work (`pond remote connect`); the encrypted session that carries video and control comes next. See the roadmap's *Away from home*.
+Reaching a Pond from outside its network: another Mac first (another Pond, the start of "sites"), then the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. It's still being built: pairing, finding a path between two Ponds, and an encrypted session over it carrying live video work, from the command line (`pond remote connect`, `pond remote watch`); events, clips and search over it, and the apps, come next. See the roadmap's *Away from home*.
 
 ## The pieces
 
@@ -13,7 +13,7 @@ Reaching a Pond from outside its network: another Mac first (another Pond, the s
 1. Deploy the signaling service: `deploy/README.md`. Point a DNS name at the server, and open TCP 443 and UDP 3478–3479.
 2. On each Mac, in the settings file: `"remote": { "enabled": true, "signaling": "wss://signal.example.com" }` ([configuration.md](configuration.md#remote-access) has the rest), and restart the service (`pond service restart`).
 3. Pair: on the Pond to be reached, `pond remote pair` shows a code (and a QR code), good once for ten minutes; on the other, `pond remote join CODE`. `pond remote devices` lists who's paired on each.
-4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went.
+4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went. `pond remote watch DEVICE CAMERA` watches one of its cameras for ten seconds (`--seconds N`; `--main` for the main stream; `--kbps N [--size WxH]` to have it re-encoded smaller, as for a weak link), keeps what came as an MP4 (`--out PATH`), and says how it went: pictures, frame rate, bitrate, loss, how soon the first came.
 
 ## How a connection is made
 
@@ -26,6 +26,15 @@ The one connecting sends the Pond an offer, sealed to it through the signaling s
 Each side then checks pairs of its own and the other's candidates, best first (own addresses, then public ones, then the relay), with STUN messages signed with the other's password: anyone else's go unanswered. A check that reaches a side from an address it didn't know about teaches it a new candidate, which it checks straight back; that's how two home routers, each letting in only replies to its own traffic, are got through. The Pond being reached chooses the best pair that worked, and both use it from then on, checking it every few seconds to keep the routers' paths open. (This is RFC 8445's Interactive Connectivity Establishment, cut down to what two Ponds need: `PathFinder` in `src/Sources/Traversal`.)
 
 When either Mac's network changes (another Wi-Fi network, Wi-Fi to a phone's hotspot), they find a path again, the old one carrying on until there's a new one.
+
+## The session
+
+Once there's a path, everything between the two goes over it, encrypted with keys made for that session alone: each side put a one-time key in its sealed offer or answer, and the session's keys come from the two (X25519, then HKDF). They're forgotten when it ends, so what was said can't be read later, even with a Pond's own keys.
+
+- **The control channel**: requests and their replies (ChaCha20-Poly1305), each delivered once and in order whatever the path loses or reorders.
+- **Live video**: a camera's stream as the Home app gets it (`LiveSession`): the camera's own H.264 as it arrives, or re-encoded to a size and bitrate the viewer asks for, which its reports then steer; SRTP, in packets small enough for any path.
+
+The checks, the channel and the video share one UDP port, told apart by each packet's first byte.
 
 ## When it can't connect
 

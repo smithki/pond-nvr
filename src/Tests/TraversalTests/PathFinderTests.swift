@@ -59,7 +59,7 @@ import Testing
     // MARK: Real sockets
 
     @Test func twoAgentsOnThisMacConnectOverIPv4() async throws {
-        let (home, away) = (try UDPSocket(), try UDPSocket())
+        let (home, away) = (try DatagramSocket(), try DatagramSocket())
         let (h, a, agents) = await Self.connect(home, homeHost: [127, 0, 0, 1], away, awayHost: [127, 0, 0, 1])
         defer { agents.0.close(); agents.1.close() }
         let chosen = try #require(Self.pair(h))
@@ -76,7 +76,7 @@ import Testing
     }
 
     @Test func twoAgentsOnThisMacConnectOverIPv6() async throws {
-        let (home, away) = (try UDPSocket(), try UDPSocket())
+        let (home, away) = (try DatagramSocket(), try DatagramSocket())
         let loopback: [UInt8] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
         let (h, a, agents) = await Self.connect(home, homeHost: loopback, away, awayHost: loopback)
         defer { agents.0.close(); agents.1.close() }

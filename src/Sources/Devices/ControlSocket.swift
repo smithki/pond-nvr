@@ -27,7 +27,8 @@ public enum ControlSocket {
         /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
         /// "search" (events that answer `question`; `camera` unused);
         /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`),
-        /// "remote.connect" (`device`: a path found to it, and how).
+        /// "remote.connect" (`device`: a path found to it, and how), "remote.watch" (`device`'s `camera` for `seconds`,
+        /// its main stream if `main`, kept at `file`).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
@@ -43,6 +44,12 @@ public enum ControlSocket {
         /// "remote.unpair": the device's id; "remote.join": another Pond's pairing code.
         public var device: String?
         public var code: String?
+        public var seconds: Double?
+        public var main: Bool?
+        public var file: String?
+        /// "remote.watch": re-encoded to this bitrate (kbit/s), at most this size ("WxH"); nil: as the camera sends it.
+        public var kbps: Int?
+        public var size: String?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
                     name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {

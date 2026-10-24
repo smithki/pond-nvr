@@ -18,7 +18,7 @@ public protocol PacketTransport: AnyObject, Sendable {
 }
 
 /// A real UDP socket on every address, IPv6 and IPv4 (IPv4 arrives mapped: ::ffff:a.b.c.d, and is sent so).
-public final class UDPSocket: PacketTransport, @unchecked Sendable {
+public final class DatagramSocket: PacketTransport, @unchecked Sendable {
     public let port: UInt16
     private let fd: Int32
     private let lock = NSLock()

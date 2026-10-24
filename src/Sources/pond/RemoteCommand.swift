@@ -89,6 +89,15 @@ enum RemoteCommand {
                 break
             }
             if outcome.pair == nil { reply.error = .failed(outcome.summary) } else { reply.connection = outcome.summary }
+        case "remote.watch":
+            guard let device = request.device, let file = request.file else { reply.error = .failed("which device, and where to keep it?"); break }
+            let size = request.size?.split(separator: "x").compactMap { Int($0) }
+            let reencode = request.kbps.map { kbps in
+                LiveRequest.Reencode(width: size?.first ?? 640, height: size?.last ?? 360, kbps: kbps, fps: 15)
+            }
+            let result = await host.watch(device: device, camera: request.camera, main: request.main ?? false, reencode: reencode,
+                                          seconds: request.seconds ?? 10, file: URL(fileURLWithPath: file))
+            if result.problem != nil || result.counts.pictures == 0 { reply.error = .failed(result.summary) } else { reply.connection = result.summary }
         default:
             reply.error = .notSupported
         }
@@ -112,12 +121,31 @@ enum RemoteCommand {
         case "connect" where args.count == 2:
             request.action = "remote.connect"
             request.device = args[1]
+        case "watch" where args.count >= 3:
+            // pond remote watch DEVICE CAMERA [--main] [--seconds N] [--out PATH] [--kbps N [--size WxH]]
+            var rest = Array(args.dropFirst(3))
+            request.action = "remote.watch"
+            request.device = args[1]
+            request.camera = args[2]
+            request.main = rest.contains("--main")
+            rest.removeAll { $0 == "--main" }
+            func value(_ name: String) -> String? {
+                guard let i = rest.firstIndex(of: name), i + 1 < rest.count else { return nil }
+                return rest[i + 1]
+            }
+            request.seconds = value("--seconds").flatMap(Double.init) ?? 10
+            request.kbps = value("--kbps").flatMap(Int.init)
+            request.size = value("--size")
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            request.file = value("--out").map { NSString(string: $0).expandingTildeInPath }
+                ?? (NSTemporaryDirectory() as NSString).appendingPathComponent("pond-watch-\(args[2])-\(stamp).mp4")
+            if !request.file!.hasPrefix("/") { request.file = FileManager.default.currentDirectoryPath + "/" + request.file! }
         default:
-            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE | connect DEVICE | relay-secret [--remove]")
+            return SearchCommand.fail("pond remote pair | devices | unpair ID | join CODE | connect DEVICE | watch DEVICE CAMERA [--main] [--seconds N] [--out PATH] [--kbps N [--size WxH]] | relay-secret [--remove]")
         }
         let client = ControlClient(path: ControlSocket.path(nextTo: configPath))
         let asked = request
-        let reply = SearchCommand.blocking { await client.ask(asked, timeout: 45) }
+        let reply = SearchCommand.blocking { await client.ask(asked, timeout: 45 + (asked.seconds ?? 0)) }
         if let error = reply.error {
             return SearchCommand.fail(error == .unreachable
                 ? "Remote access is kept by Pond's service, which isn't running (pond service start)."
@@ -136,12 +164,37 @@ enum RemoteCommand {
             for d in devices { print("\(d.id)  \(d.name)") }
         case "remote.unpair":
             print("✓ Removed: it can't reach this Mac any more.")
-        case "remote.connect":
+        case "remote.connect", "remote.watch":
             print("✓ \(reply.connection ?? "connected")")
         default:
             print("✓ Paired with \(reply.paired?.name ?? "it").")
         }
         return 0
+    }
+
+    /// The Pond being reached: what a paired device asks over a session. `live.start`: a camera's stream (by its id
+    /// or name; not a private one), main or sub, to the session's viewer; `live.stop`.
+    static func serve(_ session: PathSessions.Session, action: String, body: Data?, cameras: [Config.Camera],
+                      password: (String) -> String?, sender: LiveSender) -> (Data?, String?) {
+        switch action {
+        case "live.start":
+            guard let body, let ask = try? JSONDecoder().decode(LiveRequest.self, from: body) else { return (nil, "what to watch?") }
+            guard let camera = cameras.first(where: { $0.id == ask.camera || $0.name == ask.camera }) else {
+                return (nil, "no camera \(ask.camera)")
+            }
+            guard !PrivacyState.shared.isPrivate(camera.id) else { return (nil, "\(camera.name) is private") }
+            guard let password = password(camera.id) else { return (nil, "\(camera.name) has no password") }
+            let url = ask.main || camera.sub.isEmpty ? camera.main : camera.sub
+            guard let answer = sender.start(session, source: (url, camera.username, password), reencode: ask.reencode) else {
+                return (nil, "the session has no keys")
+            }
+            return (try? JSONEncoder().encode(answer), nil)
+        case "live.stop":
+            sender.stop(session)
+            return (nil, nil)
+        default:
+            return (nil, "not supported: \(action)")
+        }
     }
 
     /// `pond remote relay-secret [--remove]`: the relay's shared secret (coturn's static-auth-secret), read from

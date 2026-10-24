@@ -10,6 +10,7 @@
 //
 // In M3 a session is the path alone: `connect` measures the round trip with a few pings over it and ends it. M4
 // keeps sessions open (`open`), for the encrypted session that carries video.
+import CryptoKit
 import Foundation
 import Network
 import Traversal
@@ -65,6 +66,9 @@ public final class PathSessions: @unchecked Sendable {
             var session: UUID
             var credentials: PathFinder.Credentials
             var candidates: [Candidate]
+            /// The public half of the side's one-time key, for the session's keys (SessionKeys); none on a restart,
+            /// which keeps them.
+            var exchange: Data?
         }
 
         struct More: Codable {
@@ -79,12 +83,17 @@ public final class PathSessions: @unchecked Sendable {
         }
     }
 
-    final class Session: @unchecked Sendable {
-        let id: UUID
-        let peer: RemotePeer
+    /// A session with a paired peer: its path, its keys, and (once connected) its control channel.
+    public final class Session: @unchecked Sendable {
+        public let id: UUID
+        public let peer: RemotePeer
         let finder: PathFinder
         /// The socket's port (its candidates gathered again on it after a restart).
         let port: UInt16
+        /// This side's one-time key, and the session's keys once the other's public half is known.
+        let oneTime = Curve25519.KeyAgreement.PrivateKey()
+        var keys: SessionKeys? { get { lock.withLock { _keys } } set { lock.withLock { _keys = newValue } } }
+        private var _keys: SessionKeys?
         /// Its relayed address, once the relay's given one (offered again after a restart).
         var relayed: Candidate? { get { lock.withLock { _relayed } } set { lock.withLock { _relayed = newValue } } }
         private var _relayed: Candidate?
@@ -98,6 +107,90 @@ public final class PathSessions: @unchecked Sendable {
         var theirs: NetworkFacts? { get { lock.withLock { _theirs } } set { lock.withLock { _theirs = newValue } } }
         private var _mine = NetworkFacts(), _theirs: NetworkFacts?
         private let lock = NSLock()
+        weak var owner: PathSessions?
+
+        /// The control channel, from when the session first connects (it carries on across restarts).
+        var channel: SecureChannel? { lock.withLock { _channel } }
+        private var _channel: SecureChannel?
+        /// Requests asked, waiting for their replies (by id).
+        private var replies: [UInt64: OneShot<ChannelMessage?>] = [:]
+        private var nextRequest: UInt64 = 1
+        /// Pings' answers (M3's round trip), by their number.
+        private var pongs: [UInt8: Date] = [:]
+        /// Video for this side (SRTP and SRTCP: a first byte from 128 to 191), once something's set to take it.
+        public var media: (@Sendable ([UInt8]) -> Void)? {
+            get { lock.withLock { _media } }
+            set { lock.withLock { _media = newValue } }
+        }
+        private var _media: (@Sendable ([UInt8]) -> Void)?
+
+        /// Bytes onto the session's path (video, as SRTP).
+        public func send(_ bytes: [UInt8]) { finder.send(bytes) }
+
+        /// Everything that arrives on the path, by its first byte.
+        func deliver(_ bytes: [UInt8]) {
+            guard let first = bytes.first else { return }
+            switch first {
+            case SecureChannel.marker:
+                channel?.handle(bytes)
+            case PathSessions.ping where bytes.count == 2:
+                finder.send([PathSessions.pong, bytes[1]])
+            case PathSessions.pong where bytes.count == 2:
+                lock.withLock { pongs[bytes[1]] = Date() }
+            case 128 ... 191:
+                media?(bytes)
+            default:
+                break
+            }
+        }
+
+        func pong(_ n: UInt8) -> Date? { lock.withLock { pongs[n] } }
+
+        /// Connected: the control channel opened (once).
+        func connected() {
+            lock.withLock {
+                guard _channel == nil, let keys = _keys else { return }
+                let finder = self.finder
+                let channel = SecureChannel(keys: keys) { finder.send($0) }
+                channel.received = { [weak self] data in self?.arrived(data) }
+                _channel = channel
+            }
+        }
+
+        /// A request to the other side, and its reply (nil: none in time, or the session ended).
+        public func ask(_ action: String, _ body: Data? = nil, timeout: Double = 10) async -> (body: Data?, error: String?)? {
+            guard let channel else { return nil }
+            let waiting = OneShot<ChannelMessage?>()
+            let id = lock.withLock { () -> UInt64 in
+                defer { nextRequest += 1 }
+                replies[nextRequest] = waiting
+                return nextRequest
+            }
+            channel.send(PathSessions.encode(ChannelMessage(id: id, reply: false, action: action, body: body)))
+            Task {
+                try? await Task.sleep(for: .seconds(timeout))
+                waiting.resolve(nil)
+            }
+            defer { _ = lock.withLock { replies.removeValue(forKey: id) } }
+            guard let reply = await waiting.value else { return nil }
+            return (reply.body, reply.error)
+        }
+
+        /// A message on the channel: a reply to one of this side's requests, or a request to answer.
+        private func arrived(_ data: Data) {
+            guard let message = try? JSONDecoder().decode(ChannelMessage.self, from: data) else { return }
+            if message.reply {
+                lock.withLock { replies[message.id] }?.resolve(message)
+                return
+            }
+            guard let action = message.action, let owner else { return }
+            Task {
+                let (body, error) = await owner.serve(self, action: action, body: message.body)
+                channel?.send(PathSessions.encode(ChannelMessage(id: message.id, reply: true, body: body, error: error)))
+            }
+        }
+
+        func closeChannel() { lock.withLock { _channel }?.close() }
 
         init(id: UUID, peer: RemotePeer, finder: PathFinder, port: UInt16) {
             self.id = id
@@ -114,8 +207,30 @@ public final class PathSessions: @unchecked Sendable {
     private var sessions: [UUID: Session] = [:]
     private let lock = NSLock()
 
-    /// Pings and their answers over a path (M3's only traffic on it; M4's session starts with other bytes).
+    /// Pings and their answers over a path, for its round trip (`connect`).
     static let ping: UInt8 = 0xFE, pong: UInt8 = 0xFD
+
+    /// A message on a session's control channel: a request (an action, and what it's about), or the reply to one.
+    struct ChannelMessage: Codable {
+        var id: UInt64
+        var reply: Bool
+        var action: String?
+        var body: Data?
+        var error: String?
+    }
+
+    /// Told when a session ends (its stream, if it has one, stopped with it).
+    public var sessionEnded: (@Sendable (Session) -> Void)?
+
+    /// What this side does when the other asks (set by the service): the reply's body, or why not. `ping` is
+    /// answered here.
+    public var requests: (@Sendable (Session, String, Data?) async -> (Data?, String?))?
+
+    func serve(_ session: Session, action: String, body: Data?) async -> (Data?, String?) {
+        if action == "ping" { return (nil, nil) }
+        guard let requests else { return (nil, "not supported: \(action)") }
+        return await requests(session, action, body)
+    }
 
     private let network = NWPathMonitor()
     private var lastNetwork: String?
@@ -150,17 +265,19 @@ public final class PathSessions: @unchecked Sendable {
         var (outcome, session) = await open(to: peer)
         guard let session else { return outcome }
         defer { end(session, tell: true) }
-        outcome.roundTrip = await roundTrip(session.finder)
+        outcome.roundTrip = await roundTrip(session)
         log("remote: \(peer.name): \(outcome.summary)")
         return outcome
     }
 
     /// A path to `peer` found, and kept (until `close`): the session, and how it went; or no session, and why.
-    func open(to peer: RemotePeer) async -> (Outcome, Session?) {
+    public func open(to peer: RemotePeer) async -> (Outcome, Session?) {
         let start = Date()
-        guard let socket = try? UDPSocket() else { return (Outcome(took: 0, problem: "no UDP socket could be opened"), nil) }
+        guard let socket = try? DatagramSocket() else { return (Outcome(took: 0, problem: "no UDP socket could be opened"), nil) }
         let finder = PathFinder(role: .controlled, transport: socket, timing: settings.timing)
         let session = Session(id: UUID(), peer: peer, finder: finder, port: socket.port)
+        session.owner = self
+        finder.received = { [weak session] in session?.deliver($0) }
         lock.withLock { sessions[session.id] = session }
         var kept = false
         defer { if !kept { end(session, tell: true) } }
@@ -168,7 +285,8 @@ public final class PathSessions: @unchecked Sendable {
         let hosts = Gatherer.hosts(port: socket.port, mode: settings.mode)
         finder.addLocal(hosts)
         session.mine = facts(hosts)
-        let offer = Message.Offer(session: session.id, credentials: finder.local, candidates: settings.shareLocalAddresses ? hosts : [])
+        let offer = Message.Offer(session: session.id, credentials: finder.local, candidates: settings.shareLocalAddresses ? hosts : [],
+                                  exchange: session.oneTime.publicKey.rawRepresentation)
         log("remote: connecting to \(peer.name)…")
         guard await send(Message.offer, Self.encode(offer), peer) else {
             return (Outcome(took: Date().timeIntervalSince(start), problem: "\(peer.name) isn't connected to the signaling service"), nil)
@@ -181,6 +299,11 @@ public final class PathSessions: @unchecked Sendable {
         guard let theirs = await session.answer.value else {
             return (Outcome(took: Date().timeIntervalSince(start), problem: "\(peer.name) didn't answer"), nil)
         }
+        guard let exchange = theirs.exchange,
+              let keys = try? SessionKeys.derive(mine: session.oneTime, theirs: exchange, session: session.id, controlling: false) else {
+            return (Outcome(took: Date().timeIntervalSince(start), problem: "\(peer.name)'s answer had no key for the session"), nil)
+        }
+        session.keys = keys
         finder.setRemote(theirs.credentials, candidates: theirs.candidates)
         finder.start()
         let state = await settled(finder)
@@ -193,12 +316,16 @@ public final class PathSessions: @unchecked Sendable {
             return (Outcome(took: Date().timeIntervalSince(start), problem: "the attempt was stopped"), nil)
         }
         session.connectedAt = Date()
+        session.connected()
         kept = true
         return (Outcome(pair: pair, took: Date().timeIntervalSince(start)), session)
     }
 
     /// A session let go (the other side told).
-    func close(_ session: Session) { end(session, tell: true) }
+    public func close(_ session: Session) { end(session, tell: true) }
+
+    /// A session under way, by its id.
+    func session(_ id: UUID) -> Session? { lock.withLock { sessions[id] } }
 
     /// The session's path found again (this Mac's network changed): the connecting side restarts and tells the
     /// other its new credentials and candidates; the side being reached asks the connecting side to.
@@ -297,22 +424,13 @@ public final class PathSessions: @unchecked Sendable {
     }
 
     /// The median of a few pings' round trips over the path.
-    private func roundTrip(_ finder: PathFinder) async -> Double? {
-        final class Pongs: @unchecked Sendable {
-            let lock = NSLock()
-            var at: [UInt8: Date] = [:]
-        }
-        let pongs = Pongs()
-        finder.received = { bytes in
-            guard bytes.count == 2, bytes[0] == Self.pong else { return }
-            pongs.lock.withLock { pongs.at[bytes[1]] = Date() }
-        }
+    private func roundTrip(_ session: Session) async -> Double? {
         var trips: [Double] = []
         for n in UInt8(0) ..< 5 {
             let sent = Date()
-            finder.send([Self.ping, n])
-            for _ in 0 ..< 50 where pongs.lock.withLock({ pongs.at[n] == nil }) { try? await Task.sleep(for: .milliseconds(10)) }
-            if let back = pongs.lock.withLock({ pongs.at[n] }) { trips.append(back.timeIntervalSince(sent)) }
+            session.finder.send([Self.ping, n])
+            for _ in 0 ..< 50 where session.pong(n) == nil { try? await Task.sleep(for: .milliseconds(10)) }
+            if let back = session.pong(n) { trips.append(back.timeIntervalSince(sent)) }
         }
         return trips.isEmpty ? nil : trips.sorted()[trips.count / 2]
     }
@@ -365,26 +483,32 @@ public final class PathSessions: @unchecked Sendable {
     /// The side being reached: a session for the offer, answered, and its checks begun.
     private func answer(_ offer: Message.Offer, from peer: RemotePeer) {
         guard lock.withLock({ sessions[offer.session] == nil }) else { return }
-        var socket = settings.port.flatMap { try? UDPSocket(port: $0) }
+        // No key for the session: nothing could be said over it.
+        guard let exchange = offer.exchange else { return log("! remote: \(peer.name)'s offer had no key for the session") }
+        var socket = settings.port.flatMap { try? DatagramSocket(port: $0) }
         if socket == nil, let port = settings.port { log("! remote: UDP port \(port) is in use: answering from another") }
-        if socket == nil { socket = try? UDPSocket() }
+        if socket == nil { socket = try? DatagramSocket() }
         guard let socket else { return log("! remote: no UDP socket could be opened") }
         let finder = PathFinder(role: .controlling, transport: socket, timing: settings.timing)
         let session = Session(id: offer.session, peer: peer, finder: finder, port: socket.port)
+        guard let keys = try? SessionKeys.derive(mine: session.oneTime, theirs: exchange, session: offer.session, controlling: true) else {
+            finder.close()
+            return log("! remote: \(peer.name)'s key for the session isn't one")
+        }
+        session.keys = keys
         lock.withLock { sessions[offer.session] = session }
         let hosts = Gatherer.hosts(port: socket.port, mode: settings.mode)
         finder.addLocal(hosts)
         session.mine = facts(hosts)
         finder.setRemote(offer.credentials, candidates: offer.candidates)
-        // Pings answered; the session let go once found and used, or failed.
-        finder.received = { [weak finder] bytes in
-            if bytes.count == 2, bytes[0] == Self.ping { finder?.send([Self.pong, bytes[1]]) }
-        }
+        session.owner = self
+        finder.received = { [weak session] in session?.deliver($0) }
         finder.stateChanged = { [weak self, weak session] state in
             guard let self, let session else { return }
             switch state {
             case let .connected(pair):
                 session.connectedAt = Date()
+                session.connected()
                 self.log("remote: \(peer.name) connected over \(pair.remote.address.isIPv6 ? "IPv6" : "IPv4") (\(pair.remote.kind))")
             case let .failed(report):
                 self.log("remote: no path to \(peer.name). "
@@ -396,15 +520,17 @@ public final class PathSessions: @unchecked Sendable {
         }
         finder.start()
         let reply = Message.Offer(session: offer.session, credentials: finder.local,
-                                  candidates: settings.shareLocalAddresses ? hosts : [])
+                                  candidates: settings.shareLocalAddresses ? hosts : [],
+                                  exchange: session.oneTime.publicKey.rawRepresentation)
         Task {
             _ = await send(Message.answer, Self.encode(reply), peer)
             await trickle(session)
         }
-        // (A session nobody ends is let go after a minute.)
+        // (A session that never connected is let go after a minute; one that did lasts until it's ended, or its
+        // path is lost.)
         Task {
             try? await Task.sleep(for: .seconds(60))
-            self.end(session, tell: false)
+            if session.connectedAt == nil { self.end(session, tell: false) }
         }
     }
 
@@ -413,6 +539,8 @@ public final class PathSessions: @unchecked Sendable {
     private func end(_ session: Session, tell: Bool) {
         guard lock.withLock({ sessions.removeValue(forKey: session.id) }) != nil else { return }
         session.answer.resolve(nil)
+        sessionEnded?(session)
+        session.closeChannel()
         session.finder.close()
         if tell {
             let body = Self.encode(Message.End(session: session.id))

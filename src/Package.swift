@@ -38,8 +38,8 @@ targets += [
                 exclude: ["Fixtures"]),
     .testTarget(name: "NVRMacTests", dependencies: ["NVRMac"]),
     // Remote access: identities, pairing, sealed envelopes (CryptoKit), and later the connection itself.
-    .target(name: "Remote", dependencies: ["NVRCore", "Signal", "Traversal"]),
-    .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal"]),
+    .target(name: "Remote", dependencies: ["NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest", "Media"]),
+    .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest"]),
 ]
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))

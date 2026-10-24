@@ -6,8 +6,16 @@ import Foundation
 import Ingest
 import NVRCore
 
+/// Where a live stream's packets go, and its viewer's reports come from: a UDP socket to a HomeKit controller, or
+/// a remote session's path (Remote).
+public protocol MediaTransport: AnyObject, Sendable {
+    func send(_ bytes: [UInt8])
+    /// The next packet from the viewer, waiting a moment (0.2 s) for one; nil if none came.
+    func receive() -> [UInt8]?
+}
+
 /// A UDP socket bound to a free port.
-public final class UDPSocket: @unchecked Sendable {
+public final class UDPSocket: MediaTransport, @unchecked Sendable {
     let fd: Int32
     public let port: UInt16
     let ipv6: Bool
@@ -110,6 +118,16 @@ public final class LiveSession: @unchecked Sendable {
         public var width: Int
         public var height: Int
         public var maxBitrate: Int
+
+        public init(payloadType: UInt8, ssrc: UInt32, mtu: Int, rtcpInterval: Double, width: Int, height: Int, maxBitrate: Int) {
+            self.payloadType = payloadType
+            self.ssrc = ssrc
+            self.mtu = mtu
+            self.rtcpInterval = rtcpInterval
+            self.width = width
+            self.height = height
+            self.maxBitrate = maxBitrate
+        }
     }
 
     /// The sound HomeKit asked for: AAC-ELD at `sampleRate`, `maxBitrate` kbit/s.
@@ -133,7 +151,7 @@ public final class LiveSession: @unchecked Sendable {
     /// The sound's own socket, keys, packets and clock, set before `start`.
     private struct AudioOut {
         let settings: Audio
-        let socket: UDPSocket
+        let socket: any MediaTransport
         var sender: SRTPSender
         var packetizer: RTPPacketizer
         let muted: @Sendable () -> Bool
@@ -164,8 +182,10 @@ public final class LiveSession: @unchecked Sendable {
     private let reports: SRTCPReceiver
     /// The share of packets the viewer last said it lost, for the status line.
     private var viewerLoss: Double?
-    let socket: UDPSocket
+    let socket: any MediaTransport
     let video: Video
+    /// Where the camera's stream is read (shared with the recorder and other viewers).
+    let hub: StreamHub
     let log: @Sendable (String) -> Void
     private var sender: SRTPSender
     private var packetizer: RTPPacketizer
@@ -187,10 +207,11 @@ public final class LiveSession: @unchecked Sendable {
     /// Video reached the viewer.
     public var onPlaying: (@Sendable () -> Void)?
 
-    public init(source: (url: String, username: String, password: String), socket: UDPSocket, video: Video,
-                masterKey: [UInt8], masterSalt: [UInt8], log: @escaping @Sendable (String) -> Void) {
+    public init(source: (url: String, username: String, password: String), socket: any MediaTransport, video: Video,
+                masterKey: [UInt8], masterSalt: [UInt8], hub: StreamHub = .shared, log: @escaping @Sendable (String) -> Void) {
         self.source = source
         self.socket = socket
+        self.hub = hub
         self.video = video
         self.log = log
         sender = SRTPSender(masterKey: masterKey, masterSalt: masterSalt)
@@ -266,7 +287,7 @@ public final class LiveSession: @unchecked Sendable {
         }
     }
 
-    public func enableAudio(_ audio: Audio, socket: UDPSocket, masterKey: [UInt8], masterSalt: [UInt8],
+    public func enableAudio(_ audio: Audio, socket: any MediaTransport, masterKey: [UInt8], masterSalt: [UInt8],
                             muted: @escaping @Sendable () -> Bool) {
         sendLock.withLock {
             audioOut = AudioOut(settings: audio, socket: socket, sender: SRTPSender(masterKey: masterKey, masterSalt: masterSalt),
@@ -358,7 +379,7 @@ public final class LiveSession: @unchecked Sendable {
         do {
             // Shared with the recorder (and other viewers) when they read the same stream; replayed from its
             // latest keyframe, so the picture starts at once.
-            session = try StreamHub.shared.open(url: source.url, username: source.username, password: source.password,
+            session = try hub.open(url: source.url, username: source.username, password: source.password,
                                                 replay: true)
         } catch {
             log("! HomeKit live: camera: \(error.description)")

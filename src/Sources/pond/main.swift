@@ -12,6 +12,7 @@ import Detection
 import Health
 import HAPCamera
 import NVRMac
+import Remote
 import Watch
 #endif
 #if canImport(Darwin)
@@ -186,7 +187,16 @@ struct RecordingAndHomeKit: ServiceRunning {
         }
         // Remote access, when it's on: this Mac kept reachable through its signaling service, and paired with.
         let remote = startRemote(config.remote) { line in log.log("pond", line) }
-        if let remote { controls.remote = { await RemoteCommand.handle($0, host: remote) } }
+        if let remote {
+            controls.remote = { await RemoteCommand.handle($0, host: remote) }
+            // What paired devices ask over their sessions: live video, for now.
+            let sender = LiveSender { line in log.log("pond", line) }
+            remote.paths.requests = { session, action, body in
+                RemoteCommand.serve(session, action: action, body: body, cameras: cameras.cameras, password: { cameras.password($0) },
+                                    sender: sender)
+            }
+            remote.paths.sessionEnded = { sender.stop($0) }
+        }
         defer { remote?.stop() }
         controls.start()
         recording.run(for: seconds)
