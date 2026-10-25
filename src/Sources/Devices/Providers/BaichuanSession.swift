@@ -38,6 +38,8 @@ public final class BaichuanSession: @unchecked Sendable {
         static let getPrivacy: UInt32 = 574
         static let setPrivacy: UInt32 = 575
         static let privacyPushed: UInt32 = 623
+        /// Restarting the camera (as reolink_aio and neolink send it).
+        static let reboot: UInt32 = 23
         static let eventsChannel: UInt8 = 251
     }
 
@@ -128,6 +130,22 @@ public final class BaichuanSession: @unchecked Sendable {
         guard let sleep = BaichuanClient.value("sleep", in: reply) else { throw .unexpected("no sleep state") }
         notePrivacy(sleep == "1")
         return sleep == "1"
+    }
+
+    /// The camera restarted, over its own protocol (which can still answer when its video and web servers don't):
+    /// true once it says so, or if it goes away without saying (some do, at once).
+    public func restart() throws(BaichuanClient.Failure) -> Bool {
+        do {
+            _ = try request(Command.reboot, body: nil, timeout: 5)
+            return true
+        } catch .unreachable {
+            // No answer: gone already, if its connection dropped (it restarted), or else it didn't take it.
+            for _ in 0 ..< 20 {
+                if lock.withLock({ client }) == nil || state != .connected { return true }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            throw .unexpected("no answer to the restart, and it carried on")
+        }
     }
 
     /// A command to the camera (channel 0) over the session, its reply's XML.

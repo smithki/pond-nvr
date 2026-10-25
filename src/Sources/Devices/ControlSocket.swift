@@ -319,6 +319,22 @@ public final class ControlServer: @unchecked Sendable {
     /// Remote access (set by the service, when it's on): the "remote." actions.
     public var remote: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
 
+    /// The camera restarted, whichever way it can be: over its make's own protocol (a Reolink's, which answers
+    /// when its video and web servers don't), else its Restart control (ONVIF's, every ONVIF camera has it). How it
+    /// was done, or nil if it couldn't be.
+    public func restart(_ id: String) async -> String? {
+        if let done = sync?.restart(id) {
+            if done { return "over Reolink\u{2019}s own protocol" }
+        }
+        guard let controls = cameraControls(id) else { return nil }
+        do throws(ControlFailure) {
+            try await controls.withItem("restart") { item throws(ControlFailure) in try await item.perform() }
+            return "with its Restart control"
+        } catch {
+            return nil
+        }
+    }
+
     /// A camera's controls worked out again when next asked (it changed, or was removed).
     public func forget(_ id: String) { _ = lock.withLock { controls.removeValue(forKey: id) } }
 

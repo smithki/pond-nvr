@@ -6,7 +6,7 @@ Settings › **Doctor** says how each camera is doing: what's going wrong, since
 
 The service records two things for each camera in Pond's database (`pond.sqlite`, on the internal disk by default; `storage.database` in [configuration.md](configuration.md)):
 
-- **Incidents**: its video starting and stopping, being unreachable, a login refused, its own privacy mode, being made private or public, a control failing, not waking from privacy mode, and the service starting.
+- **Incidents**: its video starting and stopping, being unreachable, a login refused, its own privacy mode, being made private or public, a control failing, not waking from privacy mode, being restarted by Pond, and the service starting.
 - **Five-minute samples** of its video: frames, packets lost, bytes, keyframes, and the camera's clock against the Mac's.
 
 A week is kept, pruned hourly, apart from recording retention. The app reads the database off the main thread and works out the findings itself (`HealthDiagnosis`), so the service only records.
@@ -25,6 +25,7 @@ A finding lasts while its evidence does, mostly the last hour, so it clears afte
 |---|---|---|
 | Video keeps stopping | problem | Video stops while connected, 3 times in an hour. |
 | Drops off the network | problem | Unreachable 3 times in an hour while the other cameras weren't. |
+| Restarted by Pond | notice (problem until it's back) | The camera answered, but its video server refused every connection for three minutes while it wasn't private (its video server stuck: it happens after privacy mode, now and then): Pond restarted it, over its make's own protocol where it has one (a Reolink's, which still answers then), else its Restart control (ONVIF). Not again within half an hour; never for a camera that doesn't answer at all (that's its network, which a restart wouldn't reach), nor a private or waking one. |
 | Its video didn't come back after privacy mode | problem | Its own privacy mode turned off, and no video within its make's wake time. Lasts until video returns or it's made private again. See [controls.md](controls.md#privacy). |
 | Its login is refused | problem | A refused login with no video since. |
 | Video is losing packets | warning | Over 1% of its video lost in the last hour. |

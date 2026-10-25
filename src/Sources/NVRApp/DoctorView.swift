@@ -367,7 +367,8 @@ struct IncidentList: View {
     let incidents: [HealthIncident]
     let everything: Bool
 
-    static let problems: Set<HealthIncident.Kind> = [.stalled, .unreachable, .loginRefused, .failed, .controlFailed, .privacyMode, .wakeFailed]
+    static let problems: Set<HealthIncident.Kind> = [.stalled, .unreachable, .loginRefused, .failed, .controlFailed, .privacyMode, .wakeFailed,
+                                                     .restarted]
 
     var shown: [HealthIncident] { everything ? incidents : incidents.filter { Self.problems.contains($0.kind) } }
 
@@ -406,7 +407,7 @@ struct IncidentList: View {
     func row(_ incident: HealthIncident) -> some View {
         let (mark, color): (String, Color) = switch incident.kind {
         case .stalled, .unreachable, .loginRefused, .failed, .wakeFailed: ("✗", .red)
-        case .controlFailed, .privacyMode: ("!", .orange)
+        case .controlFailed, .privacyMode, .restarted: ("!", .orange)
         case .connected: ("✓", .green)
         default: ("", .clear)
         }

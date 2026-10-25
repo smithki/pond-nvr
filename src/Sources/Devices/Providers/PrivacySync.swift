@@ -45,6 +45,12 @@ public final class CameraPrivacySync: @unchecked Sendable {
         lock.withLock { sessions[camera] }?.privacyMode == true
     }
 
+    /// The camera restarted over its own protocol, if it has a connection there: true if it did, nil if there's none.
+    public func restart(_ camera: String) -> Bool? {
+        guard let session = lock.withLock({ sessions[camera] }), session.state == .connected else { return nil }
+        return (try? session.restart()) ?? false
+    }
+
     /// Made public now, how long it may take to start its video again: none unless it's dark.
     public func wakeTime(_ camera: String) -> TimeInterval? {
         isDark(camera) ? BaichuanPrivacy.wakeTime : nil

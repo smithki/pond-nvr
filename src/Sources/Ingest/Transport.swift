@@ -15,12 +15,16 @@ public protocol RTSPTransport: AnyObject {
 
 public enum TransportError: Error, Equatable, Codable, CustomStringConvertible {
     case unreachable(String)
+    /// The camera answered, and turned the connection down (nothing listening on the port): it's there, its
+    /// service isn't (a video server that didn't start again, say), unlike no answer at all.
+    case refused(String)
     case closed
     case failed(String)
 
     public var description: String {
         switch self {
         case let .unreachable(reason): reason
+        case let .refused(reason): reason
         case .closed: "the camera closed the connection"
         case let .failed(reason): reason
         }
@@ -46,6 +50,8 @@ public final class SocketTransport: RTSPTransport {
         }
         defer { freeaddrinfo(list) }
         var lastError = "no address"
+        // Refused by every address tried (not timed out, not unroutable): the camera's there, its service isn't.
+        var refusedEverywhere = true
         var info: UnsafeMutablePointer<addrinfo>? = first
         while let ai = info {
             info = ai.pointee.ai_next
@@ -54,6 +60,7 @@ public final class SocketTransport: RTSPTransport {
             let flags = fcntl(s, F_GETFL, 0)
             _ = fcntl(s, F_SETFL, flags | O_NONBLOCK)
             if connect(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen) != 0, errno != EINPROGRESS {
+                if errno != ECONNREFUSED { refusedEverywhere = false }
                 lastError = String(cString: strerror(errno))
                 _ = Glibc_or_Darwin_close(s)
                 continue
@@ -64,6 +71,7 @@ public final class SocketTransport: RTSPTransport {
             var len = socklen_t(MemoryLayout<Int32>.size)
             getsockopt(s, SOL_SOCKET, SO_ERROR, &soError, &len)
             if ready <= 0 || soError != 0 {
+                if ready <= 0 || soError != ECONNREFUSED { refusedEverywhere = false }
                 lastError = ready == 0 ? "no answer within \(Int(timeout)) s" : String(cString: strerror(soError))
                 _ = Glibc_or_Darwin_close(s)
                 continue
@@ -76,6 +84,7 @@ public final class SocketTransport: RTSPTransport {
             fd = s
             return
         }
+        if refusedEverywhere, lastError != "no address" { throw .refused("\(host):\(port) refused the connection") }
         throw .unreachable("\(host):\(port) did not answer: \(lastError)")
     }
 

@@ -27,6 +27,9 @@ public struct HealthIncident: Codable, Equatable, Sendable {
         /// Its own privacy mode turned off, it didn't start its video again in its make's time (its video
         /// server stuck; its controls may still answer).
         case wakeFailed
+        /// Pond restarted it: it was there, but its video server refused every connection for minutes (detail:
+        /// how, or why it couldn't).
+        case restarted
     }
 
     public var camera: String

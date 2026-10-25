@@ -124,3 +124,27 @@ final class FakeConnector: @unchecked Sendable {
         a.close()
     }
 }
+
+@Suite struct RefusedConnectionTests {
+    @Test func aClosedPortIsRefusedNotUnreachable() throws {
+        // A port just let go on this Mac: nothing listens, so the connection is turned down at once.
+        let fd = socket(AF_INET, Int32(SOCK_STREAM_TEST), 0)
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) } }
+        let port = Int(UInt16(bigEndian: address.sin_port))
+        close(fd)
+        #expect(throws: TransportError.refused("127.0.0.1:\(port) refused the connection")) {
+            _ = try SocketTransport(host: "127.0.0.1", port: port, timeout: 2)
+        }
+    }
+}
+
+#if canImport(Glibc)
+let SOCK_STREAM_TEST = Int32(SOCK_STREAM.rawValue)
+#else
+let SOCK_STREAM_TEST = SOCK_STREAM
+#endif

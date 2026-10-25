@@ -29,6 +29,12 @@ public final class CameraWorker: @unchecked Sendable {
     let hub: StreamHub
     let privacy: PrivacyState
     private var privacyObserver: UUID?
+    /// Restarting the camera (through its controls, set by the service): how it was done, or nil if it couldn't
+    /// be. Asked when its video server has refused every connection for `restartAfter` while the camera's there
+    /// (not private, not waking); not again within `restartEvery`.
+    let restart: (@Sendable (String) async -> String?)?
+    let restartAfter: TimeInterval
+    let restartEvery: TimeInterval
 
     private let lock = NSCondition()
     private var stopping = false
@@ -44,9 +50,13 @@ public final class CameraWorker: @unchecked Sendable {
 
     public init(camera: Config.Camera, password: String, recordingsRoot: String, log: EventLog,
                 segmentSeconds: Double = 60, stallSeconds: Double = 10, hub: StreamHub = .shared,
-                privacy: PrivacyState = .shared) {
+                privacy: PrivacyState = .shared, restart: (@Sendable (String) async -> String?)? = nil,
+                restartAfter: TimeInterval = 180, restartEvery: TimeInterval = 1800) {
         self.hub = hub
         self.privacy = privacy
+        self.restart = restart
+        self.restartAfter = restartAfter
+        self.restartEvery = restartEvery
         self.camera = camera
         self.password = password
         root = recordingsRoot
@@ -117,6 +127,32 @@ public final class CameraWorker: @unchecked Sendable {
         case noVideo(Double)
     }
 
+    /// The camera restarted through its controls (waited for: a few seconds), said in the log and to the doctor.
+    private func restartCamera(minutes: Int) {
+        let health = HealthLog.shared
+        let why = "its video server has refused every connection for \(minutes) min, though the camera answers"
+        guard let restart else {
+            log.log(camera.id, "\(why); it can\u{2019}t be restarted from here (restart it, or unplug it for a few seconds)")
+            return
+        }
+        log.log(camera.id, "\(why): restarting it")
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var how: String?
+        let id = camera.id
+        Task.detached {
+            how = await restart(id)
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 30)
+        if let how {
+            log.log(camera.id, "restarted (\(how)): back in a minute or so")
+            health.record(camera.id, .restarted, how)
+        } else {
+            log.log(camera.id, "couldn\u{2019}t be restarted: restart it, or unplug it for a few seconds")
+            health.record(camera.id, .restarted, "couldn\u{2019}t be restarted")
+        }
+    }
+
     /// What kind of incident an error is, for the doctor.
     private static func healthKind(_ error: Error) -> HealthIncident.Kind {
         switch error {
@@ -134,6 +170,10 @@ public final class CameraWorker: @unchecked Sendable {
         let files = SegmentFiles(root: root, camera: camera.id, log: log)
         var backoff = 1.0
         var lastProblem: String?
+        // Its video server refusing every connection though the camera's there: since when, and when it was last
+        // restarted for it.
+        var refusedSince: Date?
+        var lastRestart: Date?
         var problemSince = Date()
         var lastReported = Date()
         var saidWaking = false
@@ -183,6 +223,7 @@ public final class CameraWorker: @unchecked Sendable {
                             backoff = 1
                             lastProblem = nil
                             log.log(camera.id, "recording" + (session.audio == nil ? " (no audio)" : ""))
+                            refusedSince = nil
                             health.record(camera.id, .connected)
                             saidWaking = false
                             // Awake, if it was waking: what waited to be set on it is.
@@ -225,6 +266,18 @@ public final class CameraWorker: @unchecked Sendable {
                     let why = (error as? RTSPError)?.description ?? "\(error)"
                     log.log(camera.id, "didn\u{2019}t start its video again after privacy mode (\(why)); it may need restarting")
                     health.record(camera.id, .wakeFailed, why)
+                }
+                // Refused, not private or waking (so its video server should be up): after a few minutes of it, the
+                // camera restarted (its controls often still answer when its video server doesn't).
+                if case RTSPError.transport(.refused) = error {
+                    let since = refusedSince ?? Date()
+                    refusedSince = since
+                    if Date().timeIntervalSince(since) >= restartAfter, lastRestart.map({ Date().timeIntervalSince($0) >= restartEvery }) ?? true {
+                        lastRestart = Date()
+                        restartCamera(minutes: Int((Date().timeIntervalSince(since) / 60).rounded()))
+                    }
+                } else {
+                    refusedSince = nil
                 }
                 let problem: String
                 var wait = backoff

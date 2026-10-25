@@ -113,6 +113,10 @@ struct RecordingAndHomeKit: ServiceRunning {
         // Each camera's parts (recording, HomeKit, instant live view, Baichuan), started together, and started,
         // stopped or started again one camera at a time when the settings change (a reload).
         let recording = RecordingService(config: config, passwords: passwords, log: log)
+        // A camera whose video server keeps refusing connections, though it's there, is restarted through its
+        // controls (made below, after the cameras start: so through this, filled in then).
+        let restarter = CameraRestarter()
+        recording.restart = { await restarter.restart($0) }
         let cameras = CameraSupervisor(config: config, passwords: passwords, configPath: configPath, log: log,
                                        recording: recording, host: host, privacySync: privacySync)
         // Detection: the model (the built-in one, or one added to the Models folder), shared by every camera's
@@ -169,6 +173,7 @@ struct RecordingAndHomeKit: ServiceRunning {
             return (CameraAccess(host: camera.host, username: camera.username, password: password, mainStream: camera.main), camera.device)
         }) { line in log.log("pond", line) }
         cameras.controls = controls
+        restarter.controls = controls
         controls.reload = {
             switch cameras.reload() {
             case let .applied(summary): (summary, false, false)
@@ -212,6 +217,18 @@ struct RecordingAndHomeKit: ServiceRunning {
         }
         _ = loggedOut.wait(timeout: .now() + 5)
     }
+}
+
+/// The cameras' controls, for restarting one, once they're made (the recorder starts first).
+final class CameraRestarter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _controls: ControlServer?
+    var controls: ControlServer? {
+        get { lock.withLock { _controls } }
+        set { lock.withLock { _controls = newValue } }
+    }
+
+    func restart(_ id: String) async -> String? { await controls?.restart(id) }
 }
 
 /// Prints a camera's setup code and QR code for the Home app.

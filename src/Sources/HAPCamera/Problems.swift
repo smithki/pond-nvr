@@ -6,7 +6,7 @@ import NVRCore
 extension HomeKitStatus.Problem.Kind {
     init(_ error: RTSPError) {
         switch error {
-        case .transport(.unreachable): self = .cameraUnreachable
+        case .transport(.unreachable), .transport(.refused): self = .cameraUnreachable
         case .unauthorized: self = .loginRefused
         case .timeout: self = .noAnswer
         default: self = .other

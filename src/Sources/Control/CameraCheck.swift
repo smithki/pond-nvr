@@ -51,6 +51,8 @@ public enum CameraCheck {
         switch error {
         case .transport(.unreachable):
             ("Nothing answered at \(host).", .address)
+        case .transport(.refused):
+            ("Something answered at \(host), but turned the video connection down: is RTSP on in the camera\u{2019}s settings, on its usual port?", .address)
         case .transport(.closed):
             ("The camera at \(host) closed the connection.", .unexplained)
         case .transport(.failed):

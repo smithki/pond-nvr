@@ -73,6 +73,10 @@ public final class RecordingService: @unchecked Sendable {
         log.log("pond", "stopped")
     }
 
+    /// Restarting a camera through its controls (set by the service, before cameras are added): how, or nil.
+    /// Asked by a camera's worker when its video server keeps refusing connections though the camera's there.
+    nonisolated(unsafe) public var restart: (@Sendable (String) async -> String?)?
+
     /// A camera recorded from now, alongside the others (changed: `remove` it first).
     public func add(_ camera: Config.Camera, password: String?) {
         guard let password else {
@@ -80,7 +84,7 @@ public final class RecordingService: @unchecked Sendable {
             return
         }
         let worker = CameraWorker(camera: camera, password: password, recordingsRoot: lock.withLock { config.storage.recordingsPath },
-                                  log: log, segmentSeconds: segmentSeconds)
+                                  log: log, segmentSeconds: segmentSeconds, restart: restart)
         let previous = lock.withLock { () -> CameraWorker? in
             defer { running[camera.id] = worker }
             return running[camera.id]

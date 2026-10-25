@@ -17,7 +17,7 @@ public struct HealthFinding: Identifiable, Equatable, Sendable {
 
     public enum Kind: String, Sendable, CaseIterable {
         case unstableVideo, dropsOff, loginRefused, macNetwork, packetLoss, keyframesFarApart, clockOff, controlsFailing,
-             longPrivate, didntWake
+             longPrivate, didntWake, restarted
     }
 
     public var kind: Kind
@@ -109,6 +109,18 @@ public enum HealthDiagnosis {
                 evidence: "Privacy mode turned off, and no video since \(clock(woke.time))" + (woke.detail.map { " (\($0))" } ?? ""),
                 fix: "A fault in the camera: its video server didn\u{2019}t start again, though it may still answer its controls. Restart it (Restart in its controls, or unplug it for a few seconds).",
                 since: woke.time))
+        }
+
+        // Restarted by Pond (its video server had stopped taking connections), this past hour: said, and how.
+        if let restart = lastHour.last(where: { $0.kind == .restarted }) {
+            let back = mine.first { $0.kind == .connected && $0.time > restart.time }
+            found.append(HealthFinding(
+                kind: .restarted, severity: back == nil ? .problem : .notice,
+                headline: back == nil ? "Restarted, and not back yet" : "Restarted by Pond",
+                evidence: "Its video server refused every connection though the camera answered; Pond restarted it at \(clock(restart.time))"
+                    + (restart.detail.map { " (\($0))" } ?? "") + (back.map { "; back at \(clock($0.time))" } ?? ""),
+                fix: back == nil ? "If it doesn\u{2019}t come back in a few minutes, unplug it for a few seconds." : nil,
+                since: restart.time))
         }
 
         if let refused = lastHour.last(where: { $0.kind == .loginRefused }),
