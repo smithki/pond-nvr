@@ -15,6 +15,35 @@ Reaching a Pond from outside its network: another Mac first (another Pond, the s
 3. Pair: on the Pond to be reached, `pond remote pair` shows a code (and a QR code), good once for ten minutes; on the other, `pond remote join CODE`. `pond remote devices` lists who's paired on each.
 4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went. `pond remote watch DEVICE CAMERA` watches one of its cameras for ten seconds (`--seconds N`; `--main` for the main stream; `--kbps N [--size WxH]` to have it re-encoded smaller, as for a weak link), keeps what came as an MP4 (`--out PATH`), and says how it went: pictures, frame rate, bitrate, loss, how soon the first came.
 
+## Trying it across two networks
+
+What only a real test shows: two Macs on different networks finding each other. You need a small Linux server with a public address and Docker (any VPS does), and a second Mac you can put on another network (a phone's hotspot is the easiest).
+
+1. **The signaling service, on the server.** For a first try, plain `ws://` on a port of its own is enough (messages are sealed end to end, so the server learns nothing either way; for keeping it, use `deploy/`'s compose file and a domain, for `wss://`). Build the image on your Mac and copy it over, so the server needs nothing but Docker:
+
+   ```sh
+   docker buildx build --platform linux/amd64 -f deploy/Dockerfile.signal -t pond-signal --load .
+   docker save pond-signal | ssh SERVER docker load
+   ssh SERVER docker run -d --name pond-signal --restart unless-stopped -p 8080:8080 -p 3478-3479:3478-3479/udp pond-signal
+   ```
+
+   (`linux/arm64` for an ARM server.) Open TCP 8080 and UDP 3478–3479 in the server's firewall.
+
+2. **The Pond to be reached** (the one with the cameras): in its settings file, `"remote": { "enabled": true, "signaling": "ws://SERVER:8080" }`; then `pond service restart`, and `pond remote pair` for a code.
+
+3. **The second Mac**: build Pond (`make app`), `pond init`, point its storage at any folder (`pond storage recordings ~/PondTest`), add the same `remote` section, and start its service (`pond service install`; with remote access on it runs without cameras of its own). Then `pond remote join CODE`, and `pond remote devices` on each to see they're paired.
+
+4. **Put the second Mac on the other network** (the hotspot), and on it:
+
+   - `pond remote connect NAME` (the first Mac's name, as `pond remote devices` lists it): how it connected (straight, through the routers' public addresses, IPv4 or IPv6, and the round trip), or why it couldn't and what would fix it.
+   - `pond remote watch NAME CAMERA --seconds 15`: the camera's stream over the encrypted session, kept as an MP4 (the path is printed); how many pictures came, the frame rate, bitrate and loss.
+   - `--kbps 300` on the same: re-encoded smaller, as a phone on a weak signal would ask for it.
+   - Switch networks during a watch (the hotspot to Wi-Fi): the path is found again, and the video goes on.
+
+5. **Afterwards**: `ssh SERVER docker rm -f pond-signal`, and `remote.enabled` back to `false` on each Mac (or leave it on, with the server kept).
+
+If it can't connect, the diagnosis says what to try; `remote.relay` with `deploy/`'s relay profile is the way through two strict routers (see below).
+
 ## How a connection is made
 
 The one connecting sends the Pond an offer, sealed to it through the signaling service: a password and username for this attempt, and the addresses it can be reached at (its candidates). The Pond answers likewise. Each side's candidates:

@@ -327,6 +327,28 @@ final class FakeLaunchd: Launchd, @unchecked Sendable {
         #expect(h.console.errors.last == "✗ The login service needs macOS.")
     }
 
+    @Test func withoutCamerasItRunsOnlyForRemoteAccess() throws {
+        let h = try Harness()
+        final class Ran: ServiceRunning, @unchecked Sendable {
+            var ran = false
+            func run(config: Config, passwords: [String: String], for seconds: Double?, log: EventLog) { ran = true }
+        }
+        // No cameras and nothing else: refused, saying how to give it something to do.
+        let idle = Ran()
+        var cli = CLI(store: h.store, credentials: h.credentials, prober: h.prober, service: idle, console: h.console)
+        #expect(cli.run(["run", "--log", h.dir + "/pond.log"]) == 1)
+        #expect(!idle.ran)
+        #expect(h.console.errors.last?.contains("remote.enabled") == true)
+        // A Mac that only watches another Pond's cameras: remote access on, no cameras of its own.
+        var config = try h.store.load()
+        config.remote = Config.Remote(enabled: true, signaling: "wss://signal.example.com")
+        try h.store.save(config)
+        let watching = Ran()
+        cli = CLI(store: h.store, credentials: h.credentials, prober: h.prober, service: watching, console: h.console)
+        #expect(cli.run(["run", "--log", h.dir + "/pond.log"]) == 0, "\(h.console.errors)")
+        #expect(watching.ran)
+    }
+
     @Test func runWritesToALogFile() throws {
         let h = try Harness()
         h.console.input = "pw"

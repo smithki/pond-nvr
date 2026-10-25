@@ -13,6 +13,10 @@ public struct Config: Codable, Equatable, Sendable {
     /// Reaching this Mac from outside (remote access); left out, it's off.
     public var remote: Remote?
 
+    /// Whether the service has anything to do: cameras to record, or remote access to keep (a Mac that only watches
+    /// another Pond's cameras has none of its own).
+    public var givesTheServiceWork: Bool { !cameras.isEmpty || remote?.enabled == true }
+
     public init(storage: Storage, retention: Retention = Retention(), cameras: [Camera] = [], remote: Remote? = nil) {
         version = Self.currentVersion
         self.storage = storage

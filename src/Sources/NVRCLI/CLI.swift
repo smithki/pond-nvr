@@ -7,6 +7,9 @@ import NVRCore
 import Recorder
 
 public struct CLI {
+    /// Why the service won't start with nothing to do.
+    static let nothingToDo = "✗ There are no cameras. Add one with: pond camera add ID --host HOST (or, to only watch another Pond's, turn on remote access: remote.enabled)"
+
     let store: ConfigStore
     let credentials: CredentialStore?
     let prober: CameraProber
@@ -288,8 +291,8 @@ public struct CLI {
             for p in problems { console.err("✗ \(p)") }
             throw Failure()
         }
-        guard !config.cameras.isEmpty else {
-            console.err("✗ There are no cameras. Add one with: pond camera add ID --host HOST")
+        guard config.givesTheServiceWork else {
+            console.err(Self.nothingToDo)
             throw Failure()
         }
         let credentials = try requireCredentials()
@@ -301,7 +304,7 @@ public struct CLI {
                 console.err("! Camera \(camera.id) has no password in the Keychain and will not record. Set it with: pond camera password \(camera.id)")
             }
         }
-        guard !passwords.isEmpty else {
+        guard !passwords.isEmpty || config.cameras.isEmpty else {
             console.err("✗ No camera has a password.")
             throw Failure()
         }

@@ -29,9 +29,9 @@ extension CLI {
         // Check what `pond run` would check, so the service does not start only to fail.
         let config = try load()
         let problems = config.problems()
-        guard problems.isEmpty, !config.cameras.isEmpty else {
+        guard problems.isEmpty, config.givesTheServiceWork else {
             for p in problems { console.err("✗ \(p)") }
-            if config.cameras.isEmpty { console.err("✗ There are no cameras. Add one with: pond camera add ID --host HOST") }
+            if !config.givesTheServiceWork { console.err(CLI.nothingToDo) }
             throw Failure()
         }
         let configArgument = store.path == ConfigStore.defaultPath ? nil : store.path
