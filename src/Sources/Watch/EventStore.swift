@@ -277,6 +277,15 @@ public final class EventStore: @unchecked Sendable {
         queue.sync { rows("SELECT \(Self.columns) FROM events WHERE id = ?", [id], Self.kept).first?.event }
     }
 
+    /// Events by their ids (those still kept), oldest first.
+    public func events(ids: [String]) -> [Kept] {
+        guard !ids.isEmpty else { return [] }
+        return queue.sync {
+            rows("SELECT \(Self.columns) FROM events WHERE id IN (\(ids.map { _ in "?" }.joined(separator: ","))) ORDER BY start",
+                 ids, Self.kept)
+        }
+    }
+
     static let columns = "id, camera, start, end, category, labels, confidence, snapshot, box, summary, ongoing, zones, clip, clip_start"
 
     static func kept(_ row: Row) -> Kept? {

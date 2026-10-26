@@ -28,7 +28,9 @@ public enum ControlSocket {
         /// "search" (events that answer `question`; `camera` unused);
         /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`),
         /// "remote.connect" (`device`: a path found to it, and how), "remote.watch" (`device`'s `camera` for `seconds`,
-        /// its main stream if `main`, kept at `file`).
+        /// its main stream if `main`, kept at `file`); asked of `device` over a session: "remote.cameras",
+        /// "remote.events" (the last `seconds`' events, `camera`'s or all), "remote.search" (`question`),
+        /// "remote.picture" and "remote.clip" (`event`'s, kept at `file`).
         public var action: String
         public var velocity: PTZVelocity?
         public var preset: String?
@@ -50,6 +52,8 @@ public enum ControlSocket {
         /// "remote.watch": re-encoded to this bitrate (kbit/s), at most this size ("WxH"); nil: as the camera sends it.
         public var kbps: Int?
         public var size: String?
+        /// "remote.picture", "remote.clip": the event's id.
+        public var event: String?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
                     name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {
@@ -92,6 +96,8 @@ public enum ControlSocket {
         public var paired: RemoteDevice?
         /// "remote.connect": how it went, in words (no addresses).
         public var connection: String?
+        /// "remote.cameras", "remote.events", "remote.search": the other Pond's answer, as JSON (Remote's RemoteAPI).
+        public var body: Data?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -354,65 +360,59 @@ public final class ControlServer: @unchecked Sendable {
         // Requests until the app hangs up (or it's quiet for a long while).
         while let text = try? reader.line(timeout: 300) {
             guard let request = try? JSONDecoder().decode(ControlSocket.Request.self, from: Data(text.utf8)) else { return }
-            if request.action == "reload" {
-                var reply = ControlSocket.Reply()
-                if let (summary, restart, failed) = reload?() {
-                    if failed { reply.error = .failed(summary) } else { reply.reloaded = summary; reply.restartNeeded = restart }
-                } else {
-                    reply.error = .notSupported
-                }
-                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
-                continue
-            }
-            if request.action == "search" {
-                var reply = ControlSocket.Reply()
-                if let search {
-                    reply.search = blocking { await search(request) }
-                } else {
-                    reply.error = .notSupported
-                }
-                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
-                continue
-            }
-            if request.action.hasPrefix("remote.") {
-                let reply = remote.map { remote in blocking { await remote(request) } }
-                    ?? ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))
-                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
-                continue
-            }
-            if request.action == "privacy.list" {
-                let reply = ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
-                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
-                continue
-            }
-            guard let controls = cameraControls(request.camera) else {
-                _ = try? client.send(ControlSocket.line(ControlSocket.Reply(error: .failed("no camera \(request.camera)"))))
-                continue
-            }
-            // Private, dark or waking: what it can't do now is turned down, and its settings wait.
-            if let reply = whileAsleep(request) {
-                guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
-                continue
-            }
-            if request.action == "item.set", let item = request.item {
-                // Set anew: not to what it waited to be set to.
-                _ = lock.withLock { setting[request.camera]?.removeValue(forKey: item) }
-            }
-            if request.action == "talk" {
+            // Talking back takes the connection over (a camera that can't now is answered as any request is).
+            if request.action == "talk", let controls = cameraControls(request.camera), whileAsleep(request) == nil {
                 talk(controls, camera: request.camera, client: client, reader: &reader)
                 return
             }
-            let reply = request.action == "privacy.set"
-                ? setPrivacy(request, on: controls)
-                : blocking { await Self.perform(request, on: controls) }
-            remember(request, reply)
-            if let error = reply.error, error != .notSupported { log("! controls: \(request.camera) \(request.action): \(error)") }
-            // For the doctor: what it asked worked or not (a camera that can't, isn't failing).
-            if request.action != "controls", request.action != "items.values", reply.error != .notSupported {
-                HealthLog.shared.control(request.camera, ok: reply.error == nil, action: request.action, detail: reply.error?.description)
-            }
+            let reply = blocking { await self.answer(request) }
             guard (try? client.send(ControlSocket.line(reply))) != nil else { return }
         }
+    }
+
+    /// A request answered: any but talking back, which needs a connection of its own (from the app's socket, or
+    /// a remote device's session).
+    public func answer(_ request: ControlSocket.Request) async -> ControlSocket.Reply {
+        switch request.action {
+        case "reload":
+            var reply = ControlSocket.Reply()
+            if let (summary, restart, failed) = reload?() {
+                if failed { reply.error = .failed(summary) } else { reply.reloaded = summary; reply.restartNeeded = restart }
+            } else {
+                reply.error = .notSupported
+            }
+            return reply
+        case "search":
+            var reply = ControlSocket.Reply()
+            if let search { reply.search = await search(request) } else { reply.error = .notSupported }
+            return reply
+        case let action where action.hasPrefix("remote."):
+            guard let remote else {
+                return ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))
+            }
+            return await remote(request)
+        case "privacy.list":
+            return ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
+        case "talk" where cameraControls(request.camera) != nil && whileAsleep(request) == nil:
+            return ControlSocket.Reply(error: .notSupported)
+        default:
+            break
+        }
+        guard let controls = cameraControls(request.camera) else { return ControlSocket.Reply(error: .failed("no camera \(request.camera)")) }
+        // Private, dark or waking: what it can't do now is turned down, and its settings wait.
+        if let reply = whileAsleep(request) { return reply }
+        if request.action == "item.set", let item = request.item {
+            // Set anew: not to what it waited to be set to.
+            _ = lock.withLock { setting[request.camera]?.removeValue(forKey: item) }
+        }
+        let reply = request.action == "privacy.set" ? setPrivacy(request, on: controls) : await Self.perform(request, on: controls)
+        remember(request, reply)
+        if let error = reply.error, error != .notSupported { log("! controls: \(request.camera) \(request.action): \(error)") }
+        // For the doctor: what it asked worked or not (a camera that can't, isn't failing).
+        if request.action != "controls", request.action != "items.values", reply.error != .notSupported {
+            HealthLog.shared.control(request.camera, ok: reply.error == nil, action: request.action, detail: reply.error?.description)
+        }
+        return reply
     }
 
     /// What can't be done to a camera now: while private, using it (moving it, talking through it, its actions;

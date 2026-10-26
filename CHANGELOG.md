@@ -8,6 +8,7 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 - **Pairing** a device or another Pond with a code (`pond remote pair`, `join`), its keys in the Keychain; a **signaling service of your own** (`pond-signal`, `deploy/`) that passes sealed messages it can't read and answers STUN.
 - **Paths between Ponds**, peer to peer: the Mac's own addresses (only temporary IPv6 ones), its public one, a relay of your own (coturn) or only a mesh (Tailscale, Headscale); checks signed per attempt; found again when the network changes; and when there's none, why, and what would fix it (`pond remote connect`).
 - **An encrypted session** over the path, with keys for it alone: a reliable control channel, and **live video** from a camera, passed through or re-encoded for a weak link (`pond remote watch`).
+- **The remote API** over the session: a paired Pond's cameras, its events with their sentences, pictures and clips (in pieces), search, and the cameras' controls and privacy as the app has them at home; not pairing, the settings or talking back. Tried with `pond remote cameras`, `events`, `search`, `picture` and `clip`.
 
 ### Name
 - **The app is Pond NVR** (`Pond NVR.app`): its name in the menu bar, the Dock and the Finder. Pond is still what it calls itself, and the command is still `pond`. `make app` moves a login service from the old Pond.app to the new one.

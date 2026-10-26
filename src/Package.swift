@@ -37,9 +37,11 @@ targets += [
     .testTarget(name: "HAPCameraTests", dependencies: ["HAPCamera", "HAP", "NVRCore", "Ingest", "Devices"],
                 exclude: ["Fixtures"]),
     .testTarget(name: "NVRMacTests", dependencies: ["NVRMac"]),
-    // Remote access: identities, pairing, sealed envelopes (CryptoKit), and later the connection itself.
-    .target(name: "Remote", dependencies: ["NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest", "Media"]),
-    .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest"]),
+    // Remote access: identities, pairing, sealed envelopes (CryptoKit), paths, the session, and the API over it.
+    .target(name: "Remote", dependencies: ["NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest", "Media", "Devices", "Watch",
+                                          "Understanding"]),
+    .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest", "Devices",
+                                                    "Watch", "Understanding"]),
 ]
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))

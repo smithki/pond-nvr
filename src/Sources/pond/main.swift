@@ -194,13 +194,13 @@ struct RecordingAndHomeKit: ServiceRunning {
         let remote = startRemote(config.remote) { line in log.log("pond", line) }
         if let remote {
             controls.remote = { await RemoteCommand.handle($0, host: remote) }
-            // What paired devices ask over their sessions: live video, for now.
-            let sender = LiveSender { line in log.log("pond", line) }
-            remote.paths.requests = { session, action, body in
-                RemoteCommand.serve(session, action: action, body: body, cameras: cameras.cameras, password: { cameras.password($0) },
-                                    sender: sender)
-            }
-            remote.paths.sessionEnded = { sender.stop($0) }
+            // What paired devices ask over their sessions: the cameras, their events (pictures, clips), their
+            // controls and search, live video.
+            let api = RemoteAPI.Server(cameras: { cameras.cameras }, password: { cameras.password($0) }, events: events,
+                                       eventsFolder: { config.storage.eventsPath }, control: { await controls.answer($0) },
+                                       live: LiveSender { line in log.log("pond", line) })
+            remote.paths.requests = { await api.serve($0, action: $1, body: $2) }
+            remote.paths.sessionEnded = { api.ended($0) }
         }
         defer { remote?.stop() }
         controls.start()

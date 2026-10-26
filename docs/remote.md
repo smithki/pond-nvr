@@ -1,6 +1,6 @@
 # Remote access
 
-Reaching a Pond from outside its network: another Mac first (another Pond, the start of "sites"), then the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. It's still being built: pairing, finding a path between two Ponds, and an encrypted session over it carrying live video work, from the command line (`pond remote connect`, `pond remote watch`); events, clips and search over it, and the apps, come next. See the roadmap's *Away from home*.
+Reaching a Pond from outside its network: another Mac first (another Pond, the start of "sites"), then the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. It's still being built: pairing, finding a path between two Ponds, and an encrypted session over it carrying live video and the remote API (cameras, events, pictures, clips, search, controls) work, from the command line; the apps come next. See the roadmap's *Away from home*.
 
 ## The pieces
 
@@ -13,7 +13,7 @@ Reaching a Pond from outside its network: another Mac first (another Pond, the s
 1. Deploy the signaling service: `deploy/README.md`. Point a DNS name at the server, and open TCP 443 and UDP 3478–3479.
 2. On each Mac, in the settings file: `"remote": { "enabled": true, "signaling": "wss://signal.example.com" }` ([configuration.md](configuration.md#remote-access) has the rest), and restart the service (`pond service restart`).
 3. Pair: on the Pond to be reached, `pond remote pair` shows a code (and a QR code), good once for ten minutes; on the other, `pond remote join CODE`. `pond remote devices` lists who's paired on each.
-4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went. `pond remote watch DEVICE CAMERA` watches one of its cameras for ten seconds (`--seconds N`; `--main` for the main stream; `--kbps N [--size WxH]` to have it re-encoded smaller, as for a weak link), keeps what came as an MP4 (`--out PATH`), and says how it went: pictures, frame rate, bitrate, loss, how soon the first came.
+4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went. `pond remote watch DEVICE CAMERA` watches one of its cameras for ten seconds (`--seconds N`; `--main` for the main stream; `--kbps N [--size WxH]` to have it re-encoded smaller, as for a weak link), keeps what came as an MP4 (`--out PATH`), and says how it went: pictures, frame rate, bitrate, loss, how soon the first came. `pond remote cameras DEVICE` lists its cameras; `pond remote events DEVICE` its last day's events (`--hours N`, `--camera CAMERA`), each with its id; `pond remote search DEVICE QUESTION` asks it a question; `pond remote picture DEVICE EVENT` and `pond remote clip DEVICE EVENT` fetch an event's picture or clip (`--out PATH`).
 
 ## Trying it across two networks
 
@@ -38,6 +38,7 @@ What only a real test shows: two Macs on different networks finding each other. 
    - `pond remote connect NAME` (the first Mac's name, as `pond remote devices` lists it): how it connected (straight, through the routers' public addresses, IPv4 or IPv6, and the round trip), or why it couldn't and what would fix it.
    - `pond remote watch NAME CAMERA --seconds 15`: the camera's stream over the encrypted session, kept as an MP4 (the path is printed); how many pictures came, the frame rate, bitrate and loss.
    - `--kbps 300` on the same: re-encoded smaller, as a phone on a weak signal would ask for it.
+   - `pond remote events NAME`, then `pond remote clip NAME EVENT` with one of their ids: the clip comes over in pieces, and the size and where it's kept are printed. `pond remote search NAME "people today"` too.
    - Switch networks during a watch (the hotspot to Wi-Fi): the path is found again, and the video goes on.
 
 5. **Afterwards**: `ssh SERVER docker rm -f pond-signal`, and `remote.enabled` back to `false` on each Mac (or leave it on, with the server kept).
@@ -62,6 +63,7 @@ Once there's a path, everything between the two goes over it, encrypted with key
 
 - **The control channel**: requests and their replies (ChaCha20-Poly1305), each delivered once and in order whatever the path loses or reorders.
 - **Live video**: a camera's stream as the Home app gets it (`LiveSession`): the camera's own H.264 as it arrives, or re-encoded to a size and bitrate the viewer asks for, which its reports then steer; SRTP, in packets small enough for any path.
+- **The API**, on the control channel (`RemoteAPI` in `src/Sources/Remote`): its cameras (names, kinds, privacy); events since a time or by their ids, with what was seen, their sentences, and whether they have a picture and a clip; an event's picture or clip, in pieces of 256 KB; and the cameras' controls (moving them, their settings, privacy) and search, as the app asks for them at home. Pairing, the settings and talking back aren't offered, and files are read only as an event's own picture or clip, from the events folder.
 
 The checks, the channel and the video share one UDP port, told apart by each packet's first byte.
 
