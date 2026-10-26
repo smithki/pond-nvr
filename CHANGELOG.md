@@ -56,6 +56,7 @@ The first version: recording, the app and HomeKit.
 - **The login service** (`pond service install|status|restart|uninstall`): `pond run` as a launchd agent that starts at login and again if it stops, holds off idle sleep while recording, and logs to `~/Library/Logs/Pond/pond.log` (rotated at 10 MB, one previous file kept).
 
 ### The app
+- **Fixed: choosing a folder in Settings › Storage did nothing**: the picker closed and forgot what it was choosing before it answered. And a drive left out of Spotlight in System Settings › Spotlight › Search Privacy is now seen as not indexed (macOS still calls its indexing on), the tab checking again on coming back to Pond.
 - **"Starting to record" after the service starts**, not "Not recording": after a gap (the Mac restarted, the service was stopped), a camera's first new minute is saved about a minute after the service starts, and its tile says so until then (three minutes at most; after that, still nothing is a problem again).
 - **Live**: a resizable rail of every camera and a stage of the chosen cameras, laid out as large as fits and animated as cameras come and go; double-click to watch one alone; drag to reorder; sound for one camera at a time; badges for a camera that is offline, sends no picture or has stopped being recorded, and its HomeKit state; today's events on hover.
 - **Timeline**: any day's recordings, a lane per camera; scrubbing, skip, ½× to 16×, zoom from a day to 15 minutes, scrolling back across midnight, sound, and a LIVE mode.

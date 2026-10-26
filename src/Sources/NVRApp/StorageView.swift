@@ -4,7 +4,9 @@ import SwiftUI
 
 struct StorageView: View {
     @Environment(AppModel.self) private var model
+    /// The folder being chosen, kept until the picker answers (its presentation is apart: closing it comes first).
     @State private var choosing: Target?
+    @State private var picking = false
     @State private var turningOff = false
     @State private var spotlightProblem: String?
 
@@ -22,7 +24,7 @@ struct StorageView: View {
         Form {
             Section {
                 LocationRow(symbol: "externaldrive", path: recordings, status: .storage(StorageLocation.status(of: recordings)),
-                            choose: { choosing = .recordings })
+                            choose: { choose(.recordings) })
                 if let estimate = outlook?.estimate { lasting(estimate) }
             } header: {
                 Text("Recordings").restartRecorderButton()
@@ -34,7 +36,7 @@ struct StorageView: View {
             if let outlook, let drive = outlook.drive { checklist(drive, outlook: outlook) }
 
             Section {
-                LocationRow(symbol: "cylinder.split.1x2", path: storage?.databasePath ?? "", choose: { choosing = .database })
+                LocationRow(symbol: "cylinder.split.1x2", path: storage?.databasePath ?? "", choose: { choose(.database) })
                 if storage?.databasePath.hasPrefix("/Volumes/") == true {
                     Label("The index is on another drive. A NAS share is unreliable for it; this Mac\u{2019}s disk is safer.",
                           systemImage: "exclamationmark.triangle.fill")
@@ -48,8 +50,11 @@ struct StorageView: View {
         }
         .formStyle(.grouped)
         .task(id: model.config) { await measure() }
-        .fileImporter(isPresented: Binding(get: { choosing != nil }, set: { if !$0 { choosing = nil } }),
-                      allowedContentTypes: [.folder]) { result in
+        // Back from System Settings (Spotlight's Search Privacy, say): measured again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await measure() }
+        }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
             guard case let .success(url) = result, let target = choosing else { return }
             switch target {
             case .recordings: model.chooseFolder(url, forEvents: false)
@@ -62,6 +67,11 @@ struct StorageView: View {
         } message: {
             Text(spotlightProblem ?? "")
         }
+    }
+
+    func choose(_ target: Target) {
+        choosing = target
+        picking = true
     }
 
     func measure() async {

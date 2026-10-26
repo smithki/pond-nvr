@@ -31,20 +31,30 @@ struct DriveFacts: Equatable, Sendable {
                           spotlightIndexing: spotlight(volume.path))
     }
 
-    /// `mdutil -s`, which anyone may run: "Indexing enabled." or "Indexing and searching disabled."
+    /// `mdutil -s`, which anyone may run: "Indexing enabled." or "Indexing and searching disabled." A drive added
+    /// to System Settings' Search Privacy still says enabled, though nothing on it is indexed: so when it says so,
+    /// Spotlight is asked whether it knows of anything there (`mdfind`; none, and it's left out).
     static func spotlight(_ volume: String) -> Bool? {
+        guard let status = run("/usr/bin/mdutil", ["-s", volume])?.lowercased() else { return nil }
+        if status.contains("disabled") { return false }
+        guard status.contains("indexing enabled") else { return nil }
+        guard let found = run("/usr/bin/mdfind", ["-onlyin", volume, "-count", "kMDItemFSName == '*'"])
+            .flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return true }
+        return found > 0
+    }
+
+    /// A program's output, or nil if it couldn't be run.
+    static func run(_ program: String, _ arguments: [String]) -> String? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/mdutil")
-        process.arguments = ["-s", volume]
+        process.executableURL = URL(fileURLWithPath: program)
+        process.arguments = arguments
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
         guard (try? process.run()) != nil else { return nil }
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).lowercased()
-        if text.contains("indexing enabled") { return true }
-        if text.contains("disabled") { return false }
-        return nil
+        return String(decoding: output, as: UTF8.self)
     }
 
     /// Turns Spotlight off for the drive (`mdutil -i off`), which needs an administrator: macOS asks for the
