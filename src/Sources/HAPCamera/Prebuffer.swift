@@ -120,6 +120,8 @@ public final class Prebuffer: @unchecked Sendable {
         var videoClock = RTPClock(rate: session.video.clockRate > 0 ? session.video.clockRate : 90000)
         var audioClock = session.audio.map { RTPClock(rate: $0.clockRate > 0 ? $0.clockRate : 16000) }
         var videoUnwrap = TimestampUnwrapper(), audioUnwrap = TimestampUnwrapper()
+        // Frames placed evenly (a camera that stamps them when it sends them bunches them up: see FrameRetimer).
+        var videoRetimer = FrameRetimer()
         var any = false
         let paused = self.paused
         while !isStopped, !paused() {
@@ -136,7 +138,7 @@ public final class Prebuffer: @unchecked Sendable {
                     guard let sps = depacketizer.sps, let pps = depacketizer.pps else { continue }
                     any = true
                     keep(.video(Video(nalus: unit.nalus, keyframe: unit.isKeyframe, sps: sps, pps: pps,
-                                      time: videoUnwrap.unwrap(unit.timestamp),
+                                      time: videoRetimer.place(videoUnwrap.unwrap(unit.timestamp)),
                                       wall: videoClock.wallTime(unit.timestamp) ?? now)))
                 }
             case CameraSession.audioChannel:

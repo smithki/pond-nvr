@@ -417,11 +417,13 @@ public final class LiveSession: @unchecked Sendable {
         }
         stopFlag.withLock { transcoderInUse = reencoder }
         defer { stopFlag.withLock { transcoderInUse = nil } }
-        var cameraTime: Int64 = 0
-        var lastCameraTimestamp: UInt32?
+        // The camera's frames on its clock, placed evenly (a camera that stamps them when it sends them bunches them
+        // up: see FrameRetimer); relative to the first live one, for the viewer's RTP times.
+        var unwrap = TimestampUnwrapper()
+        var retimer = FrameRetimer()
         var needKeyframe = true
         var started = false
-        var first: UInt32 = 0
+        var first: Int64 = 0
         // Replayed frames (from before this viewer joined) are sent a millisecond apart, so they show as a blink
         // and the picture is live, not as far behind as the keyframe was; live ones carry on from them.
         var replayedFrames: UInt32 = 0
@@ -460,8 +462,7 @@ public final class LiveSession: @unchecked Sendable {
                     if needKeyframe { guard unit.isKeyframe else { continue }; needKeyframe = false }
                     guard let sps = depacketizer.sps, let pps = depacketizer.pps else { continue }
                     if unit.isKeyframe { sendLock.withLock { keyframe = (unit.nalus, sps, pps) } }
-                    if let last = lastCameraTimestamp { cameraTime += Int64(Int32(bitPattern: unit.timestamp &- last)) }
-                    lastCameraTimestamp = unit.timestamp
+                    let cameraTime = retimer.place(unwrap.unwrap(unit.timestamp))
                     if !started {
                         started = true
                         let target = stopFlag.withLock { reencode }
@@ -471,11 +472,12 @@ public final class LiveSession: @unchecked Sendable {
                     reencoder.push(unit.nalus, sps: sps, pps: pps, time: cameraTime, encode: !packet.replayed)
                     continue
                 }
+                let placed = retimer.place(unwrap.unwrap(unit.timestamp))
                 // From the first whole keyframe; a damaged frame waits for the next keyframe.
                 if !started {
                     guard unit.isKeyframe, !unit.damaged, depacketizer.sps != nil else { continue }
                     started = true
-                    first = unit.timestamp
+                    first = placed
                     log("✓ HomeKit live: streaming the \(source.url.hasSuffix("main") ? "main" : "sub-")stream")
                     onPlaying?()
                 }
@@ -491,9 +493,9 @@ public final class LiveSession: @unchecked Sendable {
                 } else {
                     if !caughtUp {
                         caughtUp = true
-                        first = unit.timestamp &- replayedFrames &* 90
+                        first = placed - Int64(replayedFrames) * 90
                     }
-                    timestamp = base &+ offset &+ (unit.timestamp &- first)
+                    timestamp = base &+ offset &+ UInt32(truncatingIfNeeded: placed - first)
                 }
                 let packets = sendLock.withLock { packetizer.packetize(nalus, timestamp: timestamp) }
                 for p in packets { send(p) }

@@ -35,6 +35,8 @@ public final class StreamRecorder {
     private var videoClock: RTPClock
     private var audioClock: RTPClock?
     private var videoUnwrap = TimestampUnwrapper()
+    /// Frames placed evenly (a camera that stamps them when it sends them bunches them up: see FrameRetimer).
+    private var videoRetimer = FrameRetimer()
     private var audioUnwrap = TimestampUnwrapper()
     private var started = false
     private var videoStart: Int64 = 0
@@ -131,14 +133,14 @@ public final class StreamRecorder {
         if !started {
             guard unit.isKeyframe, h264.sps != nil, h264.pps != nil else { return [] }
             started = true
-            videoStart = videoUnwrap.unwrap(unit.timestamp)
+            videoStart = videoRetimer.place(videoUnwrap.unwrap(unit.timestamp))
             startWall = videoClock.wallTime(unit.timestamp) ?? now
             guard let start = openSegment(at: 0) else { return [] }
             out.append(start)
             _ = writer?.addVideo(time: 0, nalus: unit.nalus, isKeyframe: true)
             return out
         }
-        let time = videoUnwrap.unwrap(unit.timestamp) - videoStart
+        let time = videoRetimer.place(videoUnwrap.unwrap(unit.timestamp)) - videoStart
         lastPlaced = startWall + Double(time) / Double(VideoTrack.timescale)
         if unit.isKeyframe, let length = segmentLength, writer != nil, time - segmentStart >= length {
             out += closeSegment(until: time)
