@@ -104,3 +104,12 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 | Search | done | Plain-language questions ("packages delivered this week") read into filters (by the Mac's own model, or plain rules) and ranked by SigLIP 2 picture embeddings and the sentences; done by the service for the Events view and `pond search`, in well under a second ([search.md](search.md)). SigLIP's converted model is too big for the repository: made by `scripts/convert-siglip.py`; how a release ships it (built in, or downloaded) is for the signed release. |
 | Left items | done | Something carried and put down (a bag, a suitcase, an umbrella) that stays 30 s with nobody over it: an event of its own. Works with the items the model knows. |
 | Zones in the app | done | Drawn on the camera's latest picture in its settings (Detection › Edit Zones): watched zones, with the kinds each takes, and ignored ones. |
+
+## Small fixes
+
+A backlog: small, contained problems seen in use, each worth a fix but not a goal of its own. Taken up between larger pieces of work, and removed from here when done (the changelog has them then).
+
+| Fix | Notes |
+| --- | --- |
+| RTSP streams that lose their framing | Now and then a camera's stream, mid-recording, has bytes that are neither an interleaved packet (`$`) nor an RTSP reply, and the reader (`RTSPReader` in `RTSPMessage.swift`) gives up after 16 KB without the end of a reply's headers ("the camera's answer could not be read: no end of headers in 16 KB"). The recorder reconnects within a second, so about a second of recording is lost each time; seen on Reolink cameras, a few times a day. It should resynchronize instead: skip ahead to the next `$` frame (or `RTSP/` reply) and carry on, counting what it skipped for the doctor. |
+
