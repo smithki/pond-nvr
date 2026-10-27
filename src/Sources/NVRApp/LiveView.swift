@@ -83,7 +83,7 @@ struct LiveView: View {
     static let defaultCount = 4
 
     var body: some View {
-        let cameras = model.config?.cameras ?? []
+        let cameras = model.liveCameras
         Group {
             if cameras.isEmpty {
                 ContentUnavailableView {
@@ -235,6 +235,10 @@ struct LiveView: View {
                 // Whether the rail would fit beside the open controls, for the toolbar's button.
                 .onChange(of: railFits(cameras), initial: true) { _, fits in if model.railFits != fits { model.railFits = fits } }
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
+                .onChange(of: staged(cameras), initial: true) { _, ids in
+                    let mixes = Set(ids.map(AppModel.pond(of:))).count > 1
+                    if model.stageMixesPonds != mixes { model.stageMixesPonds = mixes }
+                }
                 .onChange(of: reorderDrag.camera) { _, dragged in
                     if dragged != nil, reorderDrag.source == .stage {
                         if railOrder == nil { railOrder = cameras.map(\.id) }
@@ -263,6 +267,11 @@ struct LiveView: View {
     /// nothing records), against the newest recording of any camera, so a camera that stopped stands out.
     func health(_ id: String, cameras: [Config.Camera]) -> CameraHealth {
         if model.isPrivate(id) { return .keptPrivate }
+        // Another Pond's camera: only what its live view shows (its recordings are that Pond's).
+        if AppModel.pond(of: id) != nil {
+            return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil, lastRecorded: nil, recordingAsOf: nil,
+                                   startedRecording: nil)
+        }
         let asOf: Date? = model.isRecording ? Date()
             : MockEvents.enabled ? cameras.compactMap { snapshots[$0.id]?.time }.max() : nil
         return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
@@ -402,7 +411,7 @@ struct LiveView: View {
     ///   some; the dock, new, would bring it only after it appeared, at once), and the rail steps aside if there
     ///   isn't room for it beside them.
     func alongStage(next ids: [String]) {
-        let cameras = model.config?.cameras ?? []
+        let cameras = model.liveCameras
         let now = staged(cameras).count
         if ids.count > 1, now == 1, model.railMadeRoom, !railDrawn {
             setRail(true)
@@ -425,8 +434,12 @@ struct LiveView: View {
     /// Moves a dragged camera to another's place in the order (its priority, saved in the settings), the
     /// rail and the stage making way as it goes.
     func reorder(_ id: String, onto target: String) {
+        // Only among the cameras of one Pond: another Pond's, in the order kept here for it.
+        guard AppModel.pond(of: id) == AppModel.pond(of: target) else { return }
         motion = .reorder
-        withAnimation(.snappy(duration: 0.3)) { model.moveCamera(id, onto: target) }
+        withAnimation(.snappy(duration: 0.3)) {
+            if AppModel.pond(of: id) == nil { model.moveCamera(id, onto: target) } else { model.moveRemoteCamera(id, onto: target) }
+        }
     }
 
     /// Every camera on the stage, gently.
@@ -437,7 +450,7 @@ struct LiveView: View {
         lastRemoved = false
         lastChange = .distantPast
         motion = .reveal
-        inFront = Set(staged(model.config?.cameras ?? []))
+        inFront = Set(staged(model.liveCameras))
         // As for solo: the motion first, then the change.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(16))
@@ -454,7 +467,7 @@ struct LiveView: View {
     /// Shows one camera alone: instantly from another single camera; from a multi-view, by growing it to
     /// fill the stage while the others fade (or a crossfade, when it was not on the stage).
     func solo(_ id: String) {
-        let before = staged(model.config?.cameras ?? [])
+        let before = staged(model.liveCameras)
         guard before != [id] else { return }
         announcement?.cancel()
         pendingAnnouncement = nil
@@ -493,7 +506,7 @@ struct LiveView: View {
         let now = Date()
         motion = now.timeIntervalSince(lastChange) < Self.fastPace ? .calm : .lively
         lastChange = now
-        var ids = staged(model.config?.cameras ?? [])
+        var ids = staged(model.liveCameras)
         if let i = ids.firstIndex(of: id) {
             guard ids.count > 1 else { return }
             ids.remove(at: i)
@@ -516,7 +529,7 @@ struct LiveView: View {
         justAdded = nil
         announcement = Task {
             try? await Task.sleep(for: .seconds(Self.fastPace))
-            guard !Task.isCancelled, let candidate, staged(model.config?.cameras ?? []).contains(candidate) else { return }
+            guard !Task.isCancelled, let candidate, staged(model.liveCameras).contains(candidate) else { return }
             pendingAnnouncement = nil
             motion = .lively
             announce(candidate)
@@ -553,8 +566,14 @@ struct CameraRail: View {
     @AppStorage("liveRailWidth") private var width = CameraRail.defaultWidth
     @State private var dragStart: Double?
     @Environment(AppModel.self) private var model
+    /// Whether cameras are scrolled on under the rail's header and footer.
+    @State private var overflow = RailOverflow(top: false, bottom: false)
+    /// Ponds whose cameras are folded away in the rail (their ids; "" this Mac), kept.
+    @AppStorage("railFoldedPonds") private var foldedText = ""
 
     static let defaultWidth = 220.0
+    /// Between the Ponds' panels, and above the first.
+    static let pondGap = 10.0
     static let widths = 180.0 ... 460.0
     /// The narrowest a snapshot gets before the rail goes back to one column.
     static let thumbnailWidth = 150.0
@@ -568,48 +587,90 @@ struct CameraRail: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // On a narrow rail the count gives way, so "Show All" stays on one line.
-            ViewThatFits(in: .horizontal) {
-                header(count: true, title: true)
-                header(count: false, title: true)
-                header(count: false, title: false)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: columns),
-                          spacing: 10) {
-                    ForEach(cameras) { camera in
-                        RailThumbnail(camera: camera, snapshot: snapshots[camera.id], health: health(camera.id),
-                                      onStage: staged.contains(camera.id),
-                                      canRemove: staged.count > 1, solo: { solo(camera.id) }, toggle: { toggle(camera.id) },
-                                      openControls: { openControls(camera.id) })
-                            .reorderable(camera.id, name: camera.name, drag: drag, from: .rail, move: reorder)
+        // The cameras the rail's whole height, scrolling on under its header and footer: bars of translucent glass,
+        // blurring what passes under them.
+        ScrollView {
+            // Several Ponds shown: a section each, on a panel of its own, under its name, folding away. While a
+            // camera's dragged, its Pond's panel is lit: its cameras are the ones it can go among.
+            let groups = model.cameraGroups
+            if groups.count > 1 {
+                VStack(alignment: .leading, spacing: Self.pondGap) {
+                    ForEach(groups, id: \.name) { group in
+                        let key = group.pond ?? ""
+                        let ids = Set(group.cameras.map(\.id))
+                        let lit = drag.camera.map { AppModel.pond(of: $0) == group.pond && drag.source != .settings } ?? false
+                        VStack(alignment: .leading, spacing: 8) {
+                            PondHeading(name: group.name, pond: group.pond, count: ids.count, folded: folding(key))
+                            if !foldedPonds.contains(key) {
+                                grid(cameras.filter { ids.contains($0.id) })
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
+                        .padding(8)
+                        .background(lit ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.45)),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(lit ? 0.6 : 0), lineWidth: 1.5)
+                        }
+                        .animation(.easeOut(duration: 0.15), value: lit)
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 8)
+                // Clear of the header bar by as much as the Ponds' panels are of each other.
+                .padding(.top, Self.pondGap)
                 .padding(.bottom, 12)
+            } else {
+                grid(cameras)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
             }
-            .scrollIndicators(.automatic)
-
-            ViewThatFits(in: .horizontal) {
-                Text("Click to add or remove · drag to reorder")
-                VStack(spacing: 2) {
-                    Text("Click to add or remove")
-                    Text("Drag to reorder")
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
         }
+        .scrollIndicators(.automatic)
+        .safeAreaBar(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                // On a narrow rail the count gives way, so "Show All" stays on one line.
+                ViewThatFits(in: .horizontal) {
+                    header(count: true, title: true)
+                    header(count: false, title: true)
+                    header(count: false, title: false)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            }
+            .frame(maxWidth: .infinity)
+            .background(RailBar(edge: .bottom, ruled: overflow.top))
+        }
+        .safeAreaBar(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    Text("Click to add or remove · drag to reorder")
+                    VStack(spacing: 2) {
+                        Text("Click to add or remove")
+                        Text("Drag to reorder")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+            .frame(maxWidth: .infinity)
+            .background(RailBar(edge: .top, ruled: overflow.bottom))
+        }
+        // The system's own blur under the bars (hard: a clear edge where they meet the cameras).
+        .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
+        // Whether cameras are under the header or the footer now (each bar then ruled off from them).
+        .onScrollGeometryChange(for: RailOverflow.self) { g in
+            RailOverflow(top: g.contentOffset.y > -g.contentInsets.top + 1,
+                         bottom: g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom < g.contentSize.height - 1)
+        } action: { _, now in overflow = now }
         .frame(width: width.clamped(to: Self.widths))
         .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomLeading))
+        // (What scrolls under the bars kept inside the rail's corners.)
+        .clipShape(LiveLayout.panel(nearWindowCorner: .bottomLeading))
         .overlay(alignment: .trailing) {
             ResizeHandle { dx in
                 let start = dragStart ?? width
@@ -631,6 +692,29 @@ struct CameraRail: View {
 }
 
 extension CameraRail {
+    var foldedPonds: Set<String> { Set(foldedText.split(separator: ",").map { $0 == "-" ? "" : String($0) }) }
+
+    func folding(_ key: String) -> Binding<Bool> {
+        Binding(get: { foldedPonds.contains(key) }, set: { fold in
+            var set = foldedPonds
+            if fold { set.insert(key) } else { set.remove(key) }
+            // ("" is this Mac: kept as "-" so it isn't lost among the commas.)
+            foldedText = set.map { $0.isEmpty ? "-" : $0 }.sorted().joined(separator: ",")
+        })
+    }
+
+    func grid(_ cameras: [Config.Camera]) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: columns), spacing: 10) {
+            ForEach(cameras) { camera in
+                RailThumbnail(camera: camera, snapshot: snapshots[camera.id], health: health(camera.id),
+                              onStage: staged.contains(camera.id),
+                              canRemove: staged.count > 1, solo: { solo(camera.id) }, toggle: { toggle(camera.id) },
+                              openControls: { openControls(camera.id) })
+                    .reorderable(camera.id, name: camera.name, drag: drag, from: .rail, move: reorder)
+            }
+        }
+    }
+
     func header(count: Bool, title: Bool) -> some View {
         HStack {
             Text("Cameras").font(.headline)
@@ -641,6 +725,31 @@ extension CameraRail {
             ShowAllButton(allShown: staged.count == cameras.count, title: title, action: showAll)
         }
         .lineLimit(1)
+    }
+}
+
+/// Whether cameras are under the rail's header and footer.
+struct RailOverflow: Equatable {
+    var top: Bool
+    var bottom: Bool
+}
+
+/// The rail's header or footer bar's edge facing the cameras: a hairline while there are some under it (the blur is
+/// the system's scroll edge effect, under bars of `safeAreaBar`).
+struct RailBar: View {
+    /// The edge that faces the cameras.
+    let edge: VerticalEdge
+    let ruled: Bool
+
+    var body: some View {
+        Color.clear
+            .overlay(alignment: edge == .top ? .top : .bottom) {
+                Rectangle()
+                    .fill(.separator)
+                    .frame(height: 1)
+                    .opacity(ruled ? 1 : 0)
+            }
+            .animation(.easeOut(duration: 0.15), value: ruled)
     }
 }
 
@@ -1530,7 +1639,8 @@ struct CameraTile: View {
                 let size = compact ? Self.compactPillHeight : Self.pillHeight
                 let seed = size * 0.6
                 HStack(spacing: gearApart ? Self.badgeGap : gearShown ? 0 : -(size + seed) / 2) {
-                    Text(camera.name)
+                    // (Cameras of several Ponds together: which Pond, after its name.)
+                    Text("\(camera.name)\(Text(model.pondName(of: camera.id).map { "  \($0)" } ?? "").foregroundStyle(.secondary))")
                         .font(compact ? .callout.weight(.semibold) : .headline)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1566,8 +1676,8 @@ struct CameraTile: View {
                 }
             }
             .onChange(of: hovering && frozen == nil, initial: true) { _, show in showGear(show) }
-            // Not while it's private: it isn't being recorded.
-            if model.isRecording, !model.isPrivate(camera.id) {
+            // Not while it's private: it isn't being recorded. (Nor for another Pond's camera: this Mac doesn't record it.)
+            if model.isRecording, !model.isPrivate(camera.id), AppModel.pond(of: camera.id) == nil {
                 HStack(spacing: 5) {
                     Circle().fill(.red).frame(width: compact ? 7 : 8, height: compact ? 7 : 8)
                     if !compact { Text("REC").font(.callout.weight(.bold)) }

@@ -19,7 +19,7 @@ endif
 APPLE_DEV := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
 SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/dev/null | grep '"Pond Local Signing"'),Pond Local Signing,-))
 
-.PHONY: help build app check test test-docker clean install update signing
+.PHONY: help build app demo check test test-docker clean install update signing
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
@@ -29,6 +29,7 @@ help:
 	@echo "make test-docker    run the tests of the modules that build on Linux, in a throwaway container (needs Docker)"
 	@echo "make install        build, then copy pond to /usr/local/bin (sudo)"
 	@echo "make update         install, then restart the login service if it is installed"
+	@echo "make demo [SCENARIO=home]  a copy of the app in dist/demo, opened in demo mode (made-up cameras; see pond demo list)"
 	@echo "make clean          remove dist/ and the Swift build folder"
 	@echo "make signing        once per Mac: a local signing certificate, so Keychain access survives rebuilds"
 
@@ -119,6 +120,17 @@ update: install
 
 signing:
 	@scripts/setup-signing.sh
+
+# Demo mode, in a copy of the app of its own (dist/demo): building it never restarts the real login service, and the
+# demo runs its own services, apart from the real ones. pond-signal goes in beside pond, for its Ponds to meet.
+SCENARIO ?= home
+demo:
+	@$(MAKE) app APP="dist/demo/Pond NVR.app"
+	swift build --package-path $(PKG) -c release --product pond-signal
+	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond-signal" "dist/demo/Pond NVR.app/Contents/MacOS/pond-signal"
+	@codesign --force --sign "$(SIGN)" --identifier pond-signal "dist/demo/Pond NVR.app/Contents/MacOS/pond-signal"
+	@codesign --force --sign "$(SIGN)" "dist/demo/Pond NVR.app"
+	"dist/demo/Pond NVR.app/Contents/MacOS/PondApp" --demo $(SCENARIO) >/dev/null 2>&1 &
 
 clean:
 	rm -rf dist $(PKG)/.build

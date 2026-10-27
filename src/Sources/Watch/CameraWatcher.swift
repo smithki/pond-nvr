@@ -220,7 +220,8 @@ public final class CameraWatcher: @unchecked Sendable {
                     let closer = mask.isMoving
                         ? tap?.picture(priority: tracker.following(EventBuilder.important) ? .following : .motion) : nil
                     if closer != nil { CloserLook.Count.looked() }
-                    guard let found = CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
+                    guard let found = detector.standIn.map({ $0(camera, now) })
+                        ?? CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
                     else { return }
                     // What counts by the zones, with the zones it's in.
                     let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
@@ -353,6 +354,8 @@ public final class CameraWatcher: @unchecked Sendable {
 /// The one detection model, shared by every camera's watcher, one picture at a time.
 public final class SharedDetector: @unchecked Sendable {
     public let detector: Detector
+    /// What's in a camera's picture at a time, known rather than looked for: demo mode's drawn scenes.
+    nonisolated(unsafe) public var standIn: (@Sendable (_ camera: String, _ at: Date) -> [Detection])?
     private let lock = NSLock()
     private var failed = false
     let say: @Sendable (String) -> Void

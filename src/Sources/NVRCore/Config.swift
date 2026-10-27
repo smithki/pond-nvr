@@ -7,6 +7,9 @@ public struct Config: Codable, Equatable, Sendable {
     public static let currentVersion = 1
 
     public var version: Int
+    /// This Pond's name, as the app shows it beside others ("Home", "Lake House") and devices pairing with it see it;
+    /// left out, this Mac's name.
+    public var name: String?
     public var storage: Storage
     public var retention: Retention
     public var cameras: [Camera]
@@ -28,6 +31,7 @@ public struct Config: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
+        name = try c.decodeIfPresent(String.self, forKey: .name)
         storage = try c.decode(Storage.self, forKey: .storage)
         retention = try c.decodeIfPresent(Retention.self, forKey: .retention) ?? Retention()
         cameras = try c.decodeIfPresent([Camera].self, forKey: .cameras) ?? []
@@ -565,7 +569,8 @@ extension Config {
 
     /// Why this stream address is unusable, or nil if it is fine.
     static func streamProblem(_ address: String) -> String? {
-        guard let url = URLComponents(string: address), url.scheme?.lowercased() == "rtsp", let host = url.host,
+        // (A demo camera's, in demo mode: demo://.)
+        guard let url = URLComponents(string: address), ["rtsp", Demo.scheme].contains(url.scheme?.lowercased()), let host = url.host,
               !host.isEmpty
         else { return "must be an rtsp:// address with a host." }
         if url.password != nil || url.user != nil {

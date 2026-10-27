@@ -21,6 +21,8 @@ struct RemoteAccessView: View {
     @State private var pairing: Pairing?
     @State private var joining = false
     @State private var removing: ControlSocket.RemoteDevice?
+    @State private var renaming: ControlSocket.RemoteDevice?
+    @State private var newName = ""
     /// A device being tried, and how each try went.
     @State private var testing: String?
     @State private var tested: [String: (ok: Bool, words: String)] = [:]
@@ -152,6 +154,13 @@ struct RemoteAccessView: View {
         } message: { _ in
             Text("It can\u{2019}t reach this Mac any more, until it\u{2019}s paired again.")
         }
+        .alert("Rename \(renaming?.name ?? "")", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Name", text: $newName)
+            Button("Rename") { if let device = renaming { Task { await rename(device, to: newName) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("What it\u{2019}s called on this Mac.")
+        }
         .alert("Remote access", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
             Button("OK") { problem = nil }
         } message: {
@@ -191,6 +200,11 @@ struct RemoteAccessView: View {
             Button(testing == device.id ? "Trying\u{2026}" : "Try Connecting") { Task { await test(device) } }
                 .disabled(testing != nil)
                 .help("Finds a path to it now, and says how (or why not, and what would fix it).")
+            Button("Rename\u{2026}") {
+                newName = device.name
+                renaming = device
+            }
+            .help("What it\u{2019}s called here: in the toolbar, the camera rail and this list. (It keeps its own name.)")
             Button("Remove\u{2026}") { removing = device }
         }
     }
@@ -268,6 +282,18 @@ struct RemoteAccessView: View {
         let reply = await model.controlClient.ask(request, timeout: 45)
         await refresh()
         return reply.error.map { $0.description.prefix(1).uppercased() + $0.description.dropFirst() + "." }
+    }
+
+    func rename(_ device: ControlSocket.RemoteDevice, to name: String) async {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != device.name else { return }
+        var request = ControlSocket.Request(camera: "", action: "remote.rename")
+        request.device = device.id
+        request.code = name
+        let reply = await model.controlClient.ask(request)
+        if let error = reply.error { problem = "\(device.name) wasn\u{2019}t renamed: \(error.description)." }
+        await refresh()
+        model.remoteStatus = status
     }
 
     func unpair(_ device: ControlSocket.RemoteDevice) async {

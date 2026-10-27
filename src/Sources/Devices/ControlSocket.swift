@@ -102,6 +102,8 @@ public enum ControlSocket {
         public var body: Data?
         /// "remote.status": remote access as it is now.
         public var remote: RemoteStatus?
+        /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.
+        public var ponds: [RemotePond]?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -118,6 +120,54 @@ public enum ControlSocket {
             self.value = value
             self.values = values
             self.sampleRate = sampleRate
+        }
+    }
+
+    /// Another Pond, for the app: its cameras (nil, with why, if it couldn't be reached), each with its live streams'
+    /// addresses (through this Mac's service) and its id here (`camera@pond`: its controls asked of it through here).
+    public struct RemotePond: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+        public var cameras: [Camera]?
+        public var problem: String?
+
+        public struct Camera: Codable, Equatable, Sendable {
+            public var id: String
+            public var name: String
+            public var doorbell: Bool
+            public var isPrivate: Bool
+            public var waking: Bool
+            public var model: String?
+            public var main: String
+            public var sub: String
+            public var controls: Config.Controls?
+
+            public init(id: String, name: String, doorbell: Bool, isPrivate: Bool, waking: Bool, model: String?, main: String, sub: String,
+                        controls: Config.Controls? = nil) {
+                self.controls = controls
+                self.id = id
+                self.name = name
+                self.doorbell = doorbell
+                self.isPrivate = isPrivate
+                self.waking = waking
+                self.model = model
+                self.main = main
+                self.sub = sub
+            }
+        }
+
+        public init(id: String, name: String, cameras: [Camera]?, problem: String?) {
+            self.id = id
+            self.name = name
+            self.cameras = cameras
+            self.problem = problem
+        }
+
+        /// A camera's id here, and back.
+        public static func cameraID(_ camera: String, pond: String) -> String { "\(camera)@\(pond)" }
+        public static func split(_ id: String) -> (camera: String, pond: String)? {
+            guard let at = id.lastIndex(of: "@") else { return nil }
+            return (String(id[..<at]), String(id[id.index(after: at)...]))
         }
     }
 
@@ -364,6 +414,8 @@ public final class ControlServer: @unchecked Sendable {
 
     /// Remote access (set by the service, when it's on): the "remote." actions.
     public var remote: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
+    /// Another Pond's camera's request (its id `camera@pond`), asked of that Pond (set by the service).
+    public var otherPond: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
 
     /// The camera restarted, whichever way it can be: over its make's own protocol (a Reolink's, which answers
     /// when its video and web servers don't), else its Restart control (ONVIF's, every ONVIF camera has it). How it
@@ -433,6 +485,10 @@ public final class ControlServer: @unchecked Sendable {
             return await remote(request)
         case "privacy.list":
             return ControlSocket.Reply(privateCameras: privacy.privateCameras.sorted())
+        case _ where ControlSocket.RemotePond.split(request.camera) != nil:
+            // Another Pond's camera: asked of it.
+            guard let forward = otherPond else { return ControlSocket.Reply(error: .failed("remote access is off")) }
+            return await forward(request)
         case "talk" where cameraControls(request.camera) != nil && whileAsleep(request) == nil:
             return ControlSocket.Reply(error: .notSupported)
         default:

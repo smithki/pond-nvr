@@ -21,6 +21,9 @@ final class ReorderDrag {
     var lastMovePointer: CGPoint?
     private var watch: Task<Void, Never>?
 
+    /// The Pond a camera's at, for keeping a drag among its own ("" this Mac; a camera of another is `camera@pond`).
+    static func group(of id: String) -> Substring { id.lastIndex(of: "@").map { id[id.index(after: $0)...] } ?? "" }
+
     /// Moves wait this long after the last: the tiles are still sliding, and the pointer crossing a moving
     /// tile (or the gap between two) would otherwise send the camera back and forth.
     static let settle: TimeInterval = 0.35
@@ -94,15 +97,19 @@ extension View {
     /// follows the pointer: the dimmed camera, and the others moving out of its way, show the drag.
     func reorderable(_ id: String, name: String, symbol: String = "video.fill", drag: ReorderDrag, from source: ReorderDrag.Source,
                      enabled: Bool = true, label: Bool = true, move: @escaping (String, String) -> Void) -> some View {
-        self
-            .opacity(drag.camera == id ? 0.45 : 1)
+        // While a camera's dragged, those of other Ponds (ids `camera@pond`) step back: it can only go among its own.
+        let apart = drag.camera.map { ReorderDrag.group(of: $0) != ReorderDrag.group(of: id) } ?? false
+        return self
+            .opacity(drag.camera == id ? 0.45 : apart ? 0.35 : 1)
+            .saturation(apart ? 0 : 1)
             .animation(.easeOut(duration: 0.15), value: drag.camera == id)
+            .animation(.easeOut(duration: 0.15), value: apart)
             // A preview of its own: by default the system draws the view itself into an image to drag, and
             // drawing its glass (the tile's badges) that way crashed the app.
             .onDrag { enabled ? drag.begin(id, from: source) : NSItemProvider() } preview: {
                 if label { DragPreview(name: name, symbol: symbol) } else { Color.clear.frame(width: 1, height: 1) }
             }
-            .onDrop(of: [.text], delegate: ReorderDropDelegate(target: id, drag: drag, enabled: enabled, move: move))
+            .onDrop(of: [.text], delegate: ReorderDropDelegate(target: id, drag: drag, enabled: enabled && !apart, move: move))
     }
 }
 

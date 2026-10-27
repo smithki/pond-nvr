@@ -84,7 +84,12 @@ public final class RemoteKeys: @unchecked Sendable {
     public func identity(name: String) throws -> RemoteIdentity {
         try lock.withLock {
             if let text = try store.password(for: Self.identityAccount),
-               let stored = try? JSONDecoder().decode(RemoteIdentity.Stored.self, from: Data(text.utf8)) {
+               var stored = try? JSONDecoder().decode(RemoteIdentity.Stored.self, from: Data(text.utf8)) {
+                // Renamed since: kept under its new name (devices pairing from now on are told it).
+                if stored.name != name {
+                    stored.name = name
+                    try store.setPassword(String(decoding: try JSONEncoder().encode(stored), as: UTF8.self), for: Self.identityAccount)
+                }
                 return try RemoteIdentity(stored)
             }
             let made = RemoteIdentity(name: name)
@@ -107,6 +112,16 @@ public final class RemoteKeys: @unchecked Sendable {
 
     public func remove(_ id: String) throws {
         try save(peers().filter { $0.id != id })
+    }
+
+    /// A paired device or Pond called something else here (what it calls itself is its own).
+    public func rename(_ id: String, to name: String) throws {
+        try save(peers().map { peer in
+            guard peer.id == id else { return peer }
+            var renamed = peer
+            renamed.name = name
+            return renamed
+        })
     }
 
     public func peer(signingKey: Data) -> RemotePeer? { peers().first { $0.signingKey == signingKey } }

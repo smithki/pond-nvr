@@ -3,9 +3,11 @@
 // another Pond to pair with this one; `join` pairs this one with another, by the code it showed. `watch`, `cameras`,
 // `events`, `search`, `picture` and `clip` ask a paired Pond, over a session made for each (its remote API).
 #if canImport(NVRMac)
+import Demo
 import Devices
 import Foundation
 import HAPCamera
+import Ingest
 import NVRCore
 import NVRMac
 import Remote
@@ -17,37 +19,45 @@ final class RemoteAccess: @unchecked Sendable {
     let log: @Sendable (String) -> Void
     private let lock = NSLock()
     private var host: RemoteHost?
+    /// Other Ponds' cameras shown in this Mac's app (sessions kept open to them while they are).
+    private var viewing: RemoteViewing?
     /// What it was started with (the settings, and the relay's secret: a new one starts it again too); why it
     /// isn't on, if the settings can fix that.
-    private var applied: (settings: Config.Remote?, secret: String?)?
+    private var applied: (settings: Config.Remote?, secret: String?, name: String?)?
     private var problem: String?
+
+    /// The service's (for what's made before it: the app's stream relay).
+    nonisolated(unsafe) static weak var running: RemoteAccess?
 
     init(api: RemoteAPI.Server, log: @escaping @Sendable (String) -> Void) {
         self.api = api
         self.log = log
+        Self.running = self
+        registerStreams()
     }
 
     var current: RemoteHost? { lock.withLock { host } }
 
     /// The settings taken up: started again if they (or the relay's secret) changed. What changed, in words.
     @discardableResult
-    func apply(_ settings: Config.Remote?) -> String? {
+    func apply(_ settings: Config.Remote?, name: String? = nil) -> String? {
         let secret = Self.keys.relaySecret()
         let changed = lock.withLock { () -> Bool in
-            guard let applied, applied.settings == settings, applied.secret == secret else { return true }
+            guard let applied, applied.settings == settings, applied.secret == secret, applied.name == name else { return true }
             return false
         }
         guard changed else { return nil }
         let (old, wasOn) = lock.withLock { (host, applied != nil) }
         old?.stop()
-        let (started, problem) = startRemote(settings, log: log)
+        let (started, problem) = startRemote(settings, pondName: name, log: log)
         if let started {
             started.paths.requests = { [api] in await api.serve($0, action: $1, body: $2) }
             started.paths.sessionEnded = { [api] in api.ended($0) }
         }
         lock.withLock {
             host = started
-            applied = (settings, secret)
+            viewing = started.map { RemoteViewing(host: $0) }
+            applied = (settings, secret, name)
             self.problem = problem
         }
         guard wasOn else { return nil }
@@ -55,6 +65,27 @@ final class RemoteAccess: @unchecked Sendable {
     }
 
     func stop() { lock.withLock { host }?.stop() }
+
+    /// For the app's live view: other Ponds' cameras' streams, opened through StreamHub (`pond-remote://`).
+    func registerStreams() {
+        StreamHub.openers[RemoteViewing.scheme] = { [weak self] url in
+            guard let viewing = self?.lock.withLock({ self?.viewing }) else { throw RTSPError.notFound(url) }
+            return try viewing.open(url)
+        }
+    }
+
+    /// Whether a stream's address is a paired Pond's camera's (the app's live view may read it).
+    func isKnownStream(_ url: String) -> Bool { lock.withLock { viewing }?.isKnown(url) ?? false }
+
+    /// Another Pond's camera's request (its id `camera@pond`), asked of it with the camera's own id.
+    func forward(_ request: ControlSocket.Request) async -> ControlSocket.Reply {
+        guard let viewing = lock.withLock({ viewing }), let (camera, pond) = ControlSocket.RemotePond.split(request.camera) else {
+            return ControlSocket.Reply(error: .failed("remote access is off"))
+        }
+        var asked = request
+        asked.camera = camera
+        return await viewing.control(pond: pond, asked)
+    }
 
     static var keys: RemoteKeys { RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService)) }
 
@@ -74,14 +105,36 @@ final class RemoteAccess: @unchecked Sendable {
                                  connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
                                  relaySecret: relaySecret, problem: problem)
             return reply
+        case "remote.ponds":
+            // Each paired Pond's cameras, with their streams' addresses through this service.
+            guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }
+            var reply = ControlSocket.Reply()
+            reply.ponds = await viewing.allCameras().map { pond, cameras, problem in
+                ControlSocket.RemotePond(id: pond.id, name: pond.name, cameras: cameras?.map { c in
+                    .init(id: ControlSocket.RemotePond.cameraID(c.id, pond: pond.id), name: c.name, doorbell: c.doorbell,
+                          isPrivate: c.isPrivate, waking: c.waking, model: c.model,
+                          main: RemoteViewing.url(pond: pond.id, camera: c.id, main: true),
+                          sub: RemoteViewing.url(pond: pond.id, camera: c.id, main: c.subStream ? false : true), controls: c.controls)
+                }, problem: problem)
+            }
+            return reply
         case "remote.relay-secret":
             // Kept (or removed), then remote access started again with it.
             let secret = request.code?.trimmingCharacters(in: .whitespaces) ?? ""
             do { try Self.keys.setRelaySecret(secret.isEmpty ? nil : secret) } catch {
                 return ControlSocket.Reply(error: .failed("it couldn\u{2019}t be kept (\(error))"))
             }
-            let settings = lock.withLock { applied?.settings }
-            apply(settings)
+            let (settings, name) = lock.withLock { (applied?.settings, applied?.name) }
+            apply(settings, name: name)
+            return ControlSocket.Reply()
+        case "remote.rename":
+            // A paired Pond or device called something else here.
+            guard let id = request.device, let name = request.code?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
+                return ControlSocket.Reply(error: .failed("which device, and what name?"))
+            }
+            do { try Self.keys.rename(id, to: name) } catch {
+                return ControlSocket.Reply(error: .failed("it couldn\u{2019}t be kept (\(error))"))
+            }
             return ControlSocket.Reply()
         default:
             guard let host = current else {
@@ -93,7 +146,7 @@ final class RemoteAccess: @unchecked Sendable {
 }
 
 /// Remote access in the service, if it's on (and set up right); else why not, if it should be.
-func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -> Void) -> (RemoteHost?, String?) {
+func startRemote(_ settings: Config.Remote?, pondName: String? = nil, log: @escaping @Sendable (String) -> Void) -> (RemoteHost?, String?) {
     guard let settings, settings.enabled else { return (nil, nil) }
     guard let address = settings.signaling, let url = URL(string: address), ["ws", "wss"].contains(url.scheme) else {
         log("! remote access is off: no signaling service set (remote.signaling, a wss:// address)")
@@ -115,7 +168,10 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
     }
     let keys = RemoteAccess.keys
     var problem: String?
-    paths.name = (Host.current().localizedName ?? "Pond").filter { $0.isLetter || $0.isNumber }
+    // (A demo's Pond is named as its scenario has it, and reached over the link it sets.)
+    let name = pondName ?? DemoWorld.current?.scenario.pondName ?? Host.current().localizedName ?? "Pond"
+    paths.name = name.filter { $0.isLetter || $0.isNumber }
+    if DemoWorld.current?.scenario.link == .slow { paths.shape = .init(delay: 0.06, loss: 0.02, rate: 300_000) }
     if let relay = settings.relay, !settings.mesh {
         let addresses = PathSessions.resolve(relay, port: 3480)
         if let secret = keys.relaySecret(), !addresses.isEmpty {
@@ -127,7 +183,7 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
         }
     }
     do {
-        let host = try RemoteHost(keys: keys, name: Host.current().localizedName ?? "Pond", signaling: url, paths: paths, log: log)
+        let host = try RemoteHost(keys: keys, name: name, signaling: url, paths: paths, log: log)
         host.start()
         log("remote: reachable through \(url.host() ?? address), \(host.devices().count) paired")
         return (host, problem)

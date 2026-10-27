@@ -43,6 +43,9 @@ targets += [
     .testTarget(name: "RemoteTests", dependencies: ["Remote", "NVRCore", "Signal", "Traversal", "HAPCamera", "Ingest", "Devices",
                                                     "Watch", "Understanding"]),
 ]
+// Demo mode: made-up cameras (scenes drawn and encoded as a camera's stream, their controls, what's found in them).
+targets.append(.target(name: "Demo", dependencies: ["NVRCore", "Ingest", "HAPCamera", "Devices", "Detection"]))
+targets.append(.testTarget(name: "DemoTests", dependencies: ["Demo", "NVRCore", "Ingest", "Detection"]))
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCore"]))
@@ -63,7 +66,7 @@ targets.append(.testTarget(name: "SoakTests", dependencies: ["Watch", "HAPCamera
 // words alike (SigLIP 2), for search.
 targets.append(.target(name: "Understanding"))
 targets.append(.testTarget(name: "UnderstandingTests", dependencies: ["Understanding"], resources: [.copy("Fixtures")]))
-commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding", "Remote"]
+commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding", "Remote", "Demo"]
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection",

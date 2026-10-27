@@ -39,6 +39,8 @@ public enum RemoteAPI {
         /// It has a sub-stream (smaller: for live video over a weak link).
         public var subStream: Bool
         public var model: String?
+        /// Its controls, as the app's dock draws them (asked for through `control`).
+        public var controls: Config.Controls?
     }
 
     public struct EventsRequest: Codable, Sendable {
@@ -139,7 +141,8 @@ public enum RemoteAPI {
             case "cameras":
                 return Self.encoded(cameras().map { camera in
                     Camera(id: camera.id, name: camera.name, doorbell: camera.kind == .doorbell, isPrivate: privacy.isPrivate(camera.id),
-                           waking: privacy.isWaking(camera.id), subStream: !camera.sub.isEmpty, model: camera.device?.model)
+                           waking: privacy.isWaking(camera.id), subStream: !camera.sub.isEmpty, model: camera.device?.model,
+                           controls: camera.device?.controls)
                 })
             case "events":
                 guard let events else { return (nil, "events aren't kept") }
@@ -174,7 +177,9 @@ public enum RemoteAPI {
                 }
                 return Self.encoded(answer)
             case "live.stop":
-                live.stop(session)
+                // One stream (its SSRC, as answered), or all of the session's.
+                let ssrc = body.flatMap { try? JSONDecoder().decode(LiveAnswer.self, from: $0) }?.ssrc
+                live.stop(session, ssrc: ssrc)
                 return (nil, nil)
             default:
                 return (nil, "not supported: \(action)")

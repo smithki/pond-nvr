@@ -48,7 +48,8 @@ extension AppModel {
 
     /// Looks again (one look at a time), and keeps what it found.
     func findCameras() async {
-        guard !findingCameras else { return }
+        // (Not in a demo: its cameras are made up, and the network's real ones aren't its.)
+        guard !findingCameras, DemoSession.scenario == nil else { return }
         findingCameras = true
         let found = await CameraFinder.find()
         foundCameras = found

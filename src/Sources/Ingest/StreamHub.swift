@@ -26,8 +26,14 @@ public final class StreamHub: @unchecked Sendable {
     /// Opens a camera connection; tests replace it.
     let connect: (String, String, String) throws(RTSPError) -> PacketSource
 
+    /// Sources for addresses other than a camera's RTSP, by scheme: demo mode's made-up cameras (`demo://`).
+    nonisolated(unsafe) public static var openers: [String: (String) throws -> PacketSource] = [:]
+
     public init(connect: @escaping (String, String, String) throws(RTSPError) -> PacketSource = { url, user, password throws(RTSPError) in
-        try CameraSession(url: url, username: user, password: password)
+        if let scheme = URLComponents(string: url)?.scheme, let opener = StreamHub.openers[scheme] {
+            do { return try opener(url) } catch let error as RTSPError { throw error } catch { throw .malformed("\(error)") }
+        }
+        return try CameraSession(url: url, username: user, password: password)
     }) {
         self.connect = connect
     }

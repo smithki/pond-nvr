@@ -92,8 +92,13 @@ struct ContentView: View {
             if model.config == nil {
                 SetupView()
             } else {
+                // Live shows every Pond shown; Timeline and Events only this Mac's for now.
                 switch model.mode {
                 case .live: LiveView()
+                case .timeline where model.shownPonds != .all && model.shownPonds != .this:
+                    OtherPondView(name: model.shownName, what: "Timelines")
+                case .events where model.shownPonds != .all && model.shownPonds != .this:
+                    OtherPondView(name: model.shownName, what: "Events")
                 case .timeline: TimelineView()
                 case .events: EventsView()
                 }
@@ -167,9 +172,11 @@ struct ContentView: View {
                           : "No room for the cameras beside the controls; make the window wider, or hide the controls, to show them")
                 }
             }
+            // The recorder's state, which is also which Pond is shown: its menu has the recorder's settings and the
+            // other Ponds paired with this one.
             ToolbarItem(placement: .navigation) {
-                RecorderStatusButton {
-                    model.settingsTab = .recorder
+                PondSwitcher { tab in
+                    model.settingsTab = tab
                     openSettings()
                 }
             }
@@ -183,6 +190,12 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 .disabled(model.config == nil)
+            }
+            // In a demo, which one, always in sight (nothing here is the real setup), in glass of its own; its menu
+            // switches to another.
+            if let demo = DemoSession.scenario {
+                ToolbarItem(placement: .primaryAction) { DemoMenu(current: demo) }
+                ToolbarSpacer(.fixed, placement: .primaryAction)
             }
             // Find Cameras, just before Add Camera and in its glass: always there (an item that came and went
             // would rebuild Add Camera's glass each time), showing the cameras found when there are some.
@@ -202,6 +215,23 @@ struct ContentView: View {
         }
         .toolbar(removing: .title)
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
+        // The Ponds paired with this one, and which are connected, for the switcher: every 10 s (every 2 s until the
+        // service first answers).
+        .task {
+            while !Task.isCancelled {
+                if model.config != nil {
+                    let reply = await model.controlClient.ask(.init(camera: "", action: "remote.status"), timeout: 5)
+                    if reply.remote != nil || model.remoteStatus != nil { model.remoteStatus = reply.remote }
+                    // Their cameras, for Live.
+                    if !model.otherPonds.isEmpty, let ponds = await model.controlClient.ask(.init(camera: "", action: "remote.ponds"), timeout: 30).ponds,
+                       ponds != model.remotePonds {
+                        model.remotePonds = ponds
+                        model.refreshPrivacy()
+                    }
+                }
+                try? await Task.sleep(for: .seconds(model.remoteStatus == nil ? 2 : 10))
+            }
+        }
         // Cameras on the network: looked for as the app opens, then again once a day while it stays open
         // (checked each hour).
         .task {
@@ -414,6 +444,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // A demo's own services go with it.
+        DemoSession.stop()
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {

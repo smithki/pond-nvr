@@ -28,8 +28,15 @@ public final class PathSessions: @unchecked Sendable {
         /// This side's name in the relay's usernames.
         public var name = "pond"
         public var timing = PathFinder.Timing()
+        /// Each session's link made worse on purpose (demo mode's slow second home); nil for a real one.
+        public var shape: ShapedTransport.Shape?
 
         public init() {}
+
+        /// A session's socket, shaped if asked.
+        func transport(_ socket: DatagramSocket) -> PacketTransport {
+            shape.map { ShapedTransport(socket, shape: $0) } ?? socket
+        }
     }
 
     /// How a connection went.
@@ -123,6 +130,24 @@ public final class PathSessions: @unchecked Sendable {
             set { lock.withLock { _media = newValue } }
         }
         private var _media: (@Sendable ([UInt8]) -> Void)?
+        /// Each live stream's own, when a session carries several: by the stream's SSRC (in the clear in each packet: an
+        /// RTP packet's at its 9th byte, a report about it, which its viewer sends as that SSRC, at its 5th).
+        private var routes: [UInt32: @Sendable ([UInt8]) -> Void] = [:]
+
+        /// A stream's packets (or the reports about it) to `take`, from now on; nil: no longer.
+        public func route(_ ssrc: UInt32, to take: (@Sendable ([UInt8]) -> Void)?) {
+            lock.withLock { routes[ssrc] = take }
+        }
+
+        /// Whom a media packet is for: its stream's route, else whatever takes the session's media.
+        func taker(of bytes: [UInt8]) -> (@Sendable ([UInt8]) -> Void)? {
+            lock.withLock {
+                guard !routes.isEmpty, bytes.count >= 12 else { return _media }
+                let at = (200 ... 204).contains(bytes[1]) ? 4 : 8
+                let ssrc = UInt32(bytes[at]) << 24 | UInt32(bytes[at + 1]) << 16 | UInt32(bytes[at + 2]) << 8 | UInt32(bytes[at + 3])
+                return routes[ssrc] ?? _media
+            }
+        }
 
         /// Bytes onto the session's path (video, as SRTP).
         public func send(_ bytes: [UInt8]) { finder.send(bytes) }
@@ -138,7 +163,7 @@ public final class PathSessions: @unchecked Sendable {
             case PathSessions.pong where bytes.count == 2:
                 lock.withLock { pongs[bytes[1]] = Date() }
             case 128 ... 191:
-                media?(bytes)
+                taker(of: bytes)?(bytes)
             default:
                 break
             }
@@ -307,7 +332,7 @@ public final class PathSessions: @unchecked Sendable {
     public func open(to peer: RemotePeer) async -> (Outcome, Session?) {
         let start = Date()
         guard let socket = try? DatagramSocket() else { return (Outcome(took: 0, problem: "no UDP socket could be opened"), nil) }
-        let finder = PathFinder(role: .controlled, transport: socket, timing: settings.timing)
+        let finder = PathFinder(role: .controlled, transport: settings.transport(socket), timing: settings.timing)
         let session = Session(id: UUID(), peer: peer, finder: finder, port: socket.port)
         session.owner = self
         finder.received = { [weak session] in session?.deliver($0) }
@@ -363,6 +388,9 @@ public final class PathSessions: @unchecked Sendable {
     }
 
     /// The sessions connected now: with whom, and how, in words ("IPv6, directly").
+    /// Whether a session's still open (not ended by either side, or its path lost).
+    public func isOpen(_ session: Session) -> Bool { lock.withLock { sessions[session.id] != nil } }
+
     public var connected: [(peer: String, how: String)] {
         lock.withLock { Array(sessions.values) }.compactMap { session in
             guard case let .connected(pair) = session.finder.state else { return nil }
@@ -540,7 +568,7 @@ public final class PathSessions: @unchecked Sendable {
         if socket == nil, let port = settings.port { log("! remote: UDP port \(port) is in use: answering from another") }
         if socket == nil { socket = try? DatagramSocket() }
         guard let socket else { return log("! remote: no UDP socket could be opened") }
-        let finder = PathFinder(role: .controlling, transport: socket, timing: settings.timing)
+        let finder = PathFinder(role: .controlling, transport: settings.transport(socket), timing: settings.timing)
         let session = Session(id: offer.session, peer: peer, finder: finder, port: socket.port)
         guard let keys = try? SessionKeys.derive(mine: session.oneTime, theirs: exchange, session: offer.session, controlling: true) else {
             finder.close()

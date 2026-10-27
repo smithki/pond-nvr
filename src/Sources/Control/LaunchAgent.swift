@@ -70,7 +70,11 @@ public enum LaunchAgent {
     public static let label = Brand.serviceLabel
 
     public static var plistPath: String { NSString(string: "~/Library/LaunchAgents/\(label).plist").expandingTildeInPath }
-    public static var logPath: String { NSString(string: Brand.logFolder + "/" + Brand.logName).expandingTildeInPath }
+    /// The service's log (a demo's own, in its folder).
+    public static var logPath: String {
+        Demo.folder.map { ($0 as NSString).appendingPathComponent(Brand.logName) }
+            ?? NSString(string: Brand.logFolder + "/" + Brand.logName).expandingTildeInPath
+    }
     /// What the process itself prints outside the log (a crash, for example).
     public static var outputPath: String { NSString(string: Brand.logFolder + "/" + Brand.outputLogName).expandingTildeInPath }
 

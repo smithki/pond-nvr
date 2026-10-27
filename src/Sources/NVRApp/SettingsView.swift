@@ -52,6 +52,12 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
+                PondNameField()
+            } footer: {
+                Text("How this Pond is shown beside others you\u{2019}ve paired with it, and the name devices pairing with it see.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(Appearance.allCases) { Text($0.title).tag($0) }
                 }
@@ -125,5 +131,26 @@ struct UnderstandingSection: View {
         case .notEligible: "Not on this Mac: it can\u{2019}t run Apple Intelligence"
         case .unavailable: "Not available now"
         }
+    }
+}
+
+/// This Pond's name, kept as it's typed (when typing stops).
+struct PondNameField: View {
+    @Environment(AppModel.self) private var model
+    @State private var text = ""
+
+    var body: some View {
+        TextField("Name", text: $text, prompt: Text(Host.current().localizedName ?? "This Mac"))
+            .onAppear { text = model.config?.name ?? "" }
+            .onSubmit(save)
+            .task(id: text) {
+                try? await Task.sleep(for: .seconds(0.8))
+                if !Task.isCancelled { save() }
+            }
+    }
+
+    func save() {
+        let name = text.trimmingCharacters(in: .whitespaces)
+        if (model.config?.name ?? "") != name { model.update(affectsRecorder: false) { $0.name = name.isEmpty ? nil : name } }
     }
 }

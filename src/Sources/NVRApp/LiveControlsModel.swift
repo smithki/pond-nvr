@@ -144,7 +144,9 @@ extension AppModel {
     func refreshPrivacy() {
         guard Date().timeIntervalSince(privacyChanged) > 1.5 else { return }
         let state = PrivacyState(path: privacyPath)
-        let now = state.privateCameras, onCamera = state.privateOnCamera
+        // (Other Ponds' cameras' as they last said.)
+        let others = remotePonds.flatMap { $0.cameras ?? [] }.filter(\.isPrivate).map(\.id)
+        let now = state.privateCameras.union(others), onCamera = state.privateOnCamera
         if now != privateCameras || onCamera != privateOnCamera {
             withAnimation(.snappy(duration: 0.3)) {
                 privateCameras = now
@@ -177,8 +179,11 @@ extension AppModel {
         }
         if controlClient.isAvailable {
             if let reply = await control(camera, .init(camera: camera, action: "privacy.set", value: .on(on))) {
-                // Waking at once (not when the file's next read): its first failures to connect aren't shown.
-                withAnimation(.snappy(duration: 0.3)) { wakingCameras = Set(reply.wakingCameras ?? []) }
+                // Waking at once (not when the file's next read): its first failures to connect aren't shown. (Another
+                // Pond's camera's answer is about that Pond's.)
+                if ControlSocket.RemotePond.split(camera) == nil {
+                    withAnimation(.snappy(duration: 0.3)) { wakingCameras = Set(reply.wakingCameras ?? []) }
+                }
             } else {
                 refreshPrivacy()
             }

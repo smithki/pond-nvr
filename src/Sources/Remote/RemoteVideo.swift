@@ -53,9 +53,10 @@ final class SessionTransport: MediaTransport, @unchecked Sendable {
     private var incoming: [[UInt8]] = []
     private let arrived = DispatchSemaphore(value: 0)
 
-    init(session: PathSessions.Session) {
+    /// The stream's reports (its viewer sends them as the stream's SSRC).
+    init(session: PathSessions.Session, ssrc: UInt32) {
         self.session = session
-        session.media = { [weak self] bytes in self?.push(bytes) }
+        session.route(ssrc) { [weak self] bytes in self?.push(bytes) }
     }
 
     func send(_ bytes: [UInt8]) { session?.send(bytes) }
@@ -79,7 +80,8 @@ final class SessionTransport: MediaTransport, @unchecked Sendable {
 public final class LiveSender: @unchecked Sendable {
     let hub: StreamHub
     let log: @Sendable (String) -> Void
-    private var streams: [UUID: LiveSession] = [:]
+    /// Each session's streams, by their SSRC.
+    private var streams: [UUID: [UInt32: LiveSession]] = [:]
     private let lock = NSLock()
 
     public init(hub: StreamHub = .shared, log: @escaping @Sendable (String) -> Void) {
@@ -87,33 +89,41 @@ public final class LiveSender: @unchecked Sendable {
         self.log = log
     }
 
-    /// The camera's stream (`source`: its address and login) to the session's viewer, from now on; any it had stops.
+    /// The camera's stream (`source`: its address and login) to the session's viewer, from now on, beside any others
+    /// it's sent (a viewer showing several cameras).
     public func start(_ session: PathSessions.Session, source: (url: String, username: String, password: String),
                       reencode: LiveRequest.Reencode? = nil) -> LiveAnswer? {
         guard let keys = session.keys else { return nil }
-        stop(session)
         let answer = LiveAnswer(ssrc: UInt32.random(in: 1 ... .max), payloadType: 99)
         // Packets small enough for any path (and a relay's wrapping): RTP and SRTP's tag inside 1,200 bytes.
         let video = LiveSession.Video(payloadType: answer.payloadType, ssrc: answer.ssrc, mtu: 1200, rtcpInterval: 0.5,
                                       width: 0, height: 0, maxBitrate: 0)
-        let live = LiveSession(source: source, socket: SessionTransport(session: session), video: video,
+        let live = LiveSession(source: source, socket: SessionTransport(session: session, ssrc: answer.ssrc), video: video,
                                masterKey: keys.videoSend.key, masterSalt: keys.videoSend.salt, hub: hub, log: log)
         if let reencode {
             live.reencode(to: .init(width: reencode.width, height: reencode.height, bitrate: reencode.kbps, fps: reencode.fps, profile: 1))
         }
-        let id = session.id
-        live.onEnd = { [weak self] in _ = self?.lock.withLock { self?.streams.removeValue(forKey: id) } }
-        lock.withLock { streams[id] = live }
+        let id = session.id, ssrc = answer.ssrc
+        live.onEnd = { [weak self, weak session] in
+            session?.route(ssrc, to: nil)
+            _ = self?.lock.withLock { self?.streams[id]?.removeValue(forKey: ssrc) }
+        }
+        lock.withLock { streams[id, default: [:]][ssrc] = live }
         live.start()
         return answer
     }
 
-    public func stop(_ session: PathSessions.Session) {
-        lock.withLock { streams.removeValue(forKey: session.id) }?.stop()
+    /// One of the session's streams stopped (by its SSRC), or all of them.
+    public func stop(_ session: PathSessions.Session, ssrc: UInt32? = nil) {
+        let stopping = lock.withLock { () -> [LiveSession] in
+            if let ssrc { return [streams[session.id]?.removeValue(forKey: ssrc)].compactMap { $0 } }
+            return Array((streams.removeValue(forKey: session.id) ?? [:]).values)
+        }
+        for live in stopping { live.stop() }
     }
 
-    /// How many sessions are being sent a stream.
-    public var sending: Int { lock.withLock { streams.count } }
+    /// How many streams are being sent, to every session.
+    public var sending: Int { lock.withLock { streams.values.reduce(0) { $0 + $1.count } } }
 }
 
 /// The viewer: a session's live stream, decrypted and put back together into pictures, with reports sent back.
@@ -127,7 +137,8 @@ public final class LiveViewer: @unchecked Sendable {
 
     let session: PathSessions.Session
     let answer: LiveAnswer
-    let ssrc = UInt32.random(in: 1 ... .max)
+    /// Its reports are sent as the stream's own SSRC, so the sender can tell which of its streams they're about.
+    var ssrc: UInt32 { answer.ssrc }
     private var srtp: SRTPReceiver
     private var reports: SRTPSender
     private var depacketizer = H264Depacketizer()
@@ -140,6 +151,8 @@ public final class LiveViewer: @unchecked Sendable {
     /// Each picture as it's put back together: its NAL units (the SPS and PPS ahead of a keyframe's), whether it's a
     /// keyframe, its RTP time.
     public var picture: (@Sendable (_ nalus: [[UInt8]], _ keyframe: Bool, _ timestamp: UInt32) -> Void)?
+    /// Each RTP packet as it arrives, decrypted (for passing on as a camera's stream is: the app's live view).
+    public var packet: (@Sendable (_ rtp: [UInt8]) -> Void)?
 
     /// For a stream the other side's answered `live.start` with.
     public init?(session: PathSessions.Session, answer: LiveAnswer) {
@@ -149,7 +162,7 @@ public final class LiveViewer: @unchecked Sendable {
         // The side being reached's video key, both ways (its stream, and these reports about it).
         srtp = SRTPReceiver(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
         reports = SRTPSender(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
-        session.media = { [weak self] bytes in self?.arrived(bytes) }
+        session.route(answer.ssrc) { [weak self] bytes in self?.arrived(bytes) }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.viewer"))
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in self?.report() }
@@ -162,7 +175,7 @@ public final class LiveViewer: @unchecked Sendable {
     public func stop() {
         timer?.cancel()
         timer = nil
-        session.media = nil
+        session.route(answer.ssrc, to: nil)
     }
 
     public var received: Counts { lock.withLock { counts } }
@@ -170,8 +183,10 @@ public final class LiveViewer: @unchecked Sendable {
     private func arrived(_ bytes: [UInt8]) {
         // RTP (its payload type in the second byte's low bits); RTCP's types (200–204) are the sender's reports.
         guard bytes.count > 12, !(200 ... 204).contains(bytes[1]) else { return }
+        var decrypted: [UInt8]?
         let done = lock.withLock { () -> [(nalus: [[UInt8]], keyframe: Bool, timestamp: UInt32)] in
             guard let packet = srtp.unprotect(bytes), let rtp = RTPPacket(packet), rtp.ssrc == answer.ssrc else { return [] }
+            decrypted = packet
             counts.packets += 1
             counts.bytes += bytes.count
             receivedSinceReport += 1
@@ -197,6 +212,7 @@ public final class LiveViewer: @unchecked Sendable {
             let sets = [depacketizer.sps, depacketizer.pps].compactMap { $0 }
             return units.map { ($0.isKeyframe && sets.count == 2 ? sets + $0.nalus : $0.nalus, $0.isKeyframe, $0.timestamp) }
         }
+        if let decrypted { packet?(decrypted) }
         for unit in done { picture?(unit.nalus, unit.keyframe, unit.timestamp) }
     }
 

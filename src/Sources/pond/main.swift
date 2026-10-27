@@ -6,6 +6,7 @@ import NVRCLI
 import NVRCore
 import Recorder
 #if canImport(NVRMac)
+import Demo
 import Devices
 import HAP
 import Detection
@@ -66,6 +67,14 @@ if let i = args.firstIndex(of: "--config") {
 }
 
 #if canImport(NVRMac)
+// A demo's settings: its world (made-up cameras drawn and encoded here, their controls, what's found in them), and
+// its secrets and log in its own folder.
+let demoWorld = Demo.adopt(configPath: configPath).map { scenario in
+    let world = DemoWorld.start(scenario, folder: Demo.folder)
+    DemoStream.register()
+    DemoProvider.register()
+    return world
+}
 let credentials: CredentialStore? = KeychainCredentialStore()
 let launchd: Launchd? = RealLaunchd()
 #else
@@ -126,7 +135,13 @@ struct RecordingAndHomeKit: ServiceRunning {
         events?.prune(days: config.retention.events.days)
         // (Doorbell presses are kept whether or not there's a model.)
         cameras.events = events
-        if let model = ModelStore.choose(nil) {
+        if let demoWorld {
+            // A demo's pictures are drawn: what's in them is known, not looked for.
+            let detector = SharedDetector { line in log.log("pond", line) }
+            detector.standIn = { camera, time in demoWorld.detections(camera, at: time) }
+            cameras.detector = detector
+            log.log("pond", "detection: the demo's own (what each scene draws)")
+        } else if let model = ModelStore.choose(nil) {
             let detector = SharedDetector { line in log.log("pond", line) }
             do {
                 try detector.detector.use(model)
@@ -166,6 +181,8 @@ struct RecordingAndHomeKit: ServiceRunning {
             log.log(camera?.id ?? "pond", "· the stream lost its framing: \(bytes) bytes skipped to its next packet, without reconnecting")
         }
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
+            // Another Pond's camera, shown beside this Mac's (no login: the session's its own).
+            if RemoteAccess.running?.isKnownStream(url) == true { return ("", "") }
             guard let camera = cameras.cameras.first(where: { $0.main == url || $0.sub == url }),
                   !PrivacyState.shared.isPrivate(camera.id), let password = cameras.password(camera.id) else { return nil }
             return (camera.username, password)
@@ -194,14 +211,15 @@ struct RecordingAndHomeKit: ServiceRunning {
         let remote = RemoteAccess(api: RemoteAPI.Server(cameras: { cameras.cameras }, password: { cameras.password($0) }, events: events,
                                                         eventsFolder: { config.storage.eventsPath }, control: { await controls.answer($0) },
                                                         live: LiveSender { line in log.log("pond", line) })) { line in log.log("pond", line) }
-        remote.apply(config.remote)
+        remote.apply(config.remote, name: config.name)
         controls.remote = { await remote.handle($0) }
+        controls.otherPond = { await remote.forward($0) }
         defer { remote.stop() }
         // A reload (the app's, `pond service reload`): the cameras that changed started again, and remote access if
         // its settings did.
         let configPath = self.configPath
         controls.reload = {
-            let remoteChange = (try? ConfigStore(path: configPath).load()).flatMap { remote.apply($0.remote) }
+            let remoteChange = (try? ConfigStore(path: configPath).load()).flatMap { remote.apply($0.remote, name: $0.name) }
             func with(_ summary: String) -> String { remoteChange.map { summary == "nothing changed" ? $0 : "\(summary); \($0)" } ?? summary }
             return switch cameras.reload() {
             case let .applied(summary): (with(summary), false, false)
@@ -412,6 +430,71 @@ if args.first == "describe" { exit(DescribeCommand.run(Array(args.dropFirst()), 
 if args.first == "search" { exit(SearchCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 /// `pond remote pair|devices|unpair ID|join CODE|connect DEVICE`: pairing for remote access, and trying a connection.
 if args.first == "remote" { exit(RemoteCommand.run(Array(args.dropFirst()), configPath: configPath)) }
+
+/// `pond demo [list]`, `pond demo prepare NAME [--fresh]`: demo mode's scenarios, and one's world made (its
+/// settings path printed, for `pond run --config`; the app runs them itself with `--demo NAME`).
+if args.first == "demo" {
+    let rest = Array(args.dropFirst())
+    switch rest.first {
+    case nil, "list":
+        for scenario in Demo.scenarios { print("\(scenario.name.padding(toLength: 20, withPad: " ", startingAt: 0)) \(scenario.about)") }
+        exit(0)
+    case "prepare":
+        guard rest.count >= 2, let scenario = Demo.scenario(named: rest[1]) else {
+            FileHandle.standardError.write(Data("✗ Which scenario? See: pond demo list\n".utf8))
+            exit(2)
+        }
+        do {
+            try Demo.prepare(scenario, fresh: rest.contains("--fresh"))
+            // Its Ponds paired with each other already (their identities made now, in their own secrets files).
+            func keys(_ pond: String?) -> RemoteKeys {
+                RemoteKeys(store: FileCredentialStore(path: (Demo.folder(scenario.name, pond: pond) as NSString).appendingPathComponent("secrets.json"),
+                                                      service: Brand.remoteKeychainService))
+            }
+            // Each Pond's cameras' controls found (through the demo's make, as a real camera's are when it's added).
+            for (world, pond) in [(scenario, nil as String?)] + scenario.ponds.map({ ($0, $0.name as String?) }) {
+                let store = ConfigStore(path: Demo.configPath(scenario.name, pond: pond))
+                var config = try store.load()
+                guard config.cameras.contains(where: { $0.device?.controls == nil }) else { continue }
+                DemoWorld.start(world, folder: nil)
+                DemoProvider.register()
+                let semaphore = DispatchSemaphore(value: 0)
+                nonisolated(unsafe) var found: [String: Config.Controls] = [:]
+                let cameras = config.cameras
+                Task.detached {
+                    for camera in cameras {
+                        let access = CameraAccess(host: camera.host, username: camera.username, password: "demo", mainStream: camera.main)
+                        found[camera.id] = await CameraControls(access: access, device: camera.device).controls()
+                    }
+                    semaphore.signal()
+                }
+                semaphore.wait()
+                for i in config.cameras.indices {
+                    let id = config.cameras[i].id
+                    config.cameras[i].device?.controls = found[id]
+                }
+                try store.save(config)
+            }
+            let home = keys(nil)
+            let me = try home.identity(name: scenario.pondName)
+            for pond in scenario.ponds {
+                let other = keys(pond.name)
+                let them = try other.identity(name: pond.pondName)
+                if home.peer(signingKey: them.peer.signingKey) == nil { try home.add(them.peer) }
+                if other.peer(signingKey: me.peer.signingKey) == nil { try other.add(me.peer) }
+            }
+        } catch {
+            FileHandle.standardError.write(Data("✗ The demo couldn\u{2019}t be made: \(error)\n".utf8))
+            exit(1)
+        }
+        print(Demo.configPath(scenario.name))
+        for pond in scenario.ponds { print(Demo.configPath(scenario.name, pond: pond.name)) }
+        exit(0)
+    default:
+        FileHandle.standardError.write(Data("✗ pond demo [list] | prepare NAME [--fresh]\n".utf8))
+        exit(2)
+    }
+}
 
 /// `pond events [CAMERA] [--hours N]`: the events the service made from what it saw (the last 24 hours), oldest
 /// first: when, how long, what, and its picture.

@@ -87,7 +87,10 @@ public enum DoorbellButtonState: Equatable, Sendable {
 
 public enum CameraProviders {
     /// In the order they are tried: the brand-specific first, ONVIF last as the general case.
-    public static let all: [CameraProvider] = [ReolinkProvider(), ONVIFProvider()]
+    public static var all: [CameraProvider] { extra + builtIn }
+    static let builtIn: [CameraProvider] = [ReolinkProvider(), ONVIFProvider()]
+    /// Others, first: demo mode's made-up make, in a demo's service.
+    nonisolated(unsafe) public static var extra: [CameraProvider] = []
 
     public static func provider(_ id: String?) -> CameraProvider? { all.first { $0.id == id } }
 

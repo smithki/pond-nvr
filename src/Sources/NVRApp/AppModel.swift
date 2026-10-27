@@ -102,6 +102,19 @@ final class AppModel {
     /// A camera check is waiting for permission to reach the local network (macOS is asking).
     private(set) var waitingForLocalNetwork = false
     private(set) var serviceState: ServiceControl.State = .notInstalled
+    /// Remote access as the service has it (the Ponds paired, those connected), for the Pond switcher.
+    var remoteStatus: ControlSocket.RemoteStatus?
+    /// The other Ponds paired with this one, and their cameras (`remote.ponds`), shown beside this Mac's.
+    var remotePonds: [ControlSocket.RemotePond] = []
+    /// Which Ponds the window shows: all of them together, or one.
+    var shownPonds = ShownPonds.all
+    /// Other Ponds' cameras in the order chosen here (this Mac's own order is its settings'; another's is its own
+    /// business), kept in the app's preferences.
+    var remoteOrder: [String: [String]] = (UserDefaults.standard.dictionary(forKey: "remoteCameraOrder") as? [String: [String]]) ?? [:] {
+        didSet { UserDefaults.standard.set(remoteOrder, forKey: "remoteCameraOrder") }
+    }
+    /// The stage has cameras of more than one Pond on it now (their tiles then say which).
+    var stageMixesPonds = false
     /// Settings were saved while the service ran with the old ones.
     /// The settings the running recorder started with, as far as the app knows (at launch: what was saved),
     /// and whether a password changed since.
@@ -180,15 +193,16 @@ final class AppModel {
     var findCamerasButtonFromTrailing: CGFloat = 64
     /// Cameras on the network (found at launch, at most daily, and when Add Camera opens), whether a look is
     /// under way, the ones not to mention again, and the one Add Camera starts from. See DiscoveryModel.
-    var foundCameras: [FoundCamera] = AppModel.keptFoundCameras()
+    var foundCameras: [FoundCamera] = DemoSession.scenario == nil ? AppModel.keptFoundCameras() : []
     var findingCameras = false
     var ignoredCameras: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AppModel.ignoredCamerasKey) ?? [])
     var addingFrom: FoundCamera?
 
-    init(store: ConfigStore = ConfigStore(path: ProcessInfo.processInfo.environment[Brand.configVariable] ?? ConfigStore.defaultPath),
+    init(store: ConfigStore = ConfigStore(path: DemoSession.configPath ?? ProcessInfo.processInfo.environment[Brand.configVariable]
+             ?? ConfigStore.defaultPath),
          passwords: PasswordKeeper? = nil,
          prober: CameraProber = RTSPProber(),
-         service: ServiceControl = ServiceControl(launchd: RealLaunchd()),
+         service: ServiceControl = DemoSession.serviceControl ?? ServiceControl(launchd: RealLaunchd()),
          helperPath: String? = Bundle.main.path(forAuxiliaryExecutable: Brand.command)) {
         self.store = store
         self.passwords = passwords ?? HelperPasswordKeeper(helper: helperPath, configPath: store.path)
@@ -249,7 +263,8 @@ final class AppModel {
         config = next
         // The running service takes up changes to the cameras, retention or remote access at once, only what changed
         // starting again (a reload); a change of storage still waits for Restart Recorder.
-        if let previous, previous.cameras != next.cameras || previous.retention != next.retention || previous.remote != next.remote {
+        if let previous, previous.cameras != next.cameras || previous.retention != next.retention || previous.remote != next.remote
+            || previous.name != next.name {
             reloadService()
         }
         return true
@@ -297,7 +312,8 @@ final class AppModel {
     // MARK: - Cameras
 
     func hasPassword(_ id: String) -> Bool {
-        passwords.has(id)
+        // (Another Pond's camera needs none here: its own Pond logs in to it.)
+        AppModel.pond(of: id) != nil || passwords.has(id)
     }
 
     var isRecording: Bool {

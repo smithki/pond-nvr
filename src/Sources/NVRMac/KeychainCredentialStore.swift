@@ -1,5 +1,6 @@
 // Camera passwords in the login Keychain: generic passwords with service "pond" (`Brand.keychainService`)
-// and the camera id as the account. Visible in Keychain Access under "pond".
+// and the camera id as the account. Visible in Keychain Access under "pond". In a demo (Demo.folder set), a file in
+// the demo's folder instead: a demo never reads or writes the Keychain.
 import Foundation
 import NVRCore
 import Security
@@ -27,7 +28,13 @@ public struct KeychainCredentialStore: CredentialStore {
          kSecAttrAccount as String: cameraID]
     }
 
+    /// The demo's file, when this process runs a demo.
+    private var demo: FileCredentialStore? {
+        Demo.folder.map { FileCredentialStore(path: ($0 as NSString).appendingPathComponent("secrets.json"), service: service) }
+    }
+
     public func password(for cameraID: String) throws -> String? {
+        if let demo { return demo.password(for: cameraID) }
         var q = query(cameraID)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -43,6 +50,7 @@ public struct KeychainCredentialStore: CredentialStore {
     /// Whether there is a password for the camera, without reading it: macOS asks for access only to read
     /// the secret, so this never prompts (the app checks this way; only pond reads passwords).
     public func hasPassword(for cameraID: String) -> Bool {
+        if let demo { return demo.password(for: cameraID) != nil }
         var q = query(cameraID)
         q[kSecReturnAttributes as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -51,6 +59,7 @@ public struct KeychainCredentialStore: CredentialStore {
     }
 
     public func setPassword(_ password: String, for cameraID: String) throws {
+        if let demo { return try demo.setPassword(password, for: cameraID) }
         let data = Data(password.utf8)
         let status = SecItemUpdate(query(cameraID) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecSuccess { return }
@@ -65,6 +74,7 @@ public struct KeychainCredentialStore: CredentialStore {
     }
 
     public func removePassword(for cameraID: String) throws {
+        if let demo { return try demo.removePassword(for: cameraID) }
         let status = SecItemDelete(query(cameraID) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError(status: status, action: "remove the password for \(cameraID)")
