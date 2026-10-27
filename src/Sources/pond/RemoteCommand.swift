@@ -206,7 +206,7 @@ enum RemoteCommand {
         let reply = SearchCommand.blocking { await client.ask(asked, timeout: asked.action == "remote.watch" ? 45 + (asked.seconds ?? 0) : 120) }
         if let error = reply.error {
             return SearchCommand.fail(error == .unreachable
-                ? "Remote access is kept by Pond's service, which isn't running (pond service start)."
+                ? "Remote access is kept by Pond's service, which isn't running (pond service install)."
                 : "\(error.description).")
         }
         switch request.action {

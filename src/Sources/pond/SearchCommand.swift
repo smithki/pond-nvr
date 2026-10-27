@@ -34,7 +34,7 @@ enum SearchCommand {
         let reply = blocking { await client.ask(asked, timeout: 60) }
         guard let result = reply.search else {
             return fail(reply.error == .unreachable || reply.error == nil
-                ? "Search is done by Pond's service, which isn't running (pond service start)."
+                ? "Search is done by Pond's service, which isn't running (pond service install)."
                 : "The search didn't go through: \(reply.error!.description)")
         }
         let query = result.query, byModel = result.byModel
