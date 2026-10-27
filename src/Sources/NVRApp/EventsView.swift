@@ -54,7 +54,8 @@ struct EventsView: View {
     @State private var slow = false
     @Environment(\.openSettings) private var openSettingsWindow
 
-    var cameras: [Config.Camera] { model.config?.cameras ?? [] }
+    /// The cameras whose events are shown: this Mac's, and other Ponds' as chosen (as Live's).
+    var cameras: [Config.Camera] { model.liveCameras }
     /// How far back events are kept.
     var keptDays: Int { model.config?.retention.events.days ?? 30 }
 
@@ -158,6 +159,11 @@ struct EventsView: View {
         }
 
         .onChange(of: selected?.id) { _, id in model.eventsState.selected = id }
+        // Other Ponds shown or not: their events read again; a camera filtered by that's no longer shown let go.
+        .onChange(of: model.shownPonds) { _, shown in
+            if let camera = model.eventsState.camera, !shown.includes(AppModel.pond(of: camera)) { model.eventsState.camera = nil }
+            Task { await load() }
+        }
         .onKeyPress(keys: [.delete, .deleteForward]) { _ in
             guard let selected else { return .ignored }
             deleting = selected
@@ -211,7 +217,8 @@ struct EventsView: View {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if shown.isEmpty {
             ContentUnavailableView {
-                Label(events.isEmpty ? "No events yet" : search != nil ? "Nothing found" : "No events here",
+                Label(events.isEmpty ? (model.shownPonds == .all || model.remotePonds.isEmpty ? "No events yet" : "No events from \(model.shownName) yet")
+                      : search != nil ? "Nothing found" : "No events here",
                       systemImage: search != nil ? "magnifyingglass" : "figure.walk.motion")
             } description: {
                 if let search {
@@ -222,6 +229,11 @@ struct EventsView: View {
                     Text(events.isEmpty
                          ? "People, vehicles, bikes and animals your cameras see appear here, each with its picture. Detection is on for each camera in its settings."
                          : "Nothing matches these filters.")
+                }
+            } actions: {
+                // Only some Ponds shown: the others a click away.
+                if model.shownPonds != .all, !model.remotePonds.isEmpty {
+                    Button("Show All Ponds") { withAnimation(.snappy(duration: 0.3)) { model.shownPonds = .all } }
                 }
             }
             .padding(.top, barHeight)
@@ -285,7 +297,13 @@ struct EventsView: View {
         ask(reading: (query, byModel))
     }
 
-    func name(_ camera: String) -> String { cameras.first { $0.id == camera }?.name ?? "Removed camera" }
+    /// A camera's name; with several Ponds' events together, and its Pond's (this Mac's too).
+    func name(_ camera: String) -> String {
+        let name = cameras.first { $0.id == camera }?.name ?? "Removed camera"
+        guard model.shownPonds == .all, !model.remotePonds.isEmpty else { return name }
+        let pond = AppModel.pond(of: camera).flatMap { id in model.remotePonds.first { $0.id == id }?.name } ?? model.thisPondName
+        return "\(name) \u{00B7} \(pond)"
+    }
 
     /// Opens the panel on an event, or closes it (nil): the panel slides, the cards reshape and the chosen card's
     /// row glides to the middle of the grid, one animation (the grid scrolls in it).
@@ -325,6 +343,8 @@ struct EventsView: View {
     }
 
     func watch(_ event: TimelineEvent) {
+        // (Another Pond's: not on this Mac's timeline.)
+        guard event.pond == nil else { return }
         model.timelineJump = TimelineJump(camera: event.camera, time: event.start)
         model.mode = .timeline
     }
@@ -333,7 +353,10 @@ struct EventsView: View {
         guard let source = EventSource(config: model.config) else { return }
         let from = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-Double(keptDays - 1) * 86400)
         let to = Date().addingTimeInterval(60)
-        let found = await Task.detached { source.events(from: from, to: to) }.value
+        // This Mac's (unless another Pond alone is shown), and other Ponds' as chosen.
+        let own = model.shownPonds.includes(nil) ? await Task.detached { source.events(from: from, to: to) }.value : []
+        let others = await model.remoteEvents(since: from)
+        let found = (own + others)
             .filter { $0.kind != .privacy && !deleted.contains($0.id) }
             .sorted { $0.start > $1.start }
         if found != events {
@@ -417,6 +440,14 @@ struct EdgeGlass: View {
 
 /// The filters, a bar over the top of the grid: the camera, and a chip a kind (how many there are of it), on or off.
 struct EventsFilterBar: View {
+    /// A camera to filter by (nil: all of them): one of a Pond not shown shows all Ponds, so its events are there.
+    func choose(camera: String?) {
+        if let camera, !model.shownPonds.includes(AppModel.pond(of: camera)) {
+            withAnimation(.snappy(duration: 0.3)) { model.shownPonds = .all }
+        }
+        model.eventsState.camera = camera
+    }
+
     let model: AppModel
     let cameras: [Config.Camera]
     let kinds: [TimelineEvent.Kind]
@@ -457,10 +488,22 @@ struct EventsFilterBar: View {
 
     var filters: some View {
         HStack(spacing: 10) {
-            Picker("Camera", selection: Binding(get: { model.eventsState.camera }, set: { model.eventsState.camera = $0 })) {
+            Picker("Camera", selection: Binding(get: { model.eventsState.camera }, set: { choose(camera: $0) })) {
                 Text("All Cameras").tag(String?.none)
-                Divider()
-                ForEach(cameras) { Text($0.name).tag(Optional($0.id)) }
+                // Several Ponds: a section each, those not shown too (said so, last), so a camera is never missing
+                // from here; choosing one of theirs shows its Pond as well.
+                let groups = model.allCameraGroups
+                if groups.count > 1 {
+                    let shown = groups.filter { model.shownPonds.includes($0.pond) }, hidden = groups.filter { !model.shownPonds.includes($0.pond) }
+                    ForEach(shown + hidden, id: \.name) { group in
+                        Section(model.shownPonds.includes(group.pond) ? group.name : "\(group.name) \u{2014} not shown") {
+                            ForEach(group.cameras) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                    }
+                } else {
+                    Divider()
+                    ForEach(cameras) { Text($0.name).tag(Optional($0.id)) }
+                }
             }
             .labelsHidden()
             .fixedSize()

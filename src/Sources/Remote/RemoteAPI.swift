@@ -81,6 +81,9 @@ public enum RemoteAPI {
         /// Its clip's size, once there's one, and the moment it begins.
         public var clipBytes: Int?
         public var clipStart: Date?
+        /// Where its subject was in its picture (fractions), and how sure the model was of it, at best.
+        public var box: Detection.Box?
+        public var confidence: Double?
     }
 
     /// A piece of an event's picture or clip.
@@ -221,7 +224,8 @@ public enum RemoteAPI {
                 let clipBytes = k.clip.flatMap(file).flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int }
                 return Event(id: e.id, camera: e.camera, start: e.start, end: e.end, ongoing: k.ongoing, category: e.category.rawValue,
                              labels: e.labels, seen: CameraEvent.words(e.labels), sentence: sentence, zones: e.zones,
-                             picture: e.snapshot != nil, clipBytes: clipBytes, clipStart: clipBytes == nil ? nil : k.clipStart)
+                             picture: e.snapshot != nil, clipBytes: clipBytes, clipStart: clipBytes == nil ? nil : k.clipStart,
+                             box: e.box, confidence: e.category == .ring ? nil : e.confidence)
             }
         }
 
@@ -358,14 +362,18 @@ public struct RemoteClient: Sendable {
     }
 
     /// An event's picture kept at `file`.
-    public func picture(_ event: String, to file: URL) async throws(Failure) -> Download {
-        try await download("picture", event, to: file)
+    public func picture(_ event: String, to file: URL, progress: Progress? = nil) async throws(Failure) -> Download {
+        try await download("picture", event, to: file, progress: progress)
     }
 
     /// An event's clip (an MP4) kept at `file`.
-    public func clip(_ event: String, to file: URL) async throws(Failure) -> Download {
-        try await download("clip", event, to: file)
+    public func clip(_ event: String, to file: URL, progress: Progress? = nil) async throws(Failure) -> Download {
+        try await download("clip", event, to: file, progress: progress)
     }
+
+    /// Told as a download goes: the file it's kept in until it's whole (in order from the start, so what's there can be
+    /// read as it grows), its size, and how much of it is there.
+    public typealias Progress = @Sendable (_ partial: URL, _ bytes: Int, _ kept: Int) -> Void
 
     /// How a download went: its size, how long it took, and how much of it had come before (resumed).
     public struct Download: Sendable, Equatable {
@@ -377,7 +385,7 @@ public struct RemoteClient: Sendable {
     /// An event's picture or clip (`kind`) kept at `file`: a few pieces at a time, kept in order beside it as they
     /// come (so a download that's cut off carries on where it got to, when asked again), checked against the
     /// file's SHA-256, then moved into place.
-    func download(_ kind: String, _ event: String, to file: URL) async throws(Failure) -> Download {
+    func download(_ kind: String, _ event: String, to file: URL, progress: Progress? = nil) async throws(Failure) -> Download {
         let started = Date()
         let info: RemoteAPI.FileInfo = try decoded(await call("\(kind).info", encoded(RemoteAPI.Piece(event: event, offset: 0, length: 0)),
                                                               timeout: 60))
@@ -394,6 +402,7 @@ public struct RemoteClient: Sendable {
             guard FileManager.default.createFile(atPath: partial.path, contents: nil) else { throw .refused("\(folder.path) can't be written to") }
         }
         let resumed = kept
+        progress?(partial, info.bytes, kept)
         guard let handle = try? FileHandle(forWritingTo: partial) else { throw .refused("\(folder.path) can't be written to") }
         _ = try? handle.seekToEnd()
         let failure: Failure? = await withTaskGroup(of: (Int, Result<Data, Failure>).self) { group in
@@ -419,6 +428,7 @@ public struct RemoteClient: Sendable {
                         }
                         hash.update(data: piece)
                         kept += piece.count
+                        progress?(partial, info.bytes, kept)
                     }
                     if next < info.bytes {
                         let at = next
@@ -434,7 +444,7 @@ public struct RemoteClient: Sendable {
         guard kept == info.bytes, hash.finalize().map({ String(format: "%02x", $0) }).joined() == info.sha256 else {
             try? FileManager.default.removeItem(at: partial)
             // (What was there before wasn't good: from the start again, once.)
-            if resumed > 0 { return try await download(kind, event, to: file) }
+            if resumed > 0 { return try await download(kind, event, to: file, progress: progress) }
             throw .damaged
         }
         try? FileManager.default.removeItem(at: file)

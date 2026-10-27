@@ -92,13 +92,11 @@ struct ContentView: View {
             if model.config == nil {
                 SetupView()
             } else {
-                // Live shows every Pond shown; Timeline and Events only this Mac's for now.
+                // Live and Events show every Pond shown; the Timeline only this Mac's for now.
                 switch model.mode {
                 case .live: LiveView()
                 case .timeline where model.shownPonds != .all && model.shownPonds != .this:
                     OtherPondView(name: model.shownName, what: "Timelines")
-                case .events where model.shownPonds != .all && model.shownPonds != .this:
-                    OtherPondView(name: model.shownName, what: "Events")
                 case .timeline: TimelineView()
                 case .events: EventsView()
                 }

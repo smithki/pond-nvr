@@ -102,6 +102,10 @@ public enum ControlSocket {
         public var body: Data?
         /// "remote.status": remote access as it is now.
         public var remote: RemoteStatus?
+        /// "remote.all-events": other Ponds' events (begun in the last `seconds` of the request).
+        public var remoteEvents: [RemoteEvent]?
+        /// "remote.event-file": an event's picture or clip, fetched (or on its way).
+        public var remoteFile: RemoteFile?
         /// "remote.still": when the picture in `body` (a JPEG) was recorded.
         public var taken: Date?
         /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.
@@ -170,6 +174,72 @@ public enum ControlSocket {
         public static func split(_ id: String) -> (camera: String, pond: String)? {
             guard let at = id.lastIndex(of: "@") else { return nil }
             return (String(id[..<at]), String(id[id.index(after: at)...]))
+        }
+    }
+
+    /// Another Pond's event, for the app's Events view: its id and camera's here (`…@pond`).
+    public struct RemoteEvent: Codable, Equatable, Sendable {
+        public var id: String
+        public var pond: String
+        public var camera: String
+        public var start: Date
+        public var end: Date
+        public var ongoing: Bool
+        public var category: String
+        public var labels: [String: Int]
+        /// Its sentence, or what was seen.
+        public var summary: String
+        public var zones: [String]
+        public var picture: Bool
+        public var clipBytes: Int?
+        public var clipStart: Date?
+        /// Where its subject was (x, y, width, height: fractions of the picture), and how sure the model was.
+        public var box: [Double]?
+        public var confidence: Double?
+
+        public init(id: String, pond: String, camera: String, start: Date, end: Date, ongoing: Bool, category: String,
+                    labels: [String: Int], summary: String, zones: [String], picture: Bool, clipBytes: Int?, clipStart: Date?,
+                    box: [Double]?, confidence: Double?) {
+            self.id = id
+            self.pond = pond
+            self.camera = camera
+            self.start = start
+            self.end = end
+            self.ongoing = ongoing
+            self.category = category
+            self.labels = labels
+            self.summary = summary
+            self.zones = zones
+            self.picture = picture
+            self.clipBytes = clipBytes
+            self.clipStart = clipStart
+            self.box = box
+            self.confidence = confidence
+        }
+
+        /// Where its picture and clip are kept once fetched.
+        public static func file(pond: String, event: String, clip: Bool) -> String {
+            (Brand.remoteCache(pond: pond) as NSString).appendingPathComponent("\(event).\(clip ? "mp4" : "jpg")")
+        }
+    }
+
+    /// An event's picture or clip from another Pond, as it's fetched: where it'll be, where it is meanwhile (its start,
+    /// growing in order), how big it is and how much has come.
+    public struct RemoteFile: Codable, Equatable, Sendable {
+        public var path: String
+        public var partial: String?
+        public var bytes: Int
+        public var received: Int
+        public var done: Bool
+        public var problem: String?
+
+        public init(path: String, partial: String?, bytes: Int, received: Int, done: Bool, problem: String? = nil) {
+            self.path = path
+            self.partial = partial
+            self.bytes = bytes
+            self.received = received
+            self.done = done
+            self.problem = problem
         }
     }
 

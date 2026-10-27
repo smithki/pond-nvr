@@ -113,6 +113,20 @@ final class RemoteAccess: @unchecked Sendable {
                                  connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
                                  relaySecret: relaySecret, problem: problem)
             return reply
+        case "remote.all-events":
+            // Every other Pond's events, begun in the last `seconds` (for the app; `remote.events` is one Pond's, for `pond`).
+            guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }
+            var reply = ControlSocket.Reply()
+            reply.remoteEvents = await viewing.allEvents(seconds: request.seconds ?? 86400)
+            return reply
+        case "remote.event-file":
+            // An event's picture or clip (`file`: "picture" or "clip"), fetched or on its way.
+            guard let viewing = lock.withLock({ viewing }), let event = request.event else {
+                return ControlSocket.Reply(error: .failed("which event?"))
+            }
+            var reply = ControlSocket.Reply()
+            reply.remoteFile = viewing.file(event, clip: request.file == "clip")
+            return reply
         case "remote.still":
             // Another Pond's camera's latest picture (its id `camera@pond`).
             return await forward(request)

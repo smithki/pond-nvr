@@ -108,6 +108,84 @@ public final class RemoteViewing: @unchecked Sendable {
         return still
     }
 
+    /// Each Pond's events as last asked (for how far back), and when: asked again at most every 10 s.
+    private var events: [String: (asked: Date, seconds: Double, events: [RemoteAPI.Event])] = [:]
+    /// Pictures and clips being fetched, or fetched (by `kind/event@pond`).
+    private var files: [String: ControlSocket.RemoteFile] = [:]
+
+    /// Every Pond's events begun in the last `seconds`, newest last, as each sends them (one that can't be reached: its
+    /// last ones, if any).
+    public func allEvents(seconds: Double) async -> [ControlSocket.RemoteEvent] {
+        await withTaskGroup(of: [ControlSocket.RemoteEvent].self) { group in
+            for peer in host.devices() {
+                group.addTask { [self] in
+                    let kept = lock.withLock { events[peer.id] }
+                    var found = kept?.events
+                    if kept == nil || Date().timeIntervalSince(kept!.asked) > 10 || kept!.seconds < seconds,
+                       let session = await session(peer.id),
+                       let fresh = try? await RemoteClient(session: session).events(.init(since: Date().addingTimeInterval(-seconds),
+                                                                                         limit: RemoteAPI.mostEvents)) {
+                        lock.withLock { events[peer.id] = (Date(), seconds, fresh) }
+                        found = fresh
+                    }
+                    return (found ?? []).map { e in
+                        let id = ControlSocket.RemotePond.cameraID(e.id, pond: peer.id)
+                        return ControlSocket.RemoteEvent(
+                            id: id, pond: peer.id, camera: ControlSocket.RemotePond.cameraID(e.camera, pond: peer.id), start: e.start,
+                            end: e.end, ongoing: e.ongoing, category: e.category, labels: e.labels,
+                            summary: e.sentence ?? e.seen, zones: e.zones, picture: e.picture, clipBytes: e.clipBytes,
+                            clipStart: e.clipStart, box: e.box.map { [$0.x, $0.y, $0.width, $0.height] }, confidence: e.confidence)
+                    }
+                }
+            }
+            var all: [ControlSocket.RemoteEvent] = []
+            for await some in group { all += some }
+            return all.sorted { $0.start < $1.start }
+        }
+    }
+
+    /// An event's picture or clip (`event@pond`): fetched into the cache if it isn't there or on its way, and how
+    /// that's going (asked again for news).
+    public func file(_ id: String, clip: Bool) -> ControlSocket.RemoteFile {
+        guard let (event, pond) = ControlSocket.RemotePond.split(id) else {
+            return .init(path: "", partial: nil, bytes: 0, received: 0, done: false, problem: "which event?")
+        }
+        let path = ControlSocket.RemoteEvent.file(pond: pond, event: event, clip: clip)
+        let key = "\(clip ? "clip" : "picture")/\(id)"
+        if FileManager.default.fileExists(atPath: path) {
+            return .init(path: path, partial: nil, bytes: 0, received: 0, done: true)
+        }
+        // (One that failed is tried again when asked again.)
+        if let going = lock.withLock({ files[key] }), going.problem == nil { return going }
+        let started = ControlSocket.RemoteFile(path: path, partial: nil, bytes: 0, received: 0, done: false)
+        lock.withLock { files[key] = started }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let session = await session(pond) else {
+                return lock.withLock { files[key]?.problem = "the other Pond can\u{2019}t be reached" }
+            }
+            let client = RemoteClient(session: session)
+            let progress: RemoteClient.Progress = { [weak self] partial, bytes, kept in
+                self?.lock.withLock {
+                    self?.files[key]?.partial = partial.path
+                    self?.files[key]?.bytes = bytes
+                    self?.files[key]?.received = kept
+                }
+            }
+            let url = URL(fileURLWithPath: path)
+            do {
+                _ = clip ? try await client.clip(event, to: url, progress: progress) : try await client.picture(event, to: url, progress: progress)
+                lock.withLock {
+                    files[key]?.done = true
+                    files[key]?.partial = nil
+                }
+            } catch {
+                lock.withLock { files[key]?.problem = "\(error)" }
+            }
+        }
+        return started
+    }
+
     /// A request about one of a Pond's cameras (its controls, privacy), asked of it.
     public func control(pond: String, _ request: ControlSocket.Request) async -> ControlSocket.Reply {
         guard let session = await session(pond) else { return ControlSocket.Reply(error: .failed("the other Pond can\u{2019}t be reached")) }

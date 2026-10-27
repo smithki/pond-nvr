@@ -100,6 +100,10 @@ final class DemoLaunchd: Launchd, @unchecked Sendable {
         guard let data = FileManager.default.contents(atPath: pidsPath(scenario)),
               let pids = try? JSONDecoder().decode([Int32].self, from: data) else { return }
         for pid in pids { kill(pid, SIGTERM) }
+        // Gone before new ones start (10 s at most): one still stopping would take its sockets with it as it went,
+        // the new one's by then.
+        let deadline = Date().addingTimeInterval(10)
+        while pids.contains(where: { kill($0, 0) == 0 }), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
         try? FileManager.default.removeItem(atPath: pidsPath(scenario))
     }
 

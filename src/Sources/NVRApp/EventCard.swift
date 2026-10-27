@@ -43,18 +43,21 @@ struct EventCard: View {
         // going to its new size on its own.
         .geometryGroup()
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture(count: 2, perform: open)
+        .onTapGesture(count: 2) { if event.pond == nil { open() } else { choose() } }
         .onTapGesture(perform: choose)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)
-        .help("Click for details, double-click to watch on the timeline")
+        .help(event.pond == nil ? "Click for details, double-click to watch on the timeline" : "Click for details and its clip")
         .contextMenu {
-            Button("Watch on the Timeline", action: open)
+            // (Another Pond's: not on this Mac's timeline, nor deleted from here.)
+            if event.pond == nil { Button("Watch on the Timeline", action: open) }
             if let snapshot = event.snapshot {
                 Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
             }
-            Divider()
-            Button("Delete Event…", role: .destructive, action: delete)
+            if event.pond == nil {
+                Divider()
+                Button("Delete Event…", role: .destructive, action: delete)
+            }
         }
     }
 }
@@ -62,6 +65,9 @@ struct EventCard: View {
 /// An event's picture, its subject boxed, its kind in a badge.
 struct EventPicture: View {
     let event: TimelineEvent
+    @Environment(AppModel.self) private var model
+    /// Another Pond's picture, fetched since it was first drawn.
+    @State private var fetched = false
     /// The picture's own shape.
     let aspect: Double
     /// The shape it's shown in (the grid's, alike for every card: a picture of another shape fills it, cropped);
@@ -69,6 +75,8 @@ struct EventPicture: View {
     var frame: Double?
 
     var body: some View {
+        // (Read again once another Pond's has been fetched.)
+        let _ = fetched
         let image = event.snapshot.flatMap(EventPictures.image)
         // The picture's own shape (from the picture, when there is one), and the frame's: the frame alone sizes the
         // card (a box of its shape), the picture filling it, cropped, so every card in the grid is alike.
@@ -101,6 +109,11 @@ struct EventPicture: View {
             }
             .overlay(alignment: .topLeading) { KindBadge(event: event).padding(8) }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            // Another Pond's, fetched as it's first shown.
+            .task(id: event.id) {
+                guard event.pond != nil, image == nil else { return }
+                if await AppModel.fetchPicture(event, client: model.controlClient) { fetched = true }
+            }
     }
 }
 

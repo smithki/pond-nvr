@@ -30,6 +30,14 @@ public enum Brand {
     /// Environment variables for development: another settings file, pictures of the app, made-up events.
     public static let configVariable = "POND_CONFIG"
 
+    /// Where another Pond's event pictures and clips are kept once fetched (the service fetches them; the app shows
+    /// them): a cache, refetched if it's cleared. A demo's in its own folder.
+    public static func remoteCache(pond: String) -> String {
+        let base = Demo.folder.map { ($0 as NSString).appendingPathComponent("Remote Cache") }
+            ?? NSString(string: "~/Library/Caches/\(identifier)/Remote").expandingTildeInPath
+        return (base as NSString).appendingPathComponent(pond)
+    }
+
     /// What the product was called before: an existing setup is moved from these by `pond migrate`.
     public enum Legacy {
         public static let keychainService = "nvr"

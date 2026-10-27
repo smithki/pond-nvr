@@ -3,6 +3,7 @@
 import AppKit
 import AVFoundation
 import Detection
+import Devices
 import Recorder
 import SwiftUI
 import Watch
@@ -32,6 +33,10 @@ struct EventDetail: View {
     /// Made once the clip's ready (not with each redraw), let go when the panel goes.
     @State private var player: AVQueuePlayer?
     @State private var looper: AVPlayerLooper?
+    /// Another Pond's clip's loader, while it's being fetched (kept for as long as its player reads through it).
+    @State private var growing: GrowingFileLoader?
+    @Environment(AppModel.self) private var model
+    var client: ControlClient { model.controlClient }
     /// The wall time of the clip's start, and what was found in it.
     @State private var origin: Date?
     @State private var sightings: [Sighting] = []
@@ -158,12 +163,17 @@ struct EventDetail: View {
 
     var actions: some View {
         HStack(spacing: 8) {
-            Button(action: watch) {
-                Label("Watch on Timeline", systemImage: "play.rectangle.fill").frame(maxWidth: .infinity)
+            // (Another Pond's event: its clip is all there is of it here; its recordings stay at its Pond.)
+            if event.pond == nil {
+                Button(action: watch) {
+                    Label("Watch on Timeline", systemImage: "play.rectangle.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .onGeometryChange(for: Double.self) { $0.size.height } action: { actionHeight = $0 }
+            } else {
+                Spacer()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .onGeometryChange(for: Double.self) { $0.size.height } action: { actionHeight = $0 }
             Menu {
                 if let snapshot = event.snapshot {
                     Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
@@ -173,8 +183,10 @@ struct EventDetail: View {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording)])
                     }
                 }
-                Divider()
-                Button("Delete Event…", role: .destructive, action: delete)
+                if event.pond == nil {
+                    Divider()
+                    Button("Delete Event…", role: .destructive, action: delete)
+                }
             } label: {
                 // Drawn here, not by the menu's own button (smaller than a large one, whatever its size's set to):
                 // a capsule as tall as the button beside it.
@@ -226,7 +238,7 @@ struct EventDetail: View {
         }
         .overlay(alignment: .bottomLeading) {
             if noRecording {
-                Text("No recording of this").font(.caption).padding(6).glassEffect(.regular, in: .capsule).padding(8)
+                Text(event.pond == nil ? "No recording of this" : "No clip of this yet").font(.caption).padding(6).glassEffect(.regular, in: .capsule).padding(8)
             }
         }
     }
@@ -238,6 +250,29 @@ struct EventDetail: View {
         try? await Task.sleep(for: .seconds(0.45))
         guard !Task.isCancelled else { return }
         let camera = event.camera, source = self.source
+        // Another Pond's: its clip, played as it comes (fetched by the service); only its picture until it has one.
+        if event.pond != nil {
+            guard let clip = event.clip, let start = event.clipStart else {
+                noRecording = true
+                return
+            }
+            // Its length as the event has it (the clip's own isn't known until all of it's come): the event, and the
+            // few seconds the service keeps either side.
+            let length = (event.ongoing ? Date() : event.end).timeIntervalSince(start) + Self.around
+            let item: AVPlayerItem
+            if FileManager.default.fileExists(atPath: clip.path) {
+                item = AVPlayerItem(asset: AVURLAsset(url: clip))
+                recording = clip.path
+                isClip = true
+            } else {
+                let (asset, loader) = GrowingFileLoader.asset(event: event.id, client: client)
+                growing = loader
+                item = AVPlayerItem(asset: asset)
+            }
+            guard !Task.isCancelled else { return }
+            play(item, length: max(1, length), from: start, sightings: [])
+            return
+        }
         // Its own clip, when the service has made it (kept as long as events are): played as it is.
         if let clip = event.clip, let start = event.clipStart, FileManager.default.fileExists(atPath: clip.path) {
             let asset = AVURLAsset(url: clip)

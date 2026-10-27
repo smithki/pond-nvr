@@ -112,10 +112,15 @@ extension AppModel {
     }
 
     /// The same, a group per Pond (this Mac's first).
-    var cameraGroups: [(pond: String?, name: String, cameras: [Config.Camera])] {
+    var cameraGroups: [(pond: String?, name: String, cameras: [Config.Camera])] { cameraGroups(shownPonds) }
+
+    /// Every Pond's cameras, a group each, shown or not.
+    var allCameraGroups: [(pond: String?, name: String, cameras: [Config.Camera])] { cameraGroups(.all) }
+
+    func cameraGroups(_ shown: ShownPonds) -> [(pond: String?, name: String, cameras: [Config.Camera])] {
         var groups: [(String?, String, [Config.Camera])] = []
-        if shownPonds.includes(nil) { groups.append((nil, thisPondName, config?.cameras ?? [])) }
-        for pond in remotePonds where shownPonds.includes(pond.id) {
+        if shown.includes(nil) { groups.append((nil, thisPondName, config?.cameras ?? [])) }
+        for pond in remotePonds where shown.includes(pond.id) {
             let order = remoteOrder[pond.id] ?? []
             let sorted = (pond.cameras ?? []).sorted { a, b in
                 (order.firstIndex(of: a.id) ?? .max, (pond.cameras ?? []).firstIndex(of: a) ?? 0)
@@ -183,7 +188,7 @@ enum ShownPonds: Hashable {
     }
 }
 
-/// Another Pond shown on its own, in a view that doesn't show other Ponds yet (Timeline; Events).
+/// Another Pond shown on its own, in a view that doesn't show other Ponds yet (the Timeline).
 struct OtherPondView: View {
     @Environment(AppModel.self) private var model
     let name: String
