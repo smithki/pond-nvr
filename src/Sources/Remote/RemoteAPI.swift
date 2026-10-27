@@ -11,6 +11,7 @@
 //
 // A file comes a few pieces at a time (as many in flight as fill a fast link), kept in order as they come, so a
 // download that's cut off carries on from where it got to; checked against its SHA-256 at the end.
+//   still             StillRequest (a camera) → Still: its latest recorded picture (JPEG), and when
 //   control           a ControlSocket.Request → its Reply: the cameras' controls, privacy and search, as the app asks
 //                     for them on the Mac itself (not pairing, the settings or talking back)
 //   live.start, stop  a camera's live video (RemoteVideo)
@@ -101,6 +102,17 @@ public enum RemoteAPI {
         public var sha256: String
     }
 
+    /// A camera's latest recorded picture: asked for by its id.
+    public struct StillRequest: Codable, Sendable {
+        public var camera: String
+        public init(camera: String) { self.camera = camera }
+    }
+
+    public struct Still: Codable, Sendable {
+        public var time: Date
+        public var jpeg: Data
+    }
+
     /// Pieces of a file asked for (1 MB, at most), and how many at once.
     static let pieceLength = 1 << 20, longestPiece = 1 << 20, piecesInFlight = 4
     static let eventsLimit = 200, mostEvents = 1000
@@ -117,6 +129,8 @@ public enum RemoteAPI {
         let password: @Sendable (String) -> String?
         let events: EventStore?
         let eventsFolder: @Sendable () -> String
+        /// The recordings folder (for cameras' latest pictures).
+        let recordings: @Sendable () -> String
         let control: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
         let privacy: PrivacyState
         public let live: LiveSender
@@ -125,12 +139,14 @@ public enum RemoteAPI {
         /// service's ControlServer's `answer`).
         public init(cameras: @escaping @Sendable () -> [Config.Camera], password: @escaping @Sendable (String) -> String?,
                     events: EventStore?, eventsFolder: @escaping @Sendable () -> String,
+                    recordings: @escaping @Sendable () -> String = { "" },
                     control: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?, privacy: PrivacyState = .shared,
                     live: LiveSender) {
             self.cameras = cameras
             self.password = password
             self.events = events
             self.eventsFolder = eventsFolder
+            self.recordings = recordings
             self.control = control
             self.privacy = privacy
             self.live = live
@@ -157,6 +173,14 @@ public enum RemoteAPI {
                 return Self.encoded(described(kept.suffix(min(RemoteAPI.mostEvents, ask.limit ?? RemoteAPI.eventsLimit)), in: events))
             case "picture.info", "clip.info":
                 return info(String(action.dropLast(5)), body)
+            case "still":
+                // A camera's latest recorded picture (not a private one's).
+                guard let body, let ask = try? JSONDecoder().decode(StillRequest.self, from: body),
+                      let camera = cameras().first(where: { $0.id == ask.camera }) else { return (nil, "which camera?") }
+                guard !privacy.isPrivate(camera.id) else { return (nil, "\(camera.name) is private") }
+                guard let still = await LatestStill.of(camera: camera.id, recordings: recordings()),
+                      let jpeg = LatestStill.jpeg(still.image) else { return (nil, "nothing recorded lately") }
+                return Self.encoded(Still(time: still.time, jpeg: jpeg))
             case "picture", "clip":
                 return piece(action, body)
             case "control":
@@ -297,6 +321,10 @@ public struct RemoteClient: Sendable {
 
     public func cameras() async throws(Failure) -> [RemoteAPI.Camera] {
         try decoded(await call("cameras"))
+    }
+
+    public func still(_ camera: String) async throws(Failure) -> RemoteAPI.Still {
+        try decoded(await call("still", encoded(RemoteAPI.StillRequest(camera: camera)), timeout: 20))
     }
 
     public func events(_ request: RemoteAPI.EventsRequest) async throws(Failure) -> [RemoteAPI.Event] {

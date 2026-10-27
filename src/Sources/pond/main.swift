@@ -209,7 +209,8 @@ struct RecordingAndHomeKit: ServiceRunning {
         // paired devices ask over their sessions: the cameras, their events (pictures, clips), their controls and
         // search, live video. Its settings are taken up as they change (a reload), recording untouched.
         let remote = RemoteAccess(api: RemoteAPI.Server(cameras: { cameras.cameras }, password: { cameras.password($0) }, events: events,
-                                                        eventsFolder: { config.storage.eventsPath }, control: { await controls.answer($0) },
+                                                        eventsFolder: { config.storage.eventsPath },
+                                                        recordings: { config.storage.recordingsPath }, control: { await controls.answer($0) },
                                                         live: LiveSender { line in log.log("pond", line) })) { line in log.log("pond", line) }
         remote.apply(config.remote, name: config.name)
         controls.remote = { await remote.handle($0) }

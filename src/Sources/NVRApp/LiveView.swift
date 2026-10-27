@@ -256,8 +256,11 @@ struct LiveView: View {
         .task(id: cameras.map(\.id)) {
             let base = model.config?.storage.recordingsPath ?? ""
             while !Task.isCancelled {
-                await snapshots.refresh(base: base, cameras: cameras.map(\.id))
-                await activity.refresh(base: base, cameras: cameras.map(\.id), source: EventSource(config: model.config))
+                // This Mac's from its recordings; other Ponds' as they send them.
+                let (others, own) = cameras.map(\.id).partitioned { AppModel.pond(of: $0) != nil }
+                await snapshots.refresh(base: base, cameras: own)
+                await snapshots.refreshRemote(others, client: model.controlClient)
+                await activity.refresh(base: base, cameras: own, source: EventSource(config: model.config))
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -2169,5 +2172,14 @@ enum ServiceNote {
     static let stopped = "Live view comes through Pond\u{2019}s background service, which also records."
     static func behind(_ name: String) -> String {
         "Pond\u{2019}s background service started before \(name) was set up as it is now."
+    }
+}
+
+extension Array {
+    /// Those that match, and those that don't, each in order.
+    func partitioned(_ matches: (Element) -> Bool) -> ([Element], [Element]) {
+        var yes: [Element] = [], no: [Element] = []
+        for e in self { if matches(e) { yes.append(e) } else { no.append(e) } }
+        return (yes, no)
     }
 }

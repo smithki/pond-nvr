@@ -82,6 +82,14 @@ final class RemoteAccess: @unchecked Sendable {
         guard let viewing = lock.withLock({ viewing }), let (camera, pond) = ControlSocket.RemotePond.split(request.camera) else {
             return ControlSocket.Reply(error: .failed("remote access is off"))
         }
+        if request.action == "remote.still" {
+            // Its latest picture, for the app's rail.
+            guard let still = await viewing.still(pond: pond, camera: camera) else { return ControlSocket.Reply(error: .notSupported) }
+            var reply = ControlSocket.Reply()
+            reply.body = still.jpeg
+            reply.taken = still.time
+            return reply
+        }
         var asked = request
         asked.camera = camera
         return await viewing.control(pond: pond, asked)
@@ -105,6 +113,9 @@ final class RemoteAccess: @unchecked Sendable {
                                  connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
                                  relaySecret: relaySecret, problem: problem)
             return reply
+        case "remote.still":
+            // Another Pond's camera's latest picture (its id `camera@pond`).
+            return await forward(request)
         case "remote.ponds":
             // Each paired Pond's cameras, with their streams' addresses through this service.
             guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }

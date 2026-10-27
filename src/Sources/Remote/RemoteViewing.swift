@@ -94,6 +94,20 @@ public final class RemoteViewing: @unchecked Sendable {
         }
     }
 
+    /// Pictures of Ponds' cameras as last asked (by `camera@pond`), and when: asked again at most every 30 s.
+    private var stills: [String: (asked: Date, still: RemoteAPI.Still)] = [:]
+
+    /// A camera's latest recorded picture, as its Pond sends it.
+    public func still(pond: String, camera: String) async -> RemoteAPI.Still? {
+        let key = ControlSocket.RemotePond.cameraID(camera, pond: pond)
+        if let kept = lock.withLock({ stills[key] }), Date().timeIntervalSince(kept.asked) < 30 { return kept.still }
+        guard let session = await session(pond), let still = try? await RemoteClient(session: session).still(camera) else {
+            return lock.withLock { stills[key]?.still }
+        }
+        lock.withLock { stills[key] = (Date(), still) }
+        return still
+    }
+
     /// A request about one of a Pond's cameras (its controls, privacy), asked of it.
     public func control(pond: String, _ request: ControlSocket.Request) async -> ControlSocket.Reply {
         guard let session = await session(pond) else { return ControlSocket.Reply(error: .failed("the other Pond can\u{2019}t be reached")) }

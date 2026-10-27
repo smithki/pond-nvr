@@ -1,11 +1,14 @@
 // A still of each camera for the live view's rail: the last frame of its latest recorded segment, read from
-// disk, so it needs no connection to the camera (nor its password) and costs nothing while the camera is
-// off screen. Refreshed every half minute while the live view is open; each says how old it is.
+// disk (LatestStill), so it needs no connection to the camera (nor its password) and costs nothing while the camera
+// is off screen; another Pond's camera's, as its Pond sends it. Refreshed every half minute while the live view is
+// open; each says how old it is.
 import AVFoundation
 import CoreGraphics
 import Foundation
+import Devices
+import ImageIO
 import Observation
-import Recorder
+import Watch
 
 @MainActor
 @Observable
@@ -32,22 +35,20 @@ final class CameraSnapshots {
     }
 
     nonisolated static func latest(base: String, camera: String, size: CGSize = CGSize(width: 640, height: 360)) async -> Snapshot? {
-        let now = Date()
-        // Look back a little first, to avoid listing the whole week; further for a camera that has gone
-        // quiet, whose old snapshot (and its age) then says so.
-        var latest: RecordedSpan?
-        for hours: Double in [2, 24, 192] where latest == nil {
-            latest = RecordingIndex.spans(base: base, camera: camera, from: now.addingTimeInterval(-hours * 3600), to: now).last
+        await LatestStill.of(camera: camera, recordings: base, size: size).map { Snapshot(image: $0.image, time: $0.time) }
+    }
+
+    /// Other Ponds' cameras' (ids `camera@pond`), as their Ponds send them, through the service.
+    func refreshRemote(_ cameras: [String], client: ControlClient) async {
+        for camera in cameras {
+            guard !Task.isCancelled else { return }
+            let reply = await client.ask(.init(camera: camera, action: "remote.still"), timeout: 20)
+            guard let data = reply.body, let time = reply.taken,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            snapshots[camera] = Snapshot(image: image, time: time)
+            CameraAspect.remember(camera, image)
         }
-        guard let span = latest else { return nil }
-        let asset = AVURLAsset(url: URL(fileURLWithPath: span.path))
-        guard let duration = try? await asset.load(.duration), duration.seconds > 0 else { return nil }
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.maximumSize = size
-        generator.appliesPreferredTrackTransform = true
-        let at = CMTime(seconds: max(0, duration.seconds - 0.5), preferredTimescale: 600)
-        guard let (image, actual) = try? await generator.image(at: at) else { return nil }
-        return Snapshot(image: image, time: span.start.addingTimeInterval(actual.seconds))
     }
 }
 

@@ -102,6 +102,8 @@ public enum ControlSocket {
         public var body: Data?
         /// "remote.status": remote access as it is now.
         public var remote: RemoteStatus?
+        /// "remote.still": when the picture in `body` (a JPEG) was recorded.
+        public var taken: Date?
         /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.
         public var ponds: [RemotePond]?
 
