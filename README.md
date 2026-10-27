@@ -8,9 +8,11 @@ Work in progress. What works today:
 - **Pond NVR.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
 - **HomeKit**, implemented natively (the HomeKit Accessory Protocol in Swift): each camera you choose is a camera in the Home app, with snapshots, live video and sound, several viewers at once, and **HomeKit Secure Video** recording on the camera's own motion detection. Doorbells are supported as video doorbells.
 - **Camera controls**: under a camera watched on its own, a dock to move it, keep and go to positions, switch day and night, talk through its speaker and change its picture and volume, through its make's own API where Pond knows one (Reolink) and ONVIF otherwise.
+- **Events, on the Mac alone**: people, vehicles and animals found in each camera's video (Core ML), with zones; each event described in a sentence and found again by plain-language search ("a courier at the front door this week"), with Apple's on-device models only.
+- **Camera health**: a doctor for each camera, saying what's going wrong, since when, and what to try.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
 
-Planned: on-device detection of people, vehicles, animals and packages (Core ML), descriptions of each event, and plain-language search of clips ("packages delivered to the front door this week"), with Apple's on-device models only. See [docs/roadmap.md](docs/roadmap.md).
+Under way: reaching a Pond from away (another Mac, then an iPhone), and demo mode. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -94,7 +96,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.
 - [docs/development.md](docs/development.md): building, testing, conventions.
-- [docs/roadmap.md](docs/roadmap.md): what is done and what comes next.
+- [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/done.md](docs/done.md): what's been built, and how.
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## License
