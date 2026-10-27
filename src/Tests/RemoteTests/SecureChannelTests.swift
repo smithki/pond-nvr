@@ -8,10 +8,15 @@ import Testing
     final class Link: @unchecked Sendable {
         let lock = NSLock()
         var loss = 0.0, jitter = 0.0
+        /// Each way: how long a packet takes, and (when set) a bottleneck: its rate (bytes a second) and how much
+        /// it queues (seconds' worth) before dropping what comes.
+        var delay = 0.002
+        var rate = 0.0, queue = 0.1
+        var free: [ObjectIdentifier: Date] = [:]
         var tamper = false
         var a: SecureChannel!, b: SecureChannel!
         var seen: [[UInt8]] = []
-        let queue = DispatchQueue(label: "link", attributes: .concurrent)
+        let queue_ = DispatchQueue(label: "link", attributes: .concurrent)
 
         init() {
             let home = Curve25519.KeyAgreement.PrivateKey(), away = Curve25519.KeyAgreement.PrivateKey()
@@ -25,14 +30,24 @@ import Testing
 
         func carry(_ frame: [UInt8], to: @escaping @Sendable () -> SecureChannel?) {
             let (lost, delay, tampering) = lock.withLock { () -> (Bool, Double, Bool) in
-                seen.append(frame)
-                return (Double.random(in: 0 ..< 1) < loss, Double.random(in: 0 ... jitter), tamper)
+                if seen.count < 1000 { seen.append(frame) }
+                var wait = self.delay + Double.random(in: 0 ... jitter)
+                if rate > 0, let target = to() {
+                    // Through the bottleneck: after what's ahead of it in its queue, or dropped if that's full.
+                    let now = Date(), key = ObjectIdentifier(target)
+                    let start = max(now, free[key] ?? now)
+                    if start.timeIntervalSince(now) > queue { return (true, 0, false) }
+                    let done = start.addingTimeInterval(Double(frame.count) / rate)
+                    free[key] = done
+                    wait += done.timeIntervalSince(now)
+                }
+                return (Double.random(in: 0 ..< 1) < loss, wait, tamper)
             }
             guard !lost else { return }
             var altered = frame
             if tampering { altered[altered.count - 1] ^= 1 }
             let sent = altered
-            queue.asyncAfter(deadline: .now() + 0.002 + delay) { to()?.handle(sent) }
+            self.queue_.asyncAfter(deadline: .now() + delay) { to()?.handle(sent) }
         }
     }
 
@@ -107,5 +122,39 @@ import Testing
         link.a.send(Data())
         await wait(inbox, for: 1, seconds: 3)
         #expect(inbox.all == [Data()])
+    }
+
+    /// How long a message of `bytes` takes from one end to the other.
+    func transfer(_ link: Link, bytes: Int) async -> Double {
+        let inbox = Inbox()
+        link.b.received = { inbox.add($0) }
+        let message = Data((0 ..< bytes).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+        let start = Date()
+        link.a.send(message)
+        await wait(inbox, for: 1, seconds: 60)
+        #expect(inbox.all.first == message)
+        return Date().timeIntervalSince(start)
+    }
+
+    @Test func aBigTransferFillsAFarLinkDespiteTheOddLoss() async {
+        // 50 ms there and back, 1% of packets lost: 10 MB in a few seconds (a fixed window of 64 frames took 8 s).
+        let link = Link()
+        link.delay = 0.025
+        link.loss = 0.01
+        defer { link.a.close(); link.b.close() }
+        let seconds = await transfer(link, bytes: 10_000_000)
+        #expect(seconds < 4, "\(seconds) s")
+    }
+
+    @Test func aSlowLinkIsFilledNotSwamped() async {
+        // A 2 MB/s bottleneck with a fifth of a second's queue, 40 ms there and back: most of its rate used (about
+        // 3 s at all of it).
+        let link = Link()
+        link.delay = 0.02
+        link.rate = 2_000_000
+        link.queue = 0.2
+        defer { link.a.close(); link.b.close() }
+        let seconds = await transfer(link, bytes: 6_000_000)
+        #expect(seconds < 4.5, "\(seconds) s: \(6.0 / seconds) MB/s of 2")
     }
 }

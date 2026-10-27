@@ -166,7 +166,7 @@ public final class PathSessions: @unchecked Sendable {
                 replies[nextRequest] = waiting
                 return nextRequest
             }
-            channel.send(PathSessions.encode(ChannelMessage(id: id, reply: false, action: action, body: body)))
+            channel.send(ChannelMessage(id: id, reply: false, action: action, body: body).wire)
             Task {
                 try? await Task.sleep(for: .seconds(timeout))
                 waiting.resolve(nil)
@@ -178,7 +178,7 @@ public final class PathSessions: @unchecked Sendable {
 
         /// A message on the channel: a reply to one of this side's requests, or a request to answer.
         private func arrived(_ data: Data) {
-            guard let message = try? JSONDecoder().decode(ChannelMessage.self, from: data) else { return }
+            guard let message = ChannelMessage(wire: data) else { return }
             if message.reply {
                 lock.withLock { replies[message.id] }?.resolve(message)
                 return
@@ -186,7 +186,7 @@ public final class PathSessions: @unchecked Sendable {
             guard let action = message.action, let owner else { return }
             Task {
                 let (body, error) = await owner.serve(self, action: action, body: message.body)
-                channel?.send(PathSessions.encode(ChannelMessage(id: message.id, reply: true, body: body, error: error)))
+                channel?.send(ChannelMessage(id: message.id, reply: true, body: body, error: error).wire)
             }
         }
 
@@ -217,6 +217,39 @@ public final class PathSessions: @unchecked Sendable {
         var action: String?
         var body: Data?
         var error: String?
+        /// (On the wire: whether there's a body after the header.)
+        var bodied: Bool?
+
+        init(id: UInt64, reply: Bool, action: String? = nil, body: Data? = nil, error: String? = nil) {
+            self.id = id
+            self.reply = reply
+            self.action = action
+            self.body = body
+            self.error = error
+        }
+
+        /// On the wire: [the header's length, 4 bytes][the header, as JSON][the body as it is] (a clip's bytes, not
+        /// base64 inside JSON).
+        var wire: Data {
+            var header = self
+            header.body = nil
+            header.bodied = body != nil
+            let json = (try? JSONEncoder().encode(header)) ?? Data()
+            let length = UInt32(json.count)
+            return Data([UInt8(length >> 24), UInt8(length >> 16 & 0xFF), UInt8(length >> 8 & 0xFF), UInt8(length & 0xFF)]) + json + (body ?? Data())
+        }
+
+        init?(wire: Data) {
+            let bytes = [UInt8](wire.prefix(4))
+            guard bytes.count == 4 else { return nil }
+            let length = Int(bytes[0]) << 24 | Int(bytes[1]) << 16 | Int(bytes[2]) << 8 | Int(bytes[3])
+            let start = wire.startIndex + 4
+            guard wire.count >= 4 + length,
+                  var message = try? JSONDecoder().decode(ChannelMessage.self, from: wire[start ..< start + length]) else { return nil }
+            if message.bodied == true { message.body = Data(wire[(start + length)...]) }
+            message.bodied = nil
+            self = message
+        }
     }
 
     /// Told when a session ends (its stream, if it has one, stopped with it).

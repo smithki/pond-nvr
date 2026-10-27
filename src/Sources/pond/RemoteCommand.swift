@@ -101,10 +101,19 @@ enum RemoteCommand {
             if result.problem != nil || result.counts.pictures == 0 { reply.error = .failed(result.summary) } else { reply.connection = result.summary }
         case "remote.cameras", "remote.events", "remote.search", "remote.picture", "remote.clip":
             guard let device = request.device else { reply.error = .failed("which device?"); break }
-            do throws(RemoteClient.Failure) {
-                reply = try await host.asking(device) { client throws(RemoteClient.Failure) in try await ask(request, of: client) }
-            } catch {
-                reply.error = .failed(error.description)
+            // A picture or clip cut off (the session lost, no answer) asked for again on a new one, twice at most:
+            // it carries on from where it got to.
+            var tries = request.action == "remote.picture" || request.action == "remote.clip" ? 3 : 1
+            while tries > 0 {
+                tries -= 1
+                do throws(RemoteClient.Failure) {
+                    reply = try await host.asking(device) { client throws(RemoteClient.Failure) in try await ask(request, of: client) }
+                    break
+                } catch .noAnswer where tries > 0 {
+                    continue
+                } catch {
+                    reply.error = .failed(error.description)
+                }
             }
         default:
             reply.error = .notSupported
@@ -128,15 +137,12 @@ enum RemoteCommand {
         default:
             guard let event = request.event, let file = request.file else { throw .refused("which event, and where to keep it?") }
             let url = URL(fileURLWithPath: file)
-            let size: Int
-            if request.action == "remote.picture" {
-                let picture = try await client.picture(event)
-                do { try picture.write(to: url) } catch { throw .refused("\(file) can't be written") }
-                size = picture.count
-            } else {
-                size = try await client.clip(event, to: url)
-            }
-            reply.connection = "kept in \(file) (\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))"
+            let done = request.action == "remote.picture" ? try await client.picture(event, to: url) : try await client.clip(event, to: url)
+            func size(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+            let fetched = done.bytes - done.resumed
+            reply.connection = "kept in \(file): \(size(done.bytes)), checked" + String(format: ", in %.1f s", done.seconds)
+                + (fetched > 0 && done.seconds > 0 ? " (\(size(Int(Double(fetched) / done.seconds)))/s)" : "")
+                + (done.resumed > 0 ? ", carrying on after the first \(size(done.resumed))" : "")
         }
         return reply
     }
@@ -203,7 +209,13 @@ enum RemoteCommand {
         }
         let client = ControlClient(path: ControlSocket.path(nextTo: configPath))
         let asked = request
-        let reply = SearchCommand.blocking { await client.ask(asked, timeout: asked.action == "remote.watch" ? 45 + (asked.seconds ?? 0) : 120) }
+        // (A picture or clip takes as long as the other home's upload does: its own pieces time out when nothing comes.)
+        let wait: Double = switch asked.action {
+        case "remote.watch": 45 + (asked.seconds ?? 0)
+        case "remote.picture", "remote.clip": 3600
+        default: 120
+        }
+        let reply = SearchCommand.blocking { await client.ask(asked, timeout: wait) }
         if let error = reply.error {
             return SearchCommand.fail(error == .unreachable
                 ? "Remote access is kept by Pond's service, which isn't running (pond service install)."
@@ -239,8 +251,10 @@ enum RemoteCommand {
             for e in events {
                 let has = [e.picture ? "picture" : nil,
                            e.clipBytes.map { "clip " + ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }].compactMap { $0 }
-                print("\(time.string(from: e.start))  \(e.camera)  \(e.seen.isEmpty ? e.category : e.seen)"
-                      + (e.sentence.map { ": \($0)" } ?? "") + (has.isEmpty ? "" : "  (\(has.joined(separator: ", ")))") + "  \(e.id)")
+                let what = e.seen.isEmpty ? e.category : e.seen
+                let sentence = e.sentence.map { ": \($0)" } ?? ""
+                let extras = has.isEmpty ? "" : "  (\(has.joined(separator: ", ")))"
+                print("\(time.string(from: e.start))  \(e.camera)  \(what)\(sentence)\(extras)  \(e.id)")
             }
         default:
             print("✓ Paired with \(reply.paired?.name ?? "it").")

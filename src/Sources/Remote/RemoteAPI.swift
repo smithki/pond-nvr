@@ -5,8 +5,12 @@
 //   cameras           → [Camera]: each camera's id, name and kind, whether it's private (or waking), its model
 //   events            EventsRequest (begun since a time, or by their ids; one camera's or all; at most `limit`, the
 //                     newest) → [Event], oldest first: what was seen, its sentence, its picture and clip
-//   picture, clip     Piece (an event's, from `offset`, at most `length`, up to 1 MB) → the file's bytes as they are;
-//                     a piece shorter than asked for is its end
+//   picture.info,     Piece (an event's; `offset` and `length` unused) → FileInfo: its size and SHA-256
+//   clip.info
+//   picture, clip     Piece (an event's, from `offset`, at most `length`, up to 1 MB) → the file's bytes as they are
+//
+// A file comes a few pieces at a time (as many in flight as fill a fast link), kept in order as they come, so a
+// download that's cut off carries on from where it got to; checked against its SHA-256 at the end.
 //   control           a ControlSocket.Request → its Reply: the cameras' controls, privacy and search, as the app asks
 //                     for them on the Mac itself (not pairing, the settings or talking back)
 //   live.start, stop  a camera's live video (RemoteVideo)
@@ -14,6 +18,7 @@
 //
 // Files are read only from the events folder, and only as an event's own picture or clip: never a path a device
 // names.
+import CryptoKit
 import Detection
 import Devices
 import Foundation
@@ -88,7 +93,14 @@ public enum RemoteAPI {
         }
     }
 
-    static let pieceLength = 256 * 1024, longestPiece = 1 << 20
+    /// A file's size and SHA-256 (hex), to check it by once it's all come.
+    public struct FileInfo: Codable, Sendable {
+        public var bytes: Int
+        public var sha256: String
+    }
+
+    /// Pieces of a file asked for (1 MB, at most), and how many at once.
+    static let pieceLength = 1 << 20, longestPiece = 1 << 20, piecesInFlight = 4
     static let eventsLimit = 200, mostEvents = 1000
 
     /// What a device may ask of the cameras' controls: what the app does with them, but talking back (which needs
@@ -140,6 +152,8 @@ public enum RemoteAPI {
                     ?? events.events(since: ask.since ?? Date(), camera: camera)
                 if let camera { kept = kept.filter { $0.event.camera == camera } }
                 return Self.encoded(described(kept.suffix(min(RemoteAPI.mostEvents, ask.limit ?? RemoteAPI.eventsLimit)), in: events))
+            case "picture.info", "clip.info":
+                return info(String(action.dropLast(5)), body)
             case "picture", "clip":
                 return piece(action, body)
             case "control":
@@ -182,21 +196,54 @@ public enum RemoteAPI {
             }
         }
 
-        func piece(_ action: String, _ body: Data?) -> (Data?, String?) {
-            guard let body, let ask = try? JSONDecoder().decode(Piece.self, from: body), ask.offset >= 0, ask.length > 0 else {
-                return (nil, "which event's \(action)?")
+        /// An event's picture or clip, as a request names it: where it is, and what of it's asked for; or why not.
+        func located(_ kind: String, _ body: Data?) -> Result<(url: URL, piece: Piece), Refusal> {
+            guard let body, let ask = try? JSONDecoder().decode(Piece.self, from: body), ask.offset >= 0, ask.length >= 0 else {
+                return .failure(Refusal("which event's \(kind)?"))
             }
-            guard let kept = events?.events(ids: [ask.event]).first else { return (nil, "no event \(ask.event)") }
-            guard let name = action == "picture" ? kept.event.snapshot : kept.clip, let url = file(name) else {
-                return (nil, action == "picture" ? "it has no picture" : "it has no clip (yet)")
+            guard let kept = events?.events(ids: [ask.event]).first else { return .failure(Refusal("no event \(ask.event)")) }
+            guard let name = kind == "picture" ? kept.event.snapshot : kept.clip, let url = file(name) else {
+                return .failure(Refusal(kind == "picture" ? "it has no picture" : "it has no clip (yet)"))
             }
-            guard let handle = try? FileHandle(forReadingFrom: url) else { return (nil, "its \(action) is gone") }
+            return .success((url, ask))
+        }
+
+        struct Refusal: Error {
+            var why: String
+            init(_ why: String) { self.why = why }
+        }
+
+        func info(_ kind: String, _ body: Data?) -> (Data?, String?) {
+            let url: URL
+            switch located(kind, body) {
+            case let .success(found): url = found.url
+            case let .failure(refusal): return (nil, refusal.why)
+            }
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return (nil, "its \(kind) is gone") }
+            defer { try? handle.close() }
+            var hash = SHA256()
+            var bytes = 0
+            while let chunk = try? handle.read(upToCount: 4 << 20), !chunk.isEmpty {
+                hash.update(data: chunk)
+                bytes += chunk.count
+            }
+            return Self.encoded(FileInfo(bytes: bytes, sha256: hash.finalize().map { String(format: "%02x", $0) }.joined()))
+        }
+
+        func piece(_ kind: String, _ body: Data?) -> (Data?, String?) {
+            let found: (url: URL, piece: Piece)
+            switch located(kind, body) {
+            case let .success(located): found = located
+            case let .failure(refusal): return (nil, refusal.why)
+            }
+            guard found.piece.length > 0 else { return (nil, "which part of its \(kind)?") }
+            guard let handle = try? FileHandle(forReadingFrom: found.url) else { return (nil, "its \(kind) is gone") }
             defer { try? handle.close() }
             do {
-                try handle.seek(toOffset: UInt64(ask.offset))
-                return (try handle.read(upToCount: min(ask.length, RemoteAPI.longestPiece)) ?? Data(), nil)
+                try handle.seek(toOffset: UInt64(found.piece.offset))
+                return (try handle.read(upToCount: min(found.piece.length, RemoteAPI.longestPiece)) ?? Data(), nil)
             } catch {
-                return (nil, "its \(action) couldn't be read")
+                return (nil, "its \(kind) couldn't be read")
             }
         }
 
@@ -226,6 +273,8 @@ public struct RemoteClient: Sendable {
         /// It said no (why).
         case refused(String)
         case unreadable
+        /// What came didn't match the file's hash.
+        case damaged
 
         public var description: String {
             switch self {
@@ -234,6 +283,7 @@ public struct RemoteClient: Sendable {
             case .noAnswer: "it didn't answer"
             case let .refused(why): why
             case .unreadable: "its answer couldn't be read"
+            case .damaged: "it didn't arrive intact (try again)"
             }
         }
     }
@@ -267,34 +317,111 @@ public struct RemoteClient: Sendable {
 
     /// An event's picture (a JPEG).
     public func picture(_ event: String) async throws(Failure) -> Data {
-        var all = Data()
-        try await pieces("picture", event) { all.append($0) }
-        return all
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pond-picture-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: file) }
+        _ = try await download("picture", event, to: file)
+        guard let picture = try? Data(contentsOf: file) else { throw .unreadable }
+        return picture
     }
 
-    /// An event's clip (an MP4) kept at `file`: its size.
-    public func clip(_ event: String, to file: URL) async throws(Failure) -> Int {
-        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        guard FileManager.default.createFile(atPath: file.path, contents: nil), let handle = try? FileHandle(forWritingTo: file) else {
-            throw .refused("\(file.path) can't be written")
-        }
-        defer { try? handle.close() }
-        var size = 0
-        try await pieces("clip", event) { piece in
-            try? handle.write(contentsOf: piece)
-            size += piece.count
-        }
-        return size
+    /// An event's picture kept at `file`.
+    public func picture(_ event: String, to file: URL) async throws(Failure) -> Download {
+        try await download("picture", event, to: file)
     }
 
-    /// A file asked for a piece at a time, each handed on, until one's shorter than asked for.
-    func pieces(_ action: String, _ event: String, _ each: (Data) -> Void) async throws(Failure) {
-        var offset = 0
+    /// An event's clip (an MP4) kept at `file`.
+    public func clip(_ event: String, to file: URL) async throws(Failure) -> Download {
+        try await download("clip", event, to: file)
+    }
+
+    /// How a download went: its size, how long it took, and how much of it had come before (resumed).
+    public struct Download: Sendable, Equatable {
+        public var bytes: Int
+        public var seconds: Double
+        public var resumed: Int
+    }
+
+    /// An event's picture or clip (`kind`) kept at `file`: a few pieces at a time, kept in order beside it as they
+    /// come (so a download that's cut off carries on where it got to, when asked again), checked against the
+    /// file's SHA-256, then moved into place.
+    func download(_ kind: String, _ event: String, to file: URL) async throws(Failure) -> Download {
+        let started = Date()
+        let info: RemoteAPI.FileInfo = try decoded(await call("\(kind).info", encoded(RemoteAPI.Piece(event: event, offset: 0, length: 0)),
+                                                              timeout: 60))
+        let folder = file.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let partial = folder.appendingPathComponent(".\(file.lastPathComponent).\(info.sha256.prefix(16)).partial")
+        // What came before (of this same file: its hash is in the name).
+        var hash = SHA256()
+        var kept = 0
+        if let before = try? Data(contentsOf: partial), before.count <= info.bytes {
+            hash.update(data: before)
+            kept = before.count
+        } else {
+            guard FileManager.default.createFile(atPath: partial.path, contents: nil) else { throw .refused("\(folder.path) can't be written to") }
+        }
+        let resumed = kept
+        guard let handle = try? FileHandle(forWritingTo: partial) else { throw .refused("\(folder.path) can't be written to") }
+        _ = try? handle.seekToEnd()
+        let failure: Failure? = await withTaskGroup(of: (Int, Result<Data, Failure>).self) { group in
+            var next = kept
+            var arrived: [Int: Data] = [:]
+            for _ in 0 ..< RemoteAPI.piecesInFlight where next < info.bytes {
+                let at = next
+                group.addTask { (at, await self.piece(kind, event, at)) }
+                next += RemoteAPI.pieceLength
+            }
+            for await (at, result) in group {
+                switch result {
+                case let .failure(failure):
+                    group.cancelAll()
+                    return failure
+                case let .success(piece):
+                    arrived[at] = piece
+                    // Kept in order: what's come after a piece still on its way waits for it.
+                    while let piece = arrived.removeValue(forKey: kept) {
+                        guard !piece.isEmpty, (try? handle.write(contentsOf: piece)) != nil else {
+                            group.cancelAll()
+                            return piece.isEmpty ? .damaged : .refused("\(folder.path) can't be written to")
+                        }
+                        hash.update(data: piece)
+                        kept += piece.count
+                    }
+                    if next < info.bytes {
+                        let at = next
+                        group.addTask { (at, await self.piece(kind, event, at)) }
+                        next += RemoteAPI.pieceLength
+                    }
+                }
+            }
+            return nil
+        }
+        try? handle.close()
+        if let failure { throw failure }
+        guard kept == info.bytes, hash.finalize().map({ String(format: "%02x", $0) }).joined() == info.sha256 else {
+            try? FileManager.default.removeItem(at: partial)
+            // (What was there before wasn't good: from the start again, once.)
+            if resumed > 0 { return try await download(kind, event, to: file) }
+            throw .damaged
+        }
+        try? FileManager.default.removeItem(at: file)
+        do { try FileManager.default.moveItem(at: partial, to: file) } catch { throw .refused("\(file.path) can't be written") }
+        return Download(bytes: info.bytes, seconds: Date().timeIntervalSince(started), resumed: resumed)
+    }
+
+    /// A piece of a file, asked for again if no answer comes (the channel resends what's lost; a session whose path
+    /// is being found again takes a while).
+    func piece(_ kind: String, _ event: String, _ offset: Int) async -> Result<Data, Failure> {
+        var tries = 0
         while true {
-            let piece = try await call(action, encoded(RemoteAPI.Piece(event: event, offset: offset, length: RemoteAPI.pieceLength)), timeout: 30)
-            each(piece)
-            offset += piece.count
-            if piece.count < RemoteAPI.pieceLength { return }
+            do throws(Failure) {
+                return .success(try await call(kind, encoded(RemoteAPI.Piece(event: event, offset: offset, length: RemoteAPI.pieceLength)),
+                                               timeout: 60))
+            } catch .noAnswer where tries < 2 {
+                tries += 1
+            } catch {
+                return .failure(error)
+            }
         }
     }
 

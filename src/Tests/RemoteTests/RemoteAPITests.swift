@@ -1,3 +1,4 @@
+import CryptoKit
 import Devices
 import Foundation
 import Ingest
@@ -16,7 +17,8 @@ import Watch
         let events: EventStore
         let privacy: PrivacyState
         let picture = Data((0 ..< 5000).map { UInt8($0 % 251) })
-        let clip = Data((0 ..< 600_000).map { UInt8(($0 * 7) % 256) })
+        // (Over three pieces: two whole, one not.)
+        let clip = Data((0 ..< 2_600_000).map { UInt8(($0 * 7) % 256) })
         let start = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 3600).rounded())
         let lock = NSLock()
         var asked: [ControlSocket.Request] = []
@@ -108,8 +110,11 @@ import Watch
             // The picture whole, and the clip in pieces (it's longer than one).
             #expect(try await client.picture("one") == home.picture)
             let file = home.folder.appendingPathComponent("away/one.mp4")
-            #expect(try await client.clip("one", to: file) == home.clip.count)
+            let done = try await client.clip("one", to: file)
+            #expect(done.bytes == home.clip.count && done.resumed == 0)
             #expect(try Data(contentsOf: file) == home.clip)
+            // Nothing's left beside it.
+            #expect(try FileManager.default.contentsOfDirectory(atPath: file.deletingLastPathComponent().path) == ["one.mp4"])
 
             // Nothing outside the events folder, even when an event names it; and nothing that isn't there.
             #expect(await failure { () async throws(RemoteClient.Failure) in _ = try await client.picture("two") } == .refused("it has no picture"))
@@ -142,6 +147,39 @@ import Watch
             #expect(cameras.count == 2)
             #expect(await failure { () async throws(RemoteClient.Failure) in _ = try await away.asking("Elsewhere") { client throws(RemoteClient.Failure) in try await client.cameras() } }
                 == .noDevice("Elsewhere"))
+        }
+    }
+
+    @Test func aClipCutOffCarriesOnWhereItGotTo() async throws {
+        let home = try Home()
+        try await withPair(home.server()) { _, client in
+            // What came before it was cut off, kept beside it under its hash's name.
+            let hash = SHA256.hash(data: home.clip).map { String(format: "%02x", $0) }.joined()
+            let folder = home.folder.appendingPathComponent("away")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try home.clip.prefix(1_500_000).write(to: folder.appendingPathComponent(".one.mp4.\(hash.prefix(16)).partial"))
+            let done = try await client.clip("one", to: folder.appendingPathComponent("one.mp4"))
+            #expect(done.resumed == 1_500_000 && done.bytes == home.clip.count)
+            #expect(try Data(contentsOf: folder.appendingPathComponent("one.mp4")) == home.clip)
+
+            // What came before but wrongly (it doesn't match at the end): thrown away, and fetched from the start.
+            try Data(repeating: 9, count: 1000).write(to: folder.appendingPathComponent(".two.mp4.\(hash.prefix(16)).partial"))
+            let again = try await client.clip("one", to: folder.appendingPathComponent("two.mp4"))
+            #expect(again.resumed == 0)
+            #expect(try Data(contentsOf: folder.appendingPathComponent("two.mp4")) == home.clip)
+        }
+    }
+
+    @Test func aBigClipComesQuickly() async throws {
+        let home = try Home()
+        // 20 MB, over the loopback (both Ponds on this Mac): seconds, not the minute a piece at a time took.
+        let big = Data((0 ..< 20_000_000).map { UInt8(truncatingIfNeeded: $0 &* 2_654_435_761 >> 13) })
+        try big.write(to: home.folder.appendingPathComponent("events/porch/one.mp4"))
+        try await withPair(home.server()) { _, client in
+            let file = home.folder.appendingPathComponent("away/big.mp4")
+            let done = try await client.clip("one", to: file)
+            #expect(try Data(contentsOf: file) == big)
+            #expect(done.seconds < 5, "\(done.seconds) s")
         }
     }
 }

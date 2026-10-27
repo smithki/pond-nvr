@@ -39,6 +39,10 @@ public final class DatagramSocket: PacketTransport, @unchecked Sendable {
         // doesn't wake a read on macOS).
         var wake = timeval(tv_sec: 0, tv_usec: 500_000)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wake, socklen_t(MemoryLayout<timeval>.size))
+        // Room for a fast transfer's bursts (a few MB in flight), both ways, so they aren't dropped here.
+        var buffer: Int32 = 4 << 20
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buffer, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, socklen_t(MemoryLayout<Int32>.size))
         var address = sockaddr_in6()
         address.sin6_family = sa_family_t(AF_INET6)
         address.sin6_port = port.bigEndian
