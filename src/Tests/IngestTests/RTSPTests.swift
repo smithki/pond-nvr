@@ -58,6 +58,40 @@ final class ScriptedTransport: RTSPTransport {
         #expect(throws: RTSPReader.ReadError.self) { try reader.next() }
     }
 
+    @Test func aStreamThatLosesItsFramingIsReadOnFromTheNextPacket() throws {
+        var reader = RTSPReader()
+        let packets = (0 ..< 6).map { i in Fixtures.interleaved(UInt8(i % 2 * 2), (0 ..< 300 + i).map { UInt8(truncatingIfNeeded: $0 &* 13 &+ i) }) }
+        // Two packets, then the end of one whose start never came (bytes that are neither), then the rest.
+        let garbage = (0 ..< 40_000).map { UInt8(truncatingIfNeeded: ($0 &* 7919) % 251 + 3) }.map { $0 == 0x24 || $0 == 0x52 ? 0x25 : $0 }
+        reader.feed(packets[0] + packets[1] + garbage + packets[2] + packets[3])
+        var read: [InterleavedPacket] = []
+        while let item = try reader.next() { if case let .interleaved(p) = item { read.append(p) } }
+        // (Fed in pieces too: the rest a byte or two at a time, as a slow socket might.)
+        for byte in (packets[4] + packets[5]).chunked(3) {
+            reader.feed(byte)
+            while let item = try reader.next() { if case let .interleaved(p) = item { read.append(p) } }
+        }
+        #expect(read.map(\.data.count) == [300, 301, 302, 303, 304, 305])
+        #expect(reader.resyncs == 1 && reader.skipped == garbage.count)
+    }
+
+    @Test func aRequestFromTheCameraIsPassedOver() throws {
+        var reader = RTSPReader()
+        let packet = Fixtures.interleaved(0, [1, 2, 3])
+        reader.feed(packet + Array("SET_PARAMETER rtsp://cam/ RTSP/1.0\r\nCSeq: 9\r\nContent-Length: 4\r\n\r\nab\r\n".utf8) + packet)
+        #expect(try reader.next() == .interleaved(InterleavedPacket(channel: 0, data: [1, 2, 3])))
+        #expect(try reader.next() == .interleaved(InterleavedPacket(channel: 0, data: [1, 2, 3])))
+        #expect(reader.skipped == 0)
+    }
+
+    @Test func aStreamLostForAMegabyteIsGivenUpOn() throws {
+        var reader = RTSPReader()
+        reader.feed(Fixtures.interleaved(0, [1]))
+        _ = try reader.next()
+        reader.feed([UInt8](repeating: 0x11, count: 1_100_000))
+        #expect(throws: RTSPReader.ReadError.self) { while try reader.next() != nil {} }
+    }
+
     @Test func describeAnswersTheDigestChallenge() throws {
         let url = "rtsp://192.168.1.41:554/h264Preview_01_main"
         let t = ScriptedTransport([
@@ -112,5 +146,11 @@ final class ScriptedTransport: RTSPTransport {
         #expect(t.sent[1].contains("Session: 99\r\n"))
         #expect(try client.nextPacket(timeout: 0.1) == InterleavedPacket(channel: 1, data: sr))
         #expect(try client.nextPacket(timeout: 0.1) == nil)
+    }
+}
+
+extension Array {
+    func chunked(_ size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(self[$0 ..< Swift.min($0 + size, count)]) }
     }
 }

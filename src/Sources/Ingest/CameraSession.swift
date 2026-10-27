@@ -9,13 +9,19 @@ public final class CameraSession {
     public let video: SDP.Media
     public let audio: SDP.Media?
     let client: RTSPClient
+    let url: String
     let base: String
+    /// Told when a camera's stream lost its framing and was read on from the next packet (the stream's address,
+    /// and the bytes skipped): for the service's log.
+    nonisolated(unsafe) public static var framingLost: (@Sendable (_ url: String, _ bytes: Int) -> Void)?
+    private var framingLostSeen = (times: 0, bytes: 0)
     private var lastKeepalive = Date()
     let keepaliveInterval: Double = 25
 
     public init(url: String, username: String, password: String, connectTimeout: Double = 5,
                 includeAudio: Bool = true) throws(RTSPError) {
         guard let parts = URLComponents(string: url), let host = parts.host else { throw .malformed("bad address \(url)") }
+        self.url = url
         let transport: SocketTransport
         do {
             transport = try SocketTransport(host: host, port: parts.port ?? 554, timeout: connectTimeout)
@@ -46,7 +52,13 @@ public final class CameraSession {
             try client.sendWithoutReply("GET_PARAMETER", base)
             lastKeepalive = Date()
         }
-        return try client.nextPacket(timeout: min(timeout, keepaliveInterval))
+        let packet = try client.nextPacket(timeout: min(timeout, keepaliveInterval))
+        let lost = client.framingLost
+        if lost.times > framingLostSeen.times {
+            Self.framingLost?(url, lost.bytes - framingLostSeen.bytes)
+            framingLostSeen = lost
+        }
+        return packet
     }
 
     public func close() {

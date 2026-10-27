@@ -162,6 +162,9 @@ public final class RTSPClient {
                                             headers: [("CSeq", "\(cseq + 1)")] + (session.map { [("Session", $0)] } ?? [])).encoded())
     }
 
+    /// How many times the stream lost its framing (and was read on from the next packet), and the bytes skipped.
+    public var framingLost: (times: Int, bytes: Int) { (reader.resyncs, reader.skipped) }
+
     /// The next interleaved packet, or nil if none arrives within `timeout` seconds.
     public func nextPacket(timeout: Double) throws(RTSPError) -> InterleavedPacket? {
         if !early.isEmpty { return early.removeFirst() }

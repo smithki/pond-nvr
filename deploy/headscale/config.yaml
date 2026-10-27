@@ -8,14 +8,15 @@ noise:
 prefixes:
   v4: 100.64.0.0/10
   v6: fd7a:115c:a1e0::/48
-# Its own relay (DERP), so a mesh never falls back to relays run by others.
+# Its own relay (DERP), so a mesh never falls back to relays run by others. Its STUN on 3481: 3478 and 3479 are
+# pond-signal's, 3480 the relay's.
 derp:
   server:
     enabled: true
     region_id: 999
     region_code: pond
     region_name: Pond
-    stun_listen_addr: 0.0.0.0:3479
+    stun_listen_addr: 0.0.0.0:3481
     private_key_path: /var/lib/headscale/derp_server_private.key
   urls: []
   auto_update_enabled: false

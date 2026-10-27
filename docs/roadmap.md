@@ -111,5 +111,5 @@ A backlog: small, contained problems seen in use, each worth a fix but not a goa
 
 | Fix | Notes |
 | --- | --- |
-| RTSP streams that lose their framing | Now and then a camera's stream, mid-recording, has bytes that are neither an interleaved packet (`$`) nor an RTSP reply, and the reader (`RTSPReader` in `RTSPMessage.swift`) gives up after 16 KB without the end of a reply's headers ("the camera's answer could not be read: no end of headers in 16 KB"). The recorder reconnects within a second, so about a second of recording is lost each time; seen on Reolink cameras, a few times a day. It should resynchronize instead: skip ahead to the next `$` frame (or `RTSP/` reply) and carry on, counting what it skipped for the doctor. |
+| (none open) | |
 

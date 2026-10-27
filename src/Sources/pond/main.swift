@@ -160,6 +160,11 @@ struct RecordingAndHomeKit: ServiceRunning {
         }
         // The app's live views read the same camera connections, through a local socket (the cameras as they
         // are now).
+        // A camera's stream that lost its framing, and was read on from its next packet (not reconnected): said.
+        CameraSession.framingLost = { url, bytes in
+            let camera = cameras.cameras.first { $0.main == url || $0.sub == url }
+            log.log(camera?.id ?? "pond", "· the stream lost its framing: \(bytes) bytes skipped to its next packet, without reconnecting")
+        }
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
             guard let camera = cameras.cameras.first(where: { $0.main == url || $0.sub == url }),
                   !PrivacyState.shared.isPrivate(camera.id), let password = cameras.password(camera.id) else { return nil }

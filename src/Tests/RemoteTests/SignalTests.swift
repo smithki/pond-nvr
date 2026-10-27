@@ -222,6 +222,22 @@ import Traversal
         task.cancel()
     }
 
+    @Test func plainRequestsAreAnsweredNotDropped() async throws {
+        let server = try Self.server()
+        defer { server.stop() }
+        let base = URL(string: "http://127.0.0.1:\(server.boundPort)")!
+        // (A proxy in front shows what's answered; a connection dropped unanswered was its "502 Bad Gateway".)
+        var head = URLRequest(url: base)
+        head.httpMethod = "HEAD"
+        let (_, headReply) = try await URLSession.shared.data(for: head)
+        #expect((headReply as? HTTPURLResponse)?.statusCode == 426)
+        let (body, getReply) = try await URLSession.shared.data(from: base)
+        #expect((getReply as? HTTPURLResponse)?.statusCode == 426)
+        #expect(String(decoding: body, as: UTF8.self).contains("WebSocket"))
+        let (ok, healthReply) = try await URLSession.shared.data(from: base.appendingPathComponent("health"))
+        #expect((healthReply as? HTTPURLResponse)?.statusCode == 200 && ok == Data("ok\n".utf8))
+    }
+
     @Test func stunTellsAnAskerItsAddress() async throws {
         let stun = STUNResponder(port: 0)
         try stun.start()

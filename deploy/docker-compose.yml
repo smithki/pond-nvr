@@ -53,7 +53,7 @@ services:
     command: serve
     ports:
       - "8443:8080"
-      - "3479:3479/udp"
+      - "3481:3481/udp"
     volumes:
       - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
       - headscale-data:/var/lib/headscale

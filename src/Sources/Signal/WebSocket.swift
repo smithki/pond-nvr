@@ -26,18 +26,24 @@ final class WebSocketConnection: @unchecked Sendable {
         case close
     }
 
-    /// The HTTP upgrade read and answered; false if it isn't one.
+    /// The HTTP upgrade read and answered; false if it isn't one. Anything else is answered too, plainly, and the
+    /// connection closed: `/health` with 200 (for checking the server is up), the rest with 426 (a WebSocket is
+    /// what's served), so a proxy in front shows that rather than a connection dropped unanswered.
     func handshake() -> Bool {
         guard let request = readUntil("\r\n\r\n") else { return false }
         let lines = String(decoding: request, as: UTF8.self).components(separatedBy: "\r\n")
-        guard lines.first?.hasPrefix("GET ") == true else { return false }
+        let first = lines.first?.split(separator: " ").map(String.init) ?? []
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
             headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
-        guard headers["upgrade"]?.lowercased() == "websocket", let key = headers["sec-websocket-key"] else {
-            writeRaw(Array("HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\n\r\n".utf8))
+        guard first.first == "GET", headers["upgrade"]?.lowercased() == "websocket", let key = headers["sec-websocket-key"] else {
+            let health = first.count > 1 && first[1] == "/health"
+            let body = health ? "ok\n" : "Pond's signaling service: Pond connects here with a WebSocket.\n"
+            let head = (health ? "HTTP/1.1 200 OK" : "HTTP/1.1 426 Upgrade Required\r\nUpgrade: websocket")
+                + "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+            writeRaw(Array((head + (first.first == "HEAD" ? "" : body)).utf8))
             return false
         }
         let accept = Data(Hashes.sha1(Array((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()

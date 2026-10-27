@@ -18,7 +18,7 @@ POND_SIGNAL_DOMAIN=signal.example.com docker compose up -d
 
 Point a DNS name at the server first, and open TCP 80 and 443 (HTTPS) and UDP 3478 and 3479 (STUN: the second tells a Pond what kind of router it is behind, for diagnosing connections). Then in Pond: Settings › Remote Access › Signaling server: `wss://signal.example.com`.
 
-With a relay: set `static-auth-secret` in `turnserver.conf`, open UDP 3480 and 49160–49200, start with `--profile relay`, and give Pond the relay's address and the same secret. With the mesh: set `server_url` in `headscale/config.yaml`, open TCP 8443 and UDP 3479, start with `--profile mesh`, and join your Mac and devices with Tailscale's apps pointed at it.
+With a relay: set `static-auth-secret` in `turnserver.conf`, open UDP 3480 and 49160–49200, start with `--profile relay`, and give Pond the relay's address and the same secret. With the mesh: set `server_url` in `headscale/config.yaml`, open TCP 8443 and UDP 3481, start with `--profile mesh`, and join your Mac and devices with Tailscale's apps pointed at it.
 
 ## Without any of this
 
