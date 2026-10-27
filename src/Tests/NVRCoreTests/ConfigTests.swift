@@ -17,6 +17,18 @@ import Testing
         #expect(Self.good.problems() == [])
     }
 
+    @Test func theSignalingServerIsAWebSocketAddress() {
+        var config = Self.good
+        for good in [nil, "", "wss://signal.example.com", "ws://192.0.2.1:8080"] {
+            config.remote = .init(enabled: true, signaling: good)
+            #expect(config.problems() == [], "\(good ?? "nil")")
+        }
+        for bad in ["signal.example.com", "https://signal.example.com", "wss://"] {
+            config.remote = .init(enabled: true, signaling: bad)
+            #expect(config.problems() == ["remote.signaling must be a wss:// address (ws:// only for testing)."], "\(bad)")
+        }
+    }
+
     @Test func missingSectionsGetDefaults() throws {
         let json = #"{"storage": {"recordings": "/Volumes/Pond/recordings", "database": "/tmp/pond.sqlite"}}"#
         let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))

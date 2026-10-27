@@ -247,9 +247,11 @@ final class AppModel {
             return false
         }
         config = next
-        // The running service takes up changes to the cameras or retention at once, only the cameras that changed
+        // The running service takes up changes to the cameras, retention or remote access at once, only what changed
         // starting again (a reload); a change of storage still waits for Restart Recorder.
-        if let previous, previous.cameras != next.cameras || previous.retention != next.retention { reloadService() }
+        if let previous, previous.cameras != next.cameras || previous.retention != next.retention || previous.remote != next.remote {
+            reloadService()
+        }
         return true
     }
 

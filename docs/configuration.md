@@ -80,7 +80,7 @@ GB here are 1,000,000,000 bytes, as drives are sold. One camera recording its 25
 
 ## Remote access
 
-Optional, and off unless set: reaching this Mac from outside its network, through a signaling service you run (`deploy/`). The two ends find a path between them and connect directly where they can; the signaling service passes on only sealed messages it can't read. How it works, and what to do when it can't connect: [remote.md](remote.md).
+Optional, and off unless set (Settings › Remote Access, or here): reaching this Mac from outside its network, through a signaling service you run (`deploy/`). The two ends find a path between them and connect directly where they can; the signaling service passes on only sealed messages it can't read. How it works, and what to do when it can't connect: [remote.md](remote.md).
 
 | Key | Default | What it does |
 | --- | --- | --- |

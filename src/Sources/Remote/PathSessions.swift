@@ -357,6 +357,24 @@ public final class PathSessions: @unchecked Sendable {
     /// A session let go (the other side told).
     public func close(_ session: Session) { end(session, tell: true) }
 
+    /// Every session let go (remote access turned off, or its settings changed).
+    public func closeAll() {
+        for session in lock.withLock({ Array(sessions.values) }) { end(session, tell: true) }
+    }
+
+    /// The sessions connected now: with whom, and how, in words ("IPv6, directly").
+    public var connected: [(peer: String, how: String)] {
+        lock.withLock { Array(sessions.values) }.compactMap { session in
+            guard case let .connected(pair) = session.finder.state else { return nil }
+            let how = switch (pair.local.kind, pair.remote.kind) {
+            case (.relay, _), (_, .relay): "through the relay"
+            case (.host, .host): "directly"
+            default: "through the routers"
+            }
+            return (session.peer.name, "\(pair.remote.address.isIPv6 ? "IPv6" : "IPv4"), \(how)")
+        }.sorted { $0.peer < $1.peer }
+    }
+
     /// A session under way, by its id.
     func session(_ id: UUID) -> Session? { lock.withLock { sessions[id] } }
 

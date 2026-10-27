@@ -6,7 +6,7 @@ import Understanding
 import Watch
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, cameras, doctor, storage, retention, recorder
+    case general, cameras, doctor, storage, retention, remote, recorder
 
     var id: String { rawValue }
 }
@@ -24,6 +24,7 @@ struct SettingsView: View {
             Tab("Retention", systemImage: "clock.arrow.circlepath", value: SettingsTab.retention) {
                 needsSettings { RetentionView() }
             }
+            Tab("Remote Access", systemImage: "network", value: SettingsTab.remote) { needsSettings { RemoteAccessView() } }
             Tab("Recorder", systemImage: "record.circle", value: SettingsTab.recorder) { needsSettings { RecorderView() } }
         }
         // Tall enough that a camera's settings (a sheet as tall as this) fit unscrolled with their sections

@@ -26,6 +26,7 @@ public enum ControlSocket {
         /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
         /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
         /// "search" (events that answer `question`; `camera` unused);
+        /// "remote.status" (whether it's on and reachable, who's paired and connected), "remote.relay-secret" (`code`),
         /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`),
         /// "remote.connect" (`device`: a path found to it, and how), "remote.watch" (`device`'s `camera` for `seconds`,
         /// its main stream if `main`, kept at `file`); asked of `device` over a session: "remote.cameras",
@@ -43,7 +44,8 @@ public enum ControlSocket {
         public var reading: EventQuery?
         public var byModel: Bool?
         public var plain: Bool?
-        /// "remote.unpair": the device's id; "remote.join": another Pond's pairing code.
+        /// "remote.unpair": the device's id; "remote.join": another Pond's pairing code; "remote.relay-secret": the
+        /// relay's secret (empty: removed).
         public var device: String?
         public var code: String?
         public var seconds: Double?
@@ -98,6 +100,8 @@ public enum ControlSocket {
         public var connection: String?
         /// "remote.cameras", "remote.events", "remote.search": the other Pond's answer, as JSON (Remote's RemoteAPI).
         public var body: Data?
+        /// "remote.status": remote access as it is now.
+        public var remote: RemoteStatus?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -114,6 +118,42 @@ public enum ControlSocket {
             self.value = value
             self.values = values
             self.sampleRate = sampleRate
+        }
+    }
+
+    /// Remote access in the service, for Settings: whether it's on and reachable, those paired, those connected.
+    public struct RemoteStatus: Codable, Equatable, Sendable {
+        public var on: Bool
+        /// Connected to the signaling service (so devices can reach this Mac), and its host.
+        public var reachable: Bool
+        public var signaling: String?
+        public var devices: [RemoteDevice]
+        /// Those connected now, and how ("IPv6, directly").
+        public var connected: [Connection]
+        /// Whether a relay's secret is kept (the relay isn't used without one).
+        public var relaySecret: Bool
+        /// Why it's off or not working, if it's something the settings can fix.
+        public var problem: String?
+
+        public struct Connection: Codable, Equatable, Sendable {
+            public var device: String
+            public var how: String
+
+            public init(device: String, how: String) {
+                self.device = device
+                self.how = how
+            }
+        }
+
+        public init(on: Bool, reachable: Bool = false, signaling: String? = nil, devices: [RemoteDevice] = [],
+                    connected: [Connection] = [], relaySecret: Bool = false, problem: String? = nil) {
+            self.on = on
+            self.reachable = reachable
+            self.signaling = signaling
+            self.devices = devices
+            self.connected = connected
+            self.relaySecret = relaySecret
+            self.problem = problem
         }
     }
 

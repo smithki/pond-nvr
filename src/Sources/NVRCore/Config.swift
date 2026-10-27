@@ -514,6 +514,10 @@ extension Config {
         }
         if retention.events.days < 1 { out.append("retention.events.days must be at least 1.") }
         if retention.minFreeGB < 0 { out.append("retention.minFreeGB must not be negative.") }
+        if let signaling = remote?.signaling, !signaling.isEmpty,
+           URL(string: signaling).map({ ["ws", "wss"].contains($0.scheme) && $0.host() != nil }) != true {
+            out.append("remote.signaling must be a wss:// address (ws:// only for testing).")
+        }
 
         var seen = Set<String>()
         for camera in cameras {

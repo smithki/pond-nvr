@@ -10,12 +10,94 @@ import NVRCore
 import NVRMac
 import Remote
 
-/// Remote access in the service, if it's on (and set up right).
-func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -> Void) -> RemoteHost? {
-    guard let settings, settings.enabled else { return nil }
+/// Remote access in the service, as its settings say: started, changed and stopped as they change (the service's
+/// reload), recording untouched. Its sessions are answered by the remote API.
+final class RemoteAccess: @unchecked Sendable {
+    let api: RemoteAPI.Server
+    let log: @Sendable (String) -> Void
+    private let lock = NSLock()
+    private var host: RemoteHost?
+    /// What it was started with (the settings, and the relay's secret: a new one starts it again too); why it
+    /// isn't on, if the settings can fix that.
+    private var applied: (settings: Config.Remote?, secret: String?)?
+    private var problem: String?
+
+    init(api: RemoteAPI.Server, log: @escaping @Sendable (String) -> Void) {
+        self.api = api
+        self.log = log
+    }
+
+    var current: RemoteHost? { lock.withLock { host } }
+
+    /// The settings taken up: started again if they (or the relay's secret) changed. What changed, in words.
+    @discardableResult
+    func apply(_ settings: Config.Remote?) -> String? {
+        let secret = Self.keys.relaySecret()
+        let changed = lock.withLock { () -> Bool in
+            guard let applied, applied.settings == settings, applied.secret == secret else { return true }
+            return false
+        }
+        guard changed else { return nil }
+        let (old, wasOn) = lock.withLock { (host, applied != nil) }
+        old?.stop()
+        let (started, problem) = startRemote(settings, log: log)
+        if let started {
+            started.paths.requests = { [api] in await api.serve($0, action: $1, body: $2) }
+            started.paths.sessionEnded = { [api] in api.ended($0) }
+        }
+        lock.withLock {
+            host = started
+            applied = (settings, secret)
+            self.problem = problem
+        }
+        guard wasOn else { return nil }
+        return started == nil ? "remote access off" : "remote access started again"
+    }
+
+    func stop() { lock.withLock { host }?.stop() }
+
+    static var keys: RemoteKeys { RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService)) }
+
+    /// A "remote." request from the app or `pond`.
+    func handle(_ request: ControlSocket.Request) async -> ControlSocket.Reply {
+        switch request.action {
+        case "remote.status":
+            var reply = ControlSocket.Reply()
+            let (host, problem) = lock.withLock { (self.host, self.problem) }
+            let relaySecret = Self.keys.relaySecret() != nil
+            guard let host else {
+                reply.remote = .init(on: false, relaySecret: relaySecret, problem: problem)
+                return reply
+            }
+            reply.remote = .init(on: true, reachable: host.isReachable, signaling: host.signalingHost,
+                                 devices: host.devices().map { .init(id: $0.id, name: $0.name) },
+                                 connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
+                                 relaySecret: relaySecret, problem: problem)
+            return reply
+        case "remote.relay-secret":
+            // Kept (or removed), then remote access started again with it.
+            let secret = request.code?.trimmingCharacters(in: .whitespaces) ?? ""
+            do { try Self.keys.setRelaySecret(secret.isEmpty ? nil : secret) } catch {
+                return ControlSocket.Reply(error: .failed("it couldn\u{2019}t be kept (\(error))"))
+            }
+            let settings = lock.withLock { applied?.settings }
+            apply(settings)
+            return ControlSocket.Reply()
+        default:
+            guard let host = current else {
+                return ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))
+            }
+            return await RemoteCommand.handle(request, host: host)
+        }
+    }
+}
+
+/// Remote access in the service, if it's on (and set up right); else why not, if it should be.
+func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -> Void) -> (RemoteHost?, String?) {
+    guard let settings, settings.enabled else { return (nil, nil) }
     guard let address = settings.signaling, let url = URL(string: address), ["ws", "wss"].contains(url.scheme) else {
         log("! remote access is off: no signaling service set (remote.signaling, a wss:// address)")
-        return nil
+        return (nil, "No signaling server is set: a wss:// address.")
     }
     // How connections are made: where to learn this Mac's public address (the signaling host's STUN, unless one's
     // given), the port to answer from, whether its own addresses are offered, and the mesh.
@@ -31,7 +113,8 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
         paths.stun = PathSessions.resolve(server)
         if paths.stun.isEmpty { log("! remote: \(server) couldn't be looked up: only this Mac's own addresses will be offered") }
     }
-    let keys = RemoteKeys(store: KeychainCredentialStore(service: Brand.remoteKeychainService))
+    let keys = RemoteAccess.keys
+    var problem: String?
     paths.name = (Host.current().localizedName ?? "Pond").filter { $0.isLetter || $0.isNumber }
     if let relay = settings.relay, !settings.mesh {
         let addresses = PathSessions.resolve(relay, port: 3480)
@@ -40,16 +123,17 @@ func startRemote(_ settings: Config.Remote?, log: @escaping @Sendable (String) -
         } else {
             log(addresses.isEmpty ? "! remote: the relay \(relay) couldn't be looked up"
                                   : "! remote: no secret for the relay (pond remote relay-secret): it isn't used")
+            problem = addresses.isEmpty ? "The relay \(relay) couldn\u{2019}t be found." : "The relay has no secret, so it isn\u{2019}t used."
         }
     }
     do {
         let host = try RemoteHost(keys: keys, name: Host.current().localizedName ?? "Pond", signaling: url, paths: paths, log: log)
         host.start()
         log("remote: reachable through \(url.host() ?? address), \(host.devices().count) paired")
-        return host
+        return (host, problem)
     } catch {
         log("! remote access is off: this Mac's keys can't be kept (\(error))")
-        return nil
+        return (nil, "This Mac\u{2019}s keys can\u{2019}t be kept in the Keychain (\(error)).")
     }
 }
 
@@ -283,7 +367,7 @@ enum RemoteCommand {
             return SearchCommand.fail("No secret given.")
         }
         do { try keys.setRelaySecret(secret) } catch { return SearchCommand.fail("It couldn't be kept: \(error)") }
-        print("✓ Kept in the Keychain. Restart the service to use it: pond service restart")
+        print("✓ Kept in the Keychain. The service takes it up with: pond service reload")
         return 0
     }
 }

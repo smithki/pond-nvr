@@ -174,13 +174,6 @@ struct RecordingAndHomeKit: ServiceRunning {
         }) { line in log.log("pond", line) }
         cameras.controls = controls
         restarter.controls = controls
-        controls.reload = {
-            switch cameras.reload() {
-            case let .applied(summary): (summary, false, false)
-            case let .needsRestart(why): (why, true, false)
-            case let .failed(why): (why, false, true)
-            }
-        }
         // Search, for the app and `pond search`: done here, where what it takes is kept ready.
         if let events {
             let search = SearchService(store: events, cameras: { cameras.cameras }, keptDays: { config.retention.events.days })
@@ -190,19 +183,27 @@ struct RecordingAndHomeKit: ServiceRunning {
                                     plain: request.plain ?? false)
             }
         }
-        // Remote access, when it's on: this Mac kept reachable through its signaling service, and paired with.
-        let remote = startRemote(config.remote) { line in log.log("pond", line) }
-        if let remote {
-            controls.remote = { await RemoteCommand.handle($0, host: remote) }
-            // What paired devices ask over their sessions: the cameras, their events (pictures, clips), their
-            // controls and search, live video.
-            let api = RemoteAPI.Server(cameras: { cameras.cameras }, password: { cameras.password($0) }, events: events,
-                                       eventsFolder: { config.storage.eventsPath }, control: { await controls.answer($0) },
-                                       live: LiveSender { line in log.log("pond", line) })
-            remote.paths.requests = { await api.serve($0, action: $1, body: $2) }
-            remote.paths.sessionEnded = { api.ended($0) }
+        // Remote access, when it's on: this Mac kept reachable through its signaling service, and paired with. What
+        // paired devices ask over their sessions: the cameras, their events (pictures, clips), their controls and
+        // search, live video. Its settings are taken up as they change (a reload), recording untouched.
+        let remote = RemoteAccess(api: RemoteAPI.Server(cameras: { cameras.cameras }, password: { cameras.password($0) }, events: events,
+                                                        eventsFolder: { config.storage.eventsPath }, control: { await controls.answer($0) },
+                                                        live: LiveSender { line in log.log("pond", line) })) { line in log.log("pond", line) }
+        remote.apply(config.remote)
+        controls.remote = { await remote.handle($0) }
+        defer { remote.stop() }
+        // A reload (the app's, `pond service reload`): the cameras that changed started again, and remote access if
+        // its settings did.
+        let configPath = self.configPath
+        controls.reload = {
+            let remoteChange = (try? ConfigStore(path: configPath).load()).flatMap { remote.apply($0.remote) }
+            func with(_ summary: String) -> String { remoteChange.map { summary == "nothing changed" ? $0 : "\(summary); \($0)" } ?? summary }
+            return switch cameras.reload() {
+            case let .applied(summary): (with(summary), false, false)
+            case let .needsRestart(why): (why, true, false)
+            case let .failed(why): (why, false, true)
+            }
         }
-        defer { remote?.stop() }
         controls.start()
         recording.run(for: seconds)
         cameras.stopAll()

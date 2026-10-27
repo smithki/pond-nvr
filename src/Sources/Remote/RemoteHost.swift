@@ -46,7 +46,17 @@ public final class RemoteHost: @unchecked Sendable {
         client.start()
     }
 
-    public func stop() { lock.withLock { client }?.stop() }
+    /// Stopped: no longer reachable, every session ended.
+    public func stop() {
+        lock.withLock { client }?.stop()
+        paths.closeAll()
+    }
+
+    /// Connected to the signaling service now (so devices can reach it).
+    public var isReachable: Bool { lock.withLock { client }?.isConnected ?? false }
+
+    /// The signaling service's host, as the settings name it.
+    public var signalingHost: String { signaling.host() ?? signaling.absoluteString }
 
     /// A new pairing code: for a device (or another Pond) to pair with this one, for ten minutes, once.
     public func newCode() -> PairingCode { pairing.newCode(signaling: signaling.absoluteString) }
