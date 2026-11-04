@@ -569,8 +569,15 @@ struct CameraRail: View {
     @AppStorage("liveRailWidth") private var width = CameraRail.defaultWidth
     @State private var dragStart: Double?
     @Environment(AppModel.self) private var model
-    /// Whether cameras are scrolled on under the rail's header and footer.
-    @State private var overflow = RailOverflow(top: false, bottom: false)
+    /// Where the cameras are, and where the header ends and the footer begins, in the rail.
+    @State private var contentSpan = 0.0 ... 0.0
+    @State private var headerBottom = 0.0
+    @State private var footerTop = 0.0
+    /// Whether cameras are under the rail's header and footer now.
+    var overflow: RailOverflow {
+        RailOverflow(top: contentSpan.lowerBound < headerBottom - 1, bottom: footerTop > 0 && contentSpan.upperBound > footerTop + 1)
+    }
+    static let railSpace = "rail"
     /// Ponds whose cameras are folded away in the rail (their ids; "" this Mac), kept.
     @AppStorage("railFoldedPonds") private var foldedText = ""
 
@@ -593,41 +600,51 @@ struct CameraRail: View {
         // The cameras the rail's whole height, scrolling on under its header and footer: bars of translucent glass,
         // blurring what passes under them.
         ScrollView {
-            // Several Ponds shown: a section each, on a panel of its own, under its name, folding away. While a
-            // camera's dragged, its Pond's panel is lit: its cameras are the ones it can go among.
-            let groups = model.cameraGroups
-            if groups.count > 1 {
-                VStack(alignment: .leading, spacing: Self.pondGap) {
-                    ForEach(groups, id: \.name) { group in
-                        let key = group.pond ?? ""
-                        let ids = Set(group.cameras.map(\.id))
-                        let lit = drag.camera.map { AppModel.pond(of: $0) == group.pond && drag.source != .settings } ?? false
-                        VStack(alignment: .leading, spacing: 8) {
-                            PondHeading(name: group.name, pond: group.pond, count: ids.count, folded: folding(key))
-                            if !foldedPonds.contains(key) {
-                                grid(cameras.filter { ids.contains($0.id) })
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
+            VStack(spacing: 0) {
+                // Several Ponds shown: a section each, on a panel of its own, under its name, folding away. While a
+                // camera's dragged, its Pond's panel is lit: its cameras are the ones it can go among.
+                let groups = model.cameraGroups
+                if groups.count > 1 {
+                    VStack(alignment: .leading, spacing: Self.pondGap) {
+                        ForEach(groups, id: \.name) { group in
+                            let key = group.pond ?? ""
+                            let ids = Set(group.cameras.map(\.id))
+                            let lit = drag.camera.map { AppModel.pond(of: $0) == group.pond && drag.source != .settings } ?? false
+                            VStack(alignment: .leading, spacing: 8) {
+                                PondHeading(name: group.name, pond: group.pond, count: ids.count, folded: folding(key))
+                                if !foldedPonds.contains(key) {
+                                    grid(cameras.filter { ids.contains($0.id) })
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
                             }
+                            .padding(8)
+                            .background(lit ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.45)),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Color.accentColor.opacity(lit ? 0.6 : 0), lineWidth: 1.5)
+                            }
+                            .animation(.easeOut(duration: 0.15), value: lit)
                         }
-                        .padding(8)
-                        .background(lit ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.45)),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.accentColor.opacity(lit ? 0.6 : 0), lineWidth: 1.5)
-                        }
-                        .animation(.easeOut(duration: 0.15), value: lit)
                     }
-                }
-                .padding(.horizontal, 8)
-                // Clear of the header bar by as much as the Ponds' panels are of each other.
-                .padding(.top, Self.pondGap)
-                .padding(.bottom, 12)
-            } else {
-                grid(cameras)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 8)
+                    // Clear of the header bar by as much as the Ponds' panels are of each other.
+                    .padding(.top, Self.pondGap)
                     .padding(.bottom, 12)
+                } else {
+                    grid(cameras)
+                        .padding(.horizontal, 12)
+                        // (A little clear of the header at rest, so nothing's under it until the cameras move.)
+                        .padding(.top, 4)
+                        .padding(.bottom, 12)
+                }
             }
+            // Where the cameras are, against the bars (told from the first: the scroll view's own geometry is only
+            // told as it changes).
+            .onGeometryChange(for: ClosedRange<Double>.self) { g in
+                let f = g.frame(in: .named(Self.railSpace))
+                return f.minY ... max(f.minY, f.maxY)
+            } action: { contentSpan = $0 }
         }
         .scrollIndicators(.automatic)
         .safeAreaBar(edge: .top, spacing: 0) {
@@ -643,7 +660,8 @@ struct CameraRail: View {
                 .padding(.bottom, 8)
             }
             .frame(maxWidth: .infinity)
-            .background(RailBar(edge: .bottom, ruled: overflow.top))
+            .overlay(alignment: .bottom) { hairline(overflow.top) }
+            .onGeometryChange(for: Double.self) { $0.frame(in: .named(Self.railSpace)).maxY } action: { headerBottom = $0 }
         }
         .safeAreaBar(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
@@ -661,15 +679,13 @@ struct CameraRail: View {
                 .padding(.vertical, 8)
             }
             .frame(maxWidth: .infinity)
-            .background(RailBar(edge: .top, ruled: overflow.bottom))
+            .overlay(alignment: .top) { hairline(overflow.bottom) }
+            .onGeometryChange(for: Double.self) { $0.frame(in: .named(Self.railSpace)).minY } action: { footerTop = $0 }
         }
-        // The system's own blur under the bars (hard: a clear edge where they meet the cameras).
-        .scrollEdgeEffectStyle(.hard, for: [.top, .bottom])
-        // Whether cameras are under the header or the footer now (each bar then ruled off from them).
-        .onScrollGeometryChange(for: RailOverflow.self) { g in
-            RailOverflow(top: g.contentOffset.y > -g.contentInsets.top + 1,
-                         bottom: g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom < g.contentSize.height - 1)
-        } action: { _, now in overflow = now }
+        // (The bars blur what's under them themselves. The system's edge effect off: it draws a line along a bar
+        // whether or not anything's under it; the bars draw their own, only while something is.)
+        .scrollEdgeEffectHidden(true, for: [.top, .bottom])
+        .coordinateSpace(.named(Self.railSpace))
         .frame(width: width.clamped(to: Self.widths))
         .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomLeading))
         // (What scrolls under the bars kept inside the rail's corners.)
@@ -695,6 +711,11 @@ struct CameraRail: View {
 }
 
 extension CameraRail {
+    /// A bar's edge facing the cameras: ruled off from them while some are under it.
+    func hairline(_ shown: Bool) -> some View {
+        Rectangle().fill(.separator).frame(height: 1).opacity(shown ? 1 : 0).animation(.easeOut(duration: 0.15), value: shown)
+    }
+
     var foldedPonds: Set<String> { Set(foldedText.split(separator: ",").map { $0 == "-" ? "" : String($0) }) }
 
     func folding(_ key: String) -> Binding<Bool> {
@@ -735,25 +756,6 @@ extension CameraRail {
 struct RailOverflow: Equatable {
     var top: Bool
     var bottom: Bool
-}
-
-/// The rail's header or footer bar's edge facing the cameras: a hairline while there are some under it (the blur is
-/// the system's scroll edge effect, under bars of `safeAreaBar`).
-struct RailBar: View {
-    /// The edge that faces the cameras.
-    let edge: VerticalEdge
-    let ruled: Bool
-
-    var body: some View {
-        Color.clear
-            .overlay(alignment: edge == .top ? .top : .bottom) {
-                Rectangle()
-                    .fill(.separator)
-                    .frame(height: 1)
-                    .opacity(ruled ? 1 : 0)
-            }
-            .animation(.easeOut(duration: 0.15), value: ruled)
-    }
 }
 
 /// Puts every camera on the stage. While they all are, it shows so: tinted, with a checkmark that morphs in

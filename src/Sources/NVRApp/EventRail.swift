@@ -71,13 +71,10 @@ struct ActivityRail: View {
         let span = Self.span(window, today: today, days: days)
         ScrollView {
             ZStack(alignment: .topLeading) {
-                // The hours in view: under the cells (a hovered cell grows over it).
+                // The hours in view: shaded under the cells, outlined over them (the busiest hours' colour doesn't
+                // cover its edge).
                 RailWindow(start: drawn?.start ?? 0, end: drawn?.end ?? 0, days: days)
                     .fill(.white.opacity(0.12))
-                    .overlay {
-                        RailWindow(start: drawn?.start ?? 0, end: drawn?.end ?? 0, days: days)
-                            .stroke(.white.opacity(0.85), lineWidth: 1.5)
-                    }
                     .opacity(span == nil ? 0 : 1)
                     .animation(.easeOut(duration: 0.2), value: span == nil)
                     .allowsHitTesting(false)
@@ -87,6 +84,23 @@ struct ActivityRail: View {
                             counts: counts, busiest: busiest)
                             .zIndex(hovered?.back == back ? 1 : 0)
                     }
+                }
+                RailWindow(start: drawn?.start ?? 0, end: drawn?.end ?? 0, days: days)
+                    .stroke(.white.opacity(0.85), lineWidth: 1.5)
+                    .opacity(span == nil ? 0 : 1)
+                    .animation(.easeOut(duration: 0.2), value: span == nil)
+                    .allowsHitTesting(false)
+                // The hour under the pointer, lifted over everything (the outline too), in its own colour.
+                if let hovered {
+                    // One at a time, there at once and gone at once (it grows on its own, from its own middle): moving
+                    // the pointer along a row leaves no others fading behind it.
+                    LiftedCell()
+                        .id("\(hovered.back)-\(hovered.h)")
+                        .padding(.leading, Self.cellsX + Double(hovered.h) * (Self.cell + Self.gap))
+                        .padding(.top, Double(hovered.back) * (Self.row + Self.rowGap) + Self.pad)
+                        .allowsHitTesting(false)
+                        .transition(.identity)
+                        .transaction { $0.animation = nil }
                 }
             }
             .frame(width: Self.width, alignment: .topLeading)
@@ -236,8 +250,8 @@ struct RailWindow: Shape {
     }
 }
 
-/// An hour in the rail: shaded by how much happened; one with events grows a little under the pointer (its hour
-/// said beside it), and a click takes the grid there.
+/// An hour in the rail: shaded by how much happened; one with events lifted under the pointer (drawn by the rail, over
+/// the outline of the hours on screen; its hour said beside it), and a click takes the grid there.
 struct RailCell: View {
     let count: Int
     let busiest: Double
@@ -251,15 +265,7 @@ struct RailCell: View {
         let lit = count > 0
         RoundedRectangle(cornerRadius: 1.5)
             .fill(lit ? AnyShapeStyle(Color.accentColor.opacity(0.25 + 0.75 * Double(count) / busiest)) : AnyShapeStyle(.quaternary.opacity(0.5)))
-            .overlay {
-                if lit {
-                    RoundedRectangle(cornerRadius: 1.5).strokeBorder(.white.opacity(hovering ? 0.9 : 0), lineWidth: 1)
-                }
-            }
             .frame(width: ActivityRail.cell, height: ActivityRail.cellHeight)
-            .scaleEffect(lit && hovering ? 1.45 : 1)
-            .zIndex(hovering ? 1 : 0)
-            .animation(.snappy(duration: 0.15), value: hovering)
             // As wide as the gaps either side: a tiny cell, easy to hit.
             .contentShape(Rectangle().inset(by: -ActivityRail.gap))
             .onHover { inside in
@@ -268,5 +274,22 @@ struct RailCell: View {
             }
             .pointerStyle(lit ? .link : nil)
             .onTapGesture { if lit { go() } }
+    }
+
+}
+
+/// An hour with events under the pointer: its colour whole, grown a little from its own middle, lifted on a soft
+/// shadow.
+struct LiftedCell: View {
+    @State private var grown = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(Color.accentColor)
+            .brightness(0.08)
+            .frame(width: ActivityRail.cell, height: ActivityRail.cellHeight)
+            .scaleEffect(grown ? 1.5 : 1)
+            .shadow(color: .black.opacity(grown ? 0.55 : 0), radius: 2.5, y: 1)
+            .onAppear { withAnimation(.snappy(duration: 0.15)) { grown = true } }
     }
 }

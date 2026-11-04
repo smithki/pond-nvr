@@ -9,6 +9,23 @@ import SwiftUI
 struct PondSwitcher: View {
     @Environment(AppModel.self) private var model
     let openSettings: (SettingsTab) -> Void
+    @State private var nudged = false
+
+    /// What the mark says, first in its tooltip.
+    var markMeaning: String {
+        if case let .pond(id) = model.shownPonds, let pond = model.otherPonds.first(where: { $0.id == id }) {
+            return model.isConnected(pond) ? "\(pond.name) is connected (\(model.connection(pond).lowercased()))."
+                                           : "\(pond.name) isn\u{2019}t connected right now."
+        }
+        let name = model.thisPondName == "This Mac" ? "This Mac\u{2019}s" : "\(model.thisPondName)\u{2019}s"
+        return switch model.serviceState {
+        case _ where model.isRestartingRecorder: "\(name) recorder is restarting."
+        case .running where model.needsRestart: "\(name) recorder is running with old settings: restart it to use the new ones."
+        case .running: "Recording: \(name) recorder is running."
+        case .stopped: "Not recording: \(name) recorder has stopped."
+        case .notInstalled: "Not recording: \(name) recorder isn\u{2019}t installed."
+        }
+    }
 
     var body: some View {
         let switches = !model.otherPonds.isEmpty
@@ -17,16 +34,29 @@ struct PondSwitcher: View {
         } label: {
             HStack(spacing: 6) {
                 PondMark()
+                    .symbolEffect(.bounce, value: model.shownPondsNudge)
                 // With only this Mac, its recorder's state in words, as it always was; with others to choose from,
                 // which Pond is shown (its state in the mark and the help).
                 Text(switches ? model.shownName : model.recorderWords)
+                    // Changed by something else (a camera of a Pond not shown chosen in Events): lit a moment. (The
+                    // toolbar's glass can't be tinted or outlined, and what's drawn past the label is cut off: the
+                    // label's own words are what can say so.)
+                    .foregroundStyle(nudged ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
             }
             .padding(.horizontal, 4)
+            // Changed by something else (a camera of a Pond not shown chosen in Events): the button glows a moment, the
+            // whole of it, then fades.
+            .task(id: model.shownPondsNudge) {
+                guard model.shownPondsNudge > 0 else { return }
+                withAnimation(.easeIn(duration: 0.15)) { nudged = true }
+                try? await Task.sleep(for: .seconds(1.2))
+                withAnimation(.easeOut(duration: 1)) { nudged = false }
+            }
         }
         .menuIndicator(switches ? .visible : .hidden)
         .fixedSize()
-        .help(switches ? "Showing \(model.shownName) (\(model.thisPondName): \(model.recorderWords.lowercased())). Click to show another Pond, or for the recorder\u{2019}s settings."
-                       : "The background recorder. Click for its settings.")
+        .help(markMeaning + (switches ? " Showing \(model.shownName). Click to show another Pond, or for the recorder\u{2019}s settings."
+                                      : " Click for its settings."))
     }
 }
 
@@ -76,11 +106,13 @@ struct PondMark: View {
         } else {
             switch model.serviceState {
             case _ where model.isRestartingRecorder:
-                Image(systemName: "arrow.clockwise").foregroundStyle(.secondary).symbolEffect(.rotate, options: .repeating)
+                Image(systemName: "arrow.clockwise").foregroundStyle(.secondary)
             case .running where model.needsRestart:
                 Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.orange)
             case .running:
-                Image(systemName: "record.circle.fill").foregroundStyle(.red).symbolEffect(.pulse, options: .repeating)
+                Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                    // Recording now: a ring spreading from it now and then, faintly.
+                    .background { RecordingRipple() }
             case .stopped:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             case .notInstalled:
@@ -240,5 +272,23 @@ struct PondHeading: View {
         }
         .buttonStyle(.plain)
         .help(folded ? "Show \(name)\u{2019}s cameras" : "Fold \(name)\u{2019}s cameras away")
+    }
+}
+
+/// A thin ring spreading out from the recording mark and fading, every couple of seconds: it's live.
+struct RecordingRipple: View {
+    static let period = 2.2
+
+    var body: some View {
+        SwiftUI.TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
+            // Out over the first two thirds of each period, then nothing until the next.
+            let p = min(1, t / 0.66)
+            Circle()
+                .stroke(Color.red, lineWidth: 1.5)
+                .scaleEffect(0.8 + 0.6 * p)
+                .opacity(t < 0.66 ? 0.6 * (1 - p) : 0)
+        }
+        .allowsHitTesting(false)
     }
 }

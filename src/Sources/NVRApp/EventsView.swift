@@ -233,7 +233,10 @@ struct EventsView: View {
             } actions: {
                 // Only some Ponds shown: the others a click away.
                 if model.shownPonds != .all, !model.remotePonds.isEmpty {
-                    Button("Show All Ponds") { withAnimation(.snappy(duration: 0.3)) { model.shownPonds = .all } }
+                    Button("Show All Ponds") {
+                        model.shownPonds = .all
+                        model.shownPondsNudge += 1
+                    }
                 }
             }
             .padding(.top, barHeight)
@@ -440,10 +443,21 @@ struct EdgeGlass: View {
 
 /// The filters, a bar over the top of the grid: the camera, and a chip a kind (how many there are of it), on or off.
 struct EventsFilterBar: View {
+    /// The camera filtered by, as the filter says it (its Pond's too, with several); else all of them.
+    var cameraTitle: String {
+        guard let id = model.eventsState.camera else { return "All Cameras" }
+        let name = model.allCameraGroups.flatMap(\.cameras).first { $0.id == id }?.name ?? "A removed camera"
+        guard !model.remotePonds.isEmpty else { return name }
+        let pond = AppModel.pond(of: id).flatMap { p in model.remotePonds.first { $0.id == p }?.name } ?? model.thisPondName
+        return "\(name) \u{00B7} \(pond)"
+    }
+
     /// A camera to filter by (nil: all of them): one of a Pond not shown shows all Ponds, so its events are there.
     func choose(camera: String?) {
+        // (At once: the toolbar's button, its glass resizing, doesn't animate its words changing well.)
         if let camera, !model.shownPonds.includes(AppModel.pond(of: camera)) {
-            withAnimation(.snappy(duration: 0.3)) { model.shownPonds = .all }
+            model.shownPonds = .all
+            model.shownPondsNudge += 1
         }
         model.eventsState.camera = camera
     }
@@ -488,25 +502,72 @@ struct EventsFilterBar: View {
 
     var filters: some View {
         HStack(spacing: 10) {
-            Picker("Camera", selection: Binding(get: { model.eventsState.camera }, set: { choose(camera: $0) })) {
-                Text("All Cameras").tag(String?.none)
-                // Several Ponds: a section each, those not shown too (said so, last), so a camera is never missing
-                // from here; choosing one of theirs shows its Pond as well.
+            // As wide as the activity rail under it, whatever it lists; a tinted chip while it filters by a camera (as
+            // the kinds' are while on), with a way back to all of them.
+            Menu {
+                let selection = Binding(get: { model.eventsState.camera }, set: { choose(camera: $0) })
                 let groups = model.allCameraGroups
-                if groups.count > 1 {
-                    let shown = groups.filter { model.shownPonds.includes($0.pond) }, hidden = groups.filter { !model.shownPonds.includes($0.pond) }
-                    ForEach(shown + hidden, id: \.name) { group in
-                        Section(model.shownPonds.includes(group.pond) ? group.name : "\(group.name) \u{2014} not shown") {
-                            ForEach(group.cameras) { Text($0.name).tag(Optional($0.id)) }
+                let shown = groups.filter { model.shownPonds.includes($0.pond) }, hidden = groups.filter { !model.shownPonds.includes($0.pond) }
+                Picker("Camera", selection: selection) {
+                    Text("All Cameras").tag(String?.none)
+                    // Several Ponds shown: a section each.
+                    if groups.count > 1 {
+                        ForEach(shown, id: \.name) { group in
+                            Section(group.name) {
+                                ForEach(group.cameras) { Text($0.name).tag(Optional($0.id)) }
+                            }
+                        }
+                    } else {
+                        Divider()
+                        ForEach(cameras) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                }
+                .pickerStyle(.inline)
+                // Those not shown, folded away a submenu each, so a camera is never missing from here; choosing one of
+                // theirs shows its Pond as well.
+                if !hidden.isEmpty {
+                    Section("Other Ponds") {
+                        ForEach(hidden, id: \.name) { group in
+                            Menu(group.name) {
+                                Picker(group.name, selection: selection) {
+                                    ForEach(group.cameras) { Text($0.name).tag(Optional($0.id)) }
+                                }
+                                .pickerStyle(.inline)
+                            }
                         }
                     }
-                } else {
-                    Divider()
-                    ForEach(cameras) { Text($0.name).tag(Optional($0.id)) }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: model.eventsState.camera == nil ? "video" : "video.fill")
+                    Text(cameraTitle).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(width: ActivityRail.width)
+                .background(model.eventsState.camera == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.accentColor.opacity(0.35)),
+                            in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.accentColor.opacity(model.eventsState.camera == nil ? 0 : 0.8), lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .overlay(alignment: .trailing) {
+                // Filtering: back to every camera, at a click.
+                if model.eventsState.camera != nil {
+                    Button { choose(camera: nil) } label: {
+                        Image(systemName: "xmark.circle.fill").font(.callout).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 26)
+                    .help("Show every camera\u{2019}s events")
                 }
             }
-            .labelsHidden()
-            .fixedSize()
+            .animation(.snappy(duration: 0.2), value: model.eventsState.camera)
             ForEach(kinds) { kind in
                 let on = !model.eventsState.hidden.contains(kind)
                 Button {

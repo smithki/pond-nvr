@@ -113,6 +113,8 @@ final class AppModel {
     var remoteOrder: [String: [String]] = (UserDefaults.standard.dictionary(forKey: "remoteCameraOrder") as? [String: [String]]) ?? [:] {
         didSet { UserDefaults.standard.set(remoteOrder, forKey: "remoteCameraOrder") }
     }
+    /// Counted up when another action changes which Ponds are shown (not the button's own menu): the button says so.
+    var shownPondsNudge = 0
     /// The stage has cameras of more than one Pond on it now (their tiles then say which).
     var stageMixesPonds = false
     /// Settings were saved while the service ran with the old ones.
