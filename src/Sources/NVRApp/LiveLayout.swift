@@ -66,3 +66,15 @@ enum LiveLayout {
                                    bottomTrailingCorner: corner == .bottomTrailing ? window : floating)
     }
 }
+
+extension ConcentricRectangle {
+    /// A panel's corners: `radius`, floating; down by the window's bottom edge, the bottom two follow the window's
+    /// curve instead, its radius less the panel's inset (as an iOS sheet's bottom corners do the screen's), never
+    /// under 8 pt.
+    static func panel(radius: CGFloat, byWindowBottom: Bool) -> ConcentricRectangle {
+        let floating = Edge.Corner.Style.fixed(radius)
+        let window = byWindowBottom ? Edge.Corner.Style.concentric(minimum: .fixed(8)) : floating
+        return ConcentricRectangle(topLeadingCorner: floating, topTrailingCorner: floating,
+                                   bottomLeadingCorner: window, bottomTrailingCorner: window)
+    }
+}

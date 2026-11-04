@@ -26,6 +26,9 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 
 ### The app
 - **Narrow windows**: the Timeline's bar keeps its playback controls on one row down to the smallest window, the rarer controls and then the zoom moving into a ⋯ menu; the kinds' chips fold to symbols and then to one menu. In Events the filters fold the same way on one row, the activity rail goes when there's no room for it or to make room for the details panel, and in the narrowest window the details panel covers the cards until it's closed.
+  - **Size classes in Events**: resizing the window lays the grid out at once; only going from one class to another (the rail giving way, the panel covering the cards) animates. In the narrowest window the panel rises from the bottom out of a blur, the cards fading away behind it (and the glass at the edges with them), its bottom corners following the window's; it comes and goes the way the window's class is when it does.
+  - **The search's row** under the filters eases in and out, the cards moving with it. The details panel scrolls with a scroller when it's taller than the window.
+- **Timeline polish**: every lane shows, not scrolling, unless the picture would get less than a third of the height; lanes are one height however many there are. The cameras' names are buttons (the watched one tinted, the others shown under the pointer); the zoom menu is a control of its own beside the time; the lanes' panel's bottom corners follow the window's; the lanes keep clear of their scroller, and so does the way back to the playhead. The boxes are "Draw Boxes Around Identified Objects". Fixed: an event's card cut off a sentence of two or three lines.
 
 ### Name
 - **The app is Pond NVR** (`Pond NVR.app`): its name in the menu bar, the Dock and the Finder. Pond is still what it calls itself, and the command is still `pond`. `make app` moves a login service from the old Pond.app to the new one.

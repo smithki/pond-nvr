@@ -69,7 +69,7 @@ Something is in a watched zone by where it stands: the bottom middle of its box 
 
 ### Boxes on the timeline
 
-The service keeps what each look of the model found (things that matter: people, vehicles, bikes, animals, packages, items), with how sure, where, the track it was followed as, and whether the camera's zones counted it: a few looks a second, only while something moves, kept as long as events. The timeline's boxes button (or B) draws them over the recording: each in its kind's colour, labelled with what it is and how sure; what the zones ignored (someone on a TV) dimmed and dashed. They're never drawn into the recording itself (it stays as the camera sent it) nor into the Home app's picture (its hub does its own detection, which boxes would get in the way of, and its clips are kept as sent).
+The service keeps what each look of the model found (things that matter: people, vehicles, bikes, animals, packages, items), with how sure, where, the track it was followed as, and whether the camera's zones counted it: a few looks a second, only while something moves, kept as long as events. The timeline's boxes button (or B; *Draw Boxes Around Identified Objects* in its ⋯ menu in a narrow window) draws them over the recording: each in its kind's colour, labelled with what it is and how sure; what the zones ignored (someone on a TV) dimmed and dashed. They're never drawn into the recording itself (it stays as the camera sent it) nor into the Home app's picture (its hub does its own detection, which boxes would get in the way of, and its clips are kept as sent).
 
 ### In the Home app
 

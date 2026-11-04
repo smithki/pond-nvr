@@ -46,6 +46,11 @@ struct EventDetail: View {
     @State private var isClip = false
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
+    @Environment(\.panelCovers) private var covers
+
+    /// Its corners: 18 pt, floating beside the cards; over them (a narrow window, down to its bottom edge), the bottom
+    /// two follow the window's curve.
+    static func shape(covering: Bool) -> ConcentricRectangle { .panel(radius: 18, byWindowBottom: covering) }
 
     var body: some View {
         ScrollView {
@@ -58,8 +63,11 @@ struct EventDetail: View {
             }
             .padding(16)
         }
-        .scrollIndicators(.never)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // (Its scroller when there's more than fits, as the system shows them: on scrolling, or always by the Mac's
+        // setting.)
+        .scrollIndicators(.automatic)
+        .contentMargins(.vertical, 8, for: .scrollIndicators)
+        .background(.quaternary.opacity(0.5), in: Self.shape(covering: covers))
         .task { await prepare() }
         .onDisappear {
             looper?.disableLooping()
@@ -233,7 +241,7 @@ struct EventDetail: View {
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .circle)
                 .padding(8)
-                .help(boxes ? "Hide the boxes" : "Show boxes round what was found")
+                .help(boxes ? "Stop drawing boxes around identified objects" : "Draw boxes around identified objects")
             }
         }
         .overlay(alignment: .bottomLeading) {

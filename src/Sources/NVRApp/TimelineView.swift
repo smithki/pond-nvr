@@ -29,8 +29,9 @@ struct TimelineView: View {
     /// slide from wherever it was when last shown).
     @State private var settled = false
 
-    /// Without a choice, the lanes take what they need, up to this share of the height.
-    static let automaticShare = 0.4
+    /// Without a choice, the lanes take what they need (every one showing, not scrolling), as long as the picture
+    /// keeps this much of the height.
+    static let pictureKeeps = 0.3
     static let linger = Duration.milliseconds(350)
     static let slide = Animation.snappy(duration: 0.22)
     /// The lanes' panel easing to a new height (other Ponds shown, or one folded).
@@ -47,11 +48,11 @@ struct TimelineView: View {
         }
     }
 
-    /// The lanes panel's height: what the user chose, or what the lanes need up to the automatic share;
+    /// The lanes panel's height: what the user chose, or what the lanes need (the picture keeping its share);
     /// never less than two lanes, nor more than all of them.
     func lanesHeight(cameras n: Int, total: Double) -> Double {
         let full = TimelineLanes.fullHeight(cameras: n)
-        let chosen = lanesShare >= 0 ? lanesShare * total : min(full, Self.automaticShare * total)
+        let chosen = lanesShare >= 0 ? lanesShare * total : min(full, (1 - Self.pictureKeeps) * total)
         return min(full, max(TimelineLanes.minimumHeight(cameras: n), chosen))
     }
 
@@ -169,7 +170,8 @@ struct TimelineView: View {
                         .buttonStyle(.plain)
                         .glassEffect(.regular.interactive(), in: .capsule)
                         .help("Back to the playhead")
-                        .padding(before ? .leading : .trailing, before ? TimelineLanes.labelWidth + 24 : 24)
+                        // (Clear of the lanes' scroller, when they scroll.)
+                        .padding(before ? .leading : .trailing, before ? TimelineLanes.labelWidth + 24 : 24 + (fits ? 0 : 22))
                         .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
                 }
@@ -411,6 +413,7 @@ struct TimelineView: View {
 
 struct TimelineControls: View {
     @Bindable var timeline: TimelineModel
+    @State private var zoomHovered = false
 
     var body: some View {
         // As much as fits: everything in one bar; a narrower one (the rarer controls in a menu, the zoom a menu too);
@@ -572,7 +575,7 @@ struct TimelineControls: View {
                 .foregroundStyle(timeline.showBoxes ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 .frame(width: 28)
         }
-        .help(timeline.showBoxes ? "Hide the boxes round what was found (B)" : "Show boxes round what was found, with how sure (B)")
+        .help(timeline.showBoxes ? "Stop drawing boxes around identified objects (B)" : "Draw boxes around identified objects, with how sure Pond is of each (B)")
     }
 
     // Sound: for recordings and live alike, off until turned on.
@@ -604,7 +607,7 @@ struct TimelineControls: View {
             Divider()
             Menu("Speed: \(Self.speed(timeline.rate))") { speedPicker }
                 .disabled(timeline.nearPresent)
-            Toggle("Boxes Round What Was Found", isOn: $timeline.showBoxes)
+            Toggle("Draw Boxes Around Identified Objects", isOn: $timeline.showBoxes)
             Toggle("Sound", isOn: Binding(get: { !timeline.muted }, set: { timeline.muted = !$0 }))
                 .disabled(!timeline.hasAudio)
         } label: {
@@ -641,15 +644,21 @@ struct TimelineControls: View {
                     }
                     .pickerStyle(.inline)
                 } label: {
+                    // A capsule of its own, so it reads as a control apart from the time beside it.
                     HStack(spacing: 4) {
                         Text(timeline.zoom.title)
                         Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.fill.opacity(zoomHovered ? 1 : 0.6), in: Capsule())
+                    .contentShape(Capsule())
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .onHover { zoomHovered = $0 }
                 .help("How much of the day the timeline shows")
             } else if zoom {
                 CapsuleSegments(selection: $timeline.zoom, options: TimelineModel.Zoom.allCases) { $0.title }
@@ -787,6 +796,8 @@ struct TimelineLanes: View, @MainActor Animatable {
     @State private var lanesWidth: CGFloat?
     /// The label a dragged camera is over.
     @State private var dropTarget: String?
+    /// The camera name under the pointer.
+    @State private var hoveredLabel: String?
     /// Moves the first camera to where the second is.
     let reorder: (String, String) -> Void
 
@@ -794,9 +805,9 @@ struct TimelineLanes: View, @MainActor Animatable {
     static let rulerHeight = 26.0
     static let padding = 8.0
 
-    /// Roomier with few cameras, never so thin that marks are hard to read or hit: with many, the lanes
-    /// scroll instead.
-    static func laneHeight(cameras n: Int) -> Double { n <= 6 ? 36 : 30 }
+    /// The same however many there are (one Pond's or every Pond's, folded or not), so the lanes look alike
+    /// whatever's shown: never so thin that marks are hard to read or hit. With many, the lanes scroll instead.
+    static func laneHeight(cameras n: Int) -> Double { 32 }
 
     /// The panel's height with every lane showing.
     static func fullHeight(cameras n: Int) -> Double {
@@ -904,6 +915,9 @@ struct TimelineLanes: View, @MainActor Animatable {
                         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lanesWidth = $0 }
                     }
                     .frame(height: restingHeight)
+                    // A gap between the lanes and their scroller, when there's one (the ruler above follows the lanes'
+                    // width).
+                    .padding(.trailing, scrolls ? 6 : 0)
                 }
                 // (Never, not hidden, when the rows fit: hidden gives way to "Show scroll bars: Always".)
                 .scrollIndicators(scrolls ? .automatic : .never)
@@ -922,7 +936,8 @@ struct TimelineLanes: View, @MainActor Animatable {
         })
         .padding(.horizontal, 14)
         .padding(.vertical, Self.padding)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // (Its bottom corners by the window's: following its curve.)
+        .background(.quaternary.opacity(0.5), in: ConcentricRectangle.panel(radius: 18, byWindowBottom: true))
         .task(id: timeline.isToday) {
             while timeline.isToday, !Task.isCancelled {
                 clock = Date()
@@ -1013,20 +1028,35 @@ struct TimelineLanes: View, @MainActor Animatable {
         // Its Pond not heard from yet, and no heading of its own to say so (that Pond shown alone): beside its name.
         let pond = ControlSocket.RemotePond.split(camera.id)?.pond
         let waiting = timeline.awaitingOtherPonds.contains(camera.id) && !cameras.contains { $0.id == Self.headingPrefix + (pond ?? "") }
+        let hovered = hoveredLabel == camera.id
         return Button { Task { await timeline.select(camera: camera.id) } } label: {
+            // A button's shape, as tall as its lane: the watched camera's tinted, the others' shown under the pointer.
             HStack(spacing: 5) {
                 Text(camera.name)
                     .font(.callout.weight(selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : hovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if waiting { ProgressView().controlSize(.mini) }
             }
-            .padding(.trailing, 8)
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            // (Its fill and outline one shape, always there: they change together, never one without the other.)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(.quaternary.opacity(hovered ? 0.8 : 0)))
+                    .strokeBorder(Color.accentColor.opacity(selected ? 0.5 : 0), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // (Inset as its lane is: the two the same height, side by side.)
+            .padding(.vertical, 5)
+            .padding(.trailing, 8)
         }
         .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { hoveredLabel = camera.id } else if hoveredLabel == camera.id { hoveredLabel = nil }
+        }
+        .animation(.easeOut(duration: 0.12), value: hovered)
         .frame(height: laneHeight)
         .background(alignment: .top) {
             // Where a dragged camera will land.
@@ -2001,7 +2031,12 @@ struct EventCallout: View {
                         .transition(.identity)
                 }
             } else {
-                Text(event.summary).font(.callout).frame(maxWidth: 260, alignment: .leading).transition(.identity)
+                // (Wrapped at the picture's width, and as tall as its lines: measured that way too, so a sentence of
+                // two or three lines doesn't spill past the card's foot.)
+                Text(event.summary).font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 260, alignment: .leading)
+                    .transition(.identity)
             }
             HStack(spacing: 4) {
                 Text(when)

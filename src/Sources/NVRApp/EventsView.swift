@@ -36,8 +36,6 @@ struct EventsView: View {
     /// The event the user's asked to delete (confirming), and those deleted (a read under way as they were may
     /// still have them).
     @State private var deleting: TimelineEvent?
-    /// The view's width (for whether the activity rail fits).
-    @State private var width = 0.0
     @State private var deleted: Set<String> = []
     /// How tall the filters' bar is (the grid scrolls on under it; the rail and panel start below it), and whether
     /// the grid's scrolled at all (anything under it: its glass shows).
@@ -85,24 +83,51 @@ struct EventsView: View {
             .sorted { $0.day > $1.day }
     }
 
-    /// The activity rail, beside the grid while there's room for both (a narrow window gives the grid the room).
+    /// The window's size class, from its width: what's beside the grid, and how the panel opens. Changes of class
+    /// animate (the rail sliding away or back); the grid reflowing as the window's resized within one doesn't.
+    enum SizeClass {
+        /// No room for the rail; the panel covers the cards, the window's width, until closed.
+        case narrow
+        /// The rail, which slides away for the panel (the cards would be too cramped beside both).
+        case medium
+        /// The rail, and the panel beside it.
+        case wide
+
+        init(_ width: Double) {
+            self = width == 0 || width >= EventsView.railWithPanelNeeds ? .wide : width >= EventsView.railNeeds ? .medium : .narrow
+        }
+    }
+    @State private var sizeClass = SizeClass.wide
+
     /// Whether the window's wide enough for the rail (the filters' camera menu is as wide as it then, over it).
-    var railFits: Bool { width == 0 || width >= Self.railNeeds }
+    var railFits: Bool { sizeClass != .narrow }
     static let railNeeds = 760.0
     @State private var opened = false
 
-    /// How wide the cards are with the rail and the panel both beside them (as many a row as with the panel closed).
-    var cardsBesidePanel: Double {
+    /// How wide the cards are with the rail and the panel both beside them, in a window this wide (as many a row as
+    /// with the panel closed).
+    static func cardsBesidePanel(_ width: Double) -> Double {
         let closed = width - 32 - (ActivityRail.width + 14)
         let columns = Double(columnCount(closed))
         return (closed - (EventDetail.width + 14) - 14 * (columns - 1)) / columns
     }
+    /// How wide the window must be for the cards beside both the rail and the panel never to be too cramped, at it
+    /// or wider. (The cards' width jumps as a row gains a card: one width, not the cards' own, so the rail doesn't
+    /// come and go as the window's resized.)
+    static let railWithPanelNeeds: Double = {
+        var width = 3000.0
+        while width > railNeeds, cardsBesidePanel(width - 1) >= cardsNeed { width -= 1 }
+        return width
+    }()
     /// With the panel open, the rail goes (sliding away) when the cards would be too cramped beside both.
-    var railMakesRoom: Bool { railFits && width > 0 && cardsBesidePanel < Self.cardsNeed }
+    var railMakesRoom: Bool { sizeClass == .medium }
     /// Narrower than the rail needs, the panel isn't beside the cards but over them, the window's width, until closed.
-    var panelCovers: Bool { width > 0 && !railFits }
+    var panelCovers: Bool { sizeClass == .narrow }
     /// How narrow the cards can get beside the panel (a row of them likes 300).
     static let cardsNeed = 220.0
+
+    /// The cards faded away under the panel (a narrow window, an event open).
+    var cardsHidden: Bool { selected != nil && panelCovers }
     var railShown: Bool { railFits && !(selected != nil && railMakesRoom) }
     /// How much narrower the panel opening makes the grid (less the rail's room, when it goes as the panel comes).
     var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom ? ActivityRail.width + 14 : 0) }
@@ -130,6 +155,9 @@ struct EventsView: View {
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Under the panel in a narrow window: faded away while it's open (back as it closes).
+                .opacity(cardsHidden ? 0 : 1)
+                .allowsHitTesting(!cardsHidden)
             // The panel's room (the panel's drawn over the glass at the window's edge, below).
             if selected != nil, !panelCovers {
                 Color.clear.frame(width: EventDetail.width)
@@ -140,13 +168,18 @@ struct EventsView: View {
         // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
         // out.png --inactive` without this, and look under the toolbar.)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { new in
+            // Into another size class: the rail and the panel move to their new places, animated.
+            let next = SizeClass(new)
+            if next != sizeClass { withAnimation(EventGrid.panelAnimation) { sizeClass = next } }
+        }
         // Glass over the grid's edges, blurring the cards that scroll on under them, the window's width, while
         // anything's under it: under the filters, easing out just below; at the window's edge, easing in towards it.
         .overlay(alignment: .bottom) {
             EdgeGlass(fromTop: false)
                 .frame(height: Self.bottomFade)
-                .opacity(underBottom ? 1 : 0)
+                // (Not while the cards are faded away: nothing under it.)
+                .opacity(underBottom && !cardsHidden ? 1 : 0)
                 .animation(.easeOut(duration: 0.2), value: underBottom)
         }
         // The panel, over the glass's layer and clear of it at the bottom (a surface of its own): an event's own (its
@@ -162,22 +195,25 @@ struct EventsView: View {
                         .id(selected.id)
                         .transition(.identity)
                 }
-                // (Over the cards, it hides them: its own surface's translucent.)
-                .background(panelCovers ? Color(nsColor: .windowBackgroundColor) : .clear,
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                // (Over the cards, it hides them: its own surface's translucent. Beside them too, where it looks the same,
+                // so the cards don't show through it as it widens over them, the window going narrow.)
+                .background(Color(nsColor: .windowBackgroundColor), in: EventDetail.shape(covering: panelCovers))
                 .frame(width: panelCovers ? nil : EventDetail.width)
                 .frame(maxWidth: panelCovers ? .infinity : nil, maxHeight: .infinity, alignment: .top)
                 .padding(.top, barHeight)
                 // (Ending where the glass at the window's edge begins: clear of it. Over the cards, to the edge.)
                 .padding(.bottom, panelCovers ? 16 : Self.bottomFade)
                 .padding(.horizontal, 16)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.modifier(active: PanelComing(away: true), identity: PanelComing(away: false)))
             }
         }
+        // (Read by the panel's coming and going as it moves: a panel opened in one size class and closed in another
+        // goes the way the window's class is now. A transition chosen here would be the one it came in with.)
+        .environment(\.panelCovers, panelCovers)
         .overlay(alignment: .top) {
             EdgeGlass(fromTop: true)
                 .frame(height: barHeight + Self.glassEase)
-                .opacity(scrolled ? 1 : 0)
+                .opacity(scrolled && !cardsHidden ? 1 : 0)
                 .animation(.easeOut(duration: 0.2), value: scrolled)
         }
         .overlay(alignment: .top) {
@@ -186,7 +222,11 @@ struct EventsView: View {
                             question: $question, searching: searching, slow: slow, problem: searchProblem, result: search,
                             submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
                 .padding(.top, 8)
-                .onGeometryChange(for: Double.self) { $0.size.height } action: { barHeight = $0 }
+                .onGeometryChange(for: Double.self) { $0.size.height } action: { height in
+                    // (The grid's top moving with the bar as a row under the filters comes or goes, at the row's pace.)
+                    // (Measured the first time: at once.)
+                    withAnimation(barHeight == 0 ? nil : .smooth(duration: 0.35)) { barHeight = height }
+                }
         }
 
         .onChange(of: selected?.id) { _, id in model.eventsState.selected = id }
@@ -447,7 +487,7 @@ struct EventsView: View {
             EventGrid(sections: days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) },
                          events: Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                          width: max(200, geo.size.width),
-                         columns: columnCount(geo.size.width + (open ? panelTakes : 0)),
+                         columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
                          panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh, request: $request,
                          name: name, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
@@ -460,7 +500,7 @@ struct EventsView: View {
 
     /// As many as fit at least 300 wide in the width there is without the panel (the panel narrows them, it doesn't
     /// change how many there are a row).
-    func columnCount(_ available: Double) -> Int { max(1, Int((available + 14) / (300 + 14))) }
+    static func columnCount(_ available: Double) -> Int { max(1, Int((available + 14) / (300 + 14))) }
 
     nonisolated static func dayTitle(_ day: Date) -> String {
         let calendar = Calendar.current
@@ -532,23 +572,42 @@ struct EventsFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             filters
-            if let problem {
-                Label(problem.words, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            } else if searching && slow {
-                Label("Getting search ready\u{2026} The first search after Pond starts takes a little longer.",
-                      systemImage: "hourglass")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            } else if let result {
-                SearchReading(result: result, remove: remove)
+            Group {
+                if let problem {
+                    Label(problem.words, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                } else if searching && slow {
+                    Label("Getting search ready\u{2026} The first search after Pond starts takes a little longer.",
+                          systemImage: "hourglass")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                } else if let result {
+                    SearchReading(result: result, remove: remove)
+                }
             }
+            // Down from under the filters, out of a blur, and back up into them; one to the next, crossfading.
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -10)).combined(with: Self.focusing),
+                                    removal: .opacity.combined(with: .offset(y: -10)).combined(with: Self.focusing)))
         }
+        .animation(.smooth(duration: 0.35), value: row)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    /// Which row's under the filters (for its coming and going, and from one to another).
+    enum Row: Equatable { case none, problem, slow, result }
+
+    var row: Row { problem != nil ? .problem : searching && slow ? .slow : result != nil ? .result : .none }
+
+    /// Coming into focus as it comes, out of it as it goes.
+    static let focusing = AnyTransition.modifier(active: Blurring(radius: 6), identity: Blurring(radius: 0))
+
+    struct Blurring: ViewModifier {
+        let radius: Double
+        func body(content: Content) -> some View { content.blur(radius: radius) }
     }
 
     // As much as fits, in one row while it can: the kinds named and the search roomy; the search narrower (its
@@ -846,5 +905,27 @@ struct SearchReading: View {
             words.append("\(hour(hours.from)) \u{2013} \(hour(hours.to))" + (time.range == nil ? ", any day" : ""))
         }
         return words.joined(separator: ", ")
+    }
+}
+
+extension EnvironmentValues {
+    /// Whether the Events view's panel covers the cards (a narrow window) or sits beside them.
+    @Entry var panelCovers = false
+}
+
+/// The Events view's panel coming or going, as the window's size class has it now: beside the cards, in from the
+/// side; over them, up from the bottom, out of a blur.
+struct PanelComing: ViewModifier {
+    let away: Bool
+    @Environment(\.panelCovers) private var covers
+
+    func body(content: Content) -> some View {
+        let away = away, covers = covers
+        content
+            .blur(radius: away && covers ? 24 : 0)
+            .opacity(away ? 0 : 1)
+            .visualEffect { view, proxy in
+                view.offset(x: away && !covers ? proxy.size.width + 16 : 0, y: away && covers ? proxy.size.height : 0)
+            }
     }
 }
