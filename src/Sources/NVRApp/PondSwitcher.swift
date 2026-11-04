@@ -53,7 +53,9 @@ struct PondSwitcher: View {
                 withAnimation(.easeOut(duration: 1)) { nudged = false }
             }
         }
-        .menuIndicator(switches ? .visible : .hidden)
+        // (A menu either way, and marked as one: in glass of its own beside the navigation buttons, as macOS puts a
+        // menu that says so. Unmarked, it was joined to their glass, alone; marked, apart, with other Ponds.)
+        .menuIndicator(.visible)
         .fixedSize()
         .help(markMeaning + (switches ? " Showing \(model.shownName). Click to show another Pond, or for the recorder\u{2019}s settings."
                                       : " Click for its settings."))

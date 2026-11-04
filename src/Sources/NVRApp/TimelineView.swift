@@ -1030,7 +1030,7 @@ struct TimelineLanes: View, @MainActor Animatable {
         let waiting = timeline.awaitingOtherPonds.contains(camera.id) && !cameras.contains { $0.id == Self.headingPrefix + (pond ?? "") }
         let hovered = hoveredLabel == camera.id
         return Button { Task { await timeline.select(camera: camera.id) } } label: {
-            // A button's shape, as tall as its lane: the watched camera's tinted, the others' shown under the pointer.
+            // A button's shape, as tall as its lane: the watched camera's shown, the others' under the pointer.
             HStack(spacing: 5) {
                 Text(camera.name)
                     .font(.callout.weight(selected ? .semibold : .regular))
@@ -1041,11 +1041,9 @@ struct TimelineLanes: View, @MainActor Animatable {
             }
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            // (Its fill and outline one shape, always there: they change together, never one without the other.)
             .background {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(selected ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(.quaternary.opacity(hovered ? 0.8 : 0)))
-                    .strokeBorder(Color.accentColor.opacity(selected ? 0.5 : 0), lineWidth: 1)
+                    .fill(.quaternary.opacity(selected ? 1 : hovered ? 0.6 : 0))
             }
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             // (Inset as its lane is: the two the same height, side by side.)
