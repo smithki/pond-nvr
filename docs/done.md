@@ -6,6 +6,8 @@ The roadmap's finished goals, by area, with how each was done. What's left is in
 
 | Goal | Notes |
 |---|---|
+| A menu bar item | Pond at a glance without its window (Settings › General, on by default): recording, or what's wrong; each camera's privacy; Live, Events, the doctor and Settings. While it's shown, closing the window leaves Pond running, watching the recorder; Open at Login starts it there quietly. |
+| Recording the sub-stream instead | Per camera (`recordsSub`, camera settings › Recording): the sub-stream recorded instead of the main stream, for a camera whose full resolution isn't worth the room; live view, HomeKit and detection use the streams as before. |
 | Continuous recording | 1-minute MP4 segments per camera, the camera's own video and sound, retention by age, size and free space. |
 | Live view | Every camera, main or sub-stream by tile size, sound for one camera at a time, health badges. |
 | Timeline | Any day, a lane per camera, scrubbing, speeds, zoom (remembered), sound, live mode. Plays the minute being written, a few seconds behind live. Real events with their pictures, filters for the kinds there are, private stretches. |

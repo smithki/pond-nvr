@@ -173,7 +173,7 @@ final class CameraSupervisor: @unchecked Sendable {
         let whole = (try? encoder.encode(served)).map { String(decoding: $0, as: UTF8.self) } ?? camera.id
         let zones = (try? encoder.encode(camera.zones)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         let reolink = !camera.isVideoOnly && CameraProviders.choices(for: camera.device).contains { $0.id == "reolink" }
-        return Parts(recording: "\(camera.main)\n\(login)",
+        return Parts(recording: "\(camera.recordedStream)\n\(login)",
                      homekit: camera.homekit ? "\(whole)\n\(login)" : nil,
                      keeper: camera.keepsLiveReady ? "\(camera.sub)\n\(login)" : nil,
                      baichuan: reolink && password != nil ? "\(camera.host)\n\(login)" : nil,

@@ -135,6 +135,14 @@ extension AppModel {
     /// again to apply it.
     /// Whether the camera is watched for detection, and its zones. (The running service takes them up with the
     /// settings' reload: only the camera's watcher starts again.)
+    /// Recorded from its sub-stream (or its main stream again).
+    func setRecordsSub(_ id: String, _ sub: Bool) {
+        update(affectsRecorder: false) { config in
+            guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
+            config.cameras[i].recordsSub = sub ? true : nil
+        }
+    }
+
     func setDetection(_ id: String, _ on: Bool, zones: [Config.Zone]) {
         update(affectsRecorder: false) { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }

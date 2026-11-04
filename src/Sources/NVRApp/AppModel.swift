@@ -115,6 +115,8 @@ final class AppModel {
     }
     /// Counted up when another action changes which Ponds are shown (not the button's own menu): the button says so.
     var shownPondsNudge = 0
+    /// Whether Pond is recording, watched while the app runs (ServiceWatch).
+    @ObservationIgnored let watch = ServiceWatch()
     /// The stage has cameras of more than one Pond on it now (their tiles then say which).
     var stageMixesPonds = false
     /// Settings were saved while the service ran with the old ones.
@@ -213,7 +215,12 @@ final class AppModel {
         self.helperPath = helperPath
         reload()
         refreshService()
+        watch.start(self)
+        Self.current = self
     }
+
+    /// The app's (for what isn't a view: a notification clicked).
+    nonisolated(unsafe) static weak var current: AppModel?
 
     // MARK: - Settings
 

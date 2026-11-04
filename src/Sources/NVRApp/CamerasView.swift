@@ -697,6 +697,7 @@ struct EditCameraSheet: View {
     @State private var homeKitVideo = Config.Camera.HomeKitVideo.camera
     @State private var homeKitRecording = false
     @State private var detection = true
+    @State private var recordsSub = false
     @State private var homeKitMotion = Config.Camera.HomeKitMotion.detection
     @State private var showHomeKitOptions = false
     @State private var zones: [Config.Zone] = []
@@ -749,6 +750,8 @@ struct EditCameraSheet: View {
 
                 homeKitSection
 
+                recordingSection
+
                 detectionSection
 
                 moreSection
@@ -782,6 +785,7 @@ struct EditCameraSheet: View {
             homeKitVideo = camera.homekitVideo ?? .camera
             homeKitRecording = camera.homekitRecording == true
             detection = camera.watches
+            recordsSub = camera.recordsSub == true
             homeKitMotion = camera.homekitMotion ?? .detection
             zones = camera.zones
             // Opened to fix the password: show the login.
@@ -1128,6 +1132,24 @@ struct EditCameraSheet: View {
         }
     }
 
+    /// Which of its streams is recorded.
+    var recordingSection: some View {
+        Section {
+            Picker(selection: $recordsSub) {
+                Text("Main stream").tag(false)
+                Text("Sub-stream").tag(true)
+            } label: {
+                Text("Record")
+                Text(recordsSub
+                     ? "Less sharp, and a fraction of the room: for a camera that doesn\u{2019}t need its full resolution kept. Live view and the Home app still use the main stream."
+                     : "Its sharpest picture, as it sends it.")
+            }
+            .disabled(subURL.trimmingCharacters(in: .whitespaces).isEmpty)
+        } header: {
+            Text("Recording")
+        }
+    }
+
     var detectionSection: some View {
         Section {
             Toggle(isOn: $detection) {
@@ -1232,6 +1254,7 @@ struct EditCameraSheet: View {
         if instantLive != saved.keepsLiveReady { model.setInstantLive(camera.id, instantLive) }
         if homeKitVideo != (saved.homekitVideo ?? .camera) { model.setHomeKitVideo(camera.id, homeKitVideo) }
         if homeKitRecording != (saved.homekitRecording == true) { model.setHomeKitRecording(camera.id, homeKitRecording) }
+        if recordsSub != (saved.recordsSub == true) { model.setRecordsSub(camera.id, recordsSub) }
         if detection != saved.watches || zones != saved.zones { model.setDetection(camera.id, detection, zones: zones) }
         if homeKitMotion != (saved.homekitMotion ?? .detection) { model.setHomeKitMotion(camera.id, homeKitMotion) }
         // The new way of talking to it, if it answers that way; else it stays as it was, and says so.

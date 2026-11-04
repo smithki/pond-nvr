@@ -190,6 +190,11 @@ public struct Config: Codable, Equatable, Sendable {
         /// events; nil for the default: on.
         public var detection: Bool?
         public var watches: Bool { detection ?? true }
+        /// Recorded from its sub-stream rather than its main stream (for a camera whose main stream takes more room
+        /// than it's worth); nil for the default: the main stream. Live view and HomeKit use both as ever.
+        public var recordsSub: Bool?
+        /// The stream recorded.
+        public var recordedStream: String { recordsSub == true && !sub.isEmpty ? sub : main }
         /// What sets its motion sensor in the Home app (which HomeKit Secure Video records on, and notifies about):
         /// Pond's detection (nil, the default, while the camera is watched: a person, vehicle, bike or animal in
         /// its zones), or the camera's own motion.
@@ -265,6 +270,7 @@ public struct Config: Codable, Equatable, Sendable {
             homekitVideo = try c.decodeIfPresent(HomeKitVideo.self, forKey: .homekitVideo)
             homekitRecording = try c.decodeIfPresent(Bool.self, forKey: .homekitRecording)
             detection = try c.decodeIfPresent(Bool.self, forKey: .detection)
+            recordsSub = try c.decodeIfPresent(Bool.self, forKey: .recordsSub)
             homekitMotion = try c.decodeIfPresent(HomeKitMotion.self, forKey: .homekitMotion)
         }
 

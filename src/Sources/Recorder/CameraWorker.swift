@@ -195,7 +195,7 @@ public final class CameraWorker: @unchecked Sendable {
             setStatus(.connecting)
             var recorder: StreamRecorder?
             do {
-                let session = try hub.open(url: camera.main, username: camera.username, password: password)
+                let session = try hub.open(url: camera.recordedStream, username: camera.username, password: password)
                 defer { session.close() }
                 let r = StreamRecorder(video: session.video, audio: session.audio, segmentSeconds: segmentSeconds)
                 recorder = r

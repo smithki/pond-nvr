@@ -57,6 +57,7 @@ struct GeneralSettings: View {
                 Text("How this Pond is shown beside others you\u{2019}ve paired with it, and the name devices pairing with it see.")
                     .foregroundStyle(.secondary)
             }
+            MenuBarSection()
             Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(Appearance.allCases) { Text($0.title).tag($0) }
@@ -173,5 +174,36 @@ struct PondNameField: View {
     func save() {
         let name = text.trimmingCharacters(in: .whitespaces)
         if (model.config?.name ?? "") != name { model.update(affectsRecorder: false) { $0.name = name.isEmpty ? nil : name } }
+    }
+}
+
+/// The menu bar item, and opening at login: what keeps Pond watching the recorder with its window closed.
+struct MenuBarSection: View {
+    @AppStorage(MenuBarItem.key) private var menuBarItem = true
+    @State private var atLogin = OpenAtLogin.isOn
+    @State private var problem: String?
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $menuBarItem) {
+                Text("Show in the menu bar")
+                Text("Whether Pond is recording, and each camera\u{2019}s privacy. Pond keeps running there when its window is closed, and tells you if it stops recording.")
+            }
+            Toggle(isOn: Binding(get: { atLogin }, set: { on in
+                problem = OpenAtLogin.set(on)
+                atLogin = OpenAtLogin.isOn
+            })) {
+                Text("Open at login")
+                Text(menuBarItem ? "In the menu bar, its window closed: after a restart (a power cut, say), you\u{2019}re told if Pond isn\u{2019}t recording."
+                                 : "So you\u{2019}re told after a restart if Pond isn\u{2019}t recording.")
+            }
+            // (Not the demo's copy of Pond: the real one is what opens at login.)
+            .disabled(DemoSession.scenario != nil)
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Watching the recorder")
+        }
     }
 }

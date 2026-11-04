@@ -3,12 +3,14 @@
 // stop it.
 import Control
 import SwiftUI
+import UserNotifications
 
 @main
 struct NVRApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
     @AppStorage(Appearance.key) private var appearance = Appearance.dark
+    @AppStorage(MenuBarItem.key) private var menuBarItem = true
 
     var body: some Scene {
         Window("Pond", id: "main") {
@@ -31,6 +33,13 @@ struct NVRApp: App {
                 .environment(model)
                 .preferredColorScheme(appearance.scheme)
         }
+
+        MenuBarExtra(isInserted: $menuBarItem) {
+            MenuBarMenu().environment(model)
+        } label: {
+            MenuBarLabel().environment(model)
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
@@ -440,10 +449,19 @@ struct CheckLinesView: View {
 /// request from the Dock or a script is turned down before the app is asked. So both come here. An unsaved
 /// sheet is dropped, as Cancel would.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Closing the main window closes the rest (Settings, and any sheet on it) as well: the app is that
     /// window, and what was opened from it goes with it.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+        // Opened at login, with the menu bar item: quietly, its window closed (the service watched from the menu bar).
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        if event?.eventID == kAEOpenApplication,
+           event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem, MenuBarItem.isShown {
+            DispatchQueue.main.async {
+                for window in NSApp.windows where window.identifier?.rawValue.hasPrefix("main") == true { window.close() }
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
             nonisolated(unsafe) let object = note.object
             MainActor.assumeIsolated {
@@ -455,6 +473,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+
+    /// With the menu bar item, closing the window leaves Pond running (watching the service); without, it quits.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !MenuBarItem.isShown }
 
     func applicationWillTerminate(_ notification: Notification) {
         // A demo's own services go with it.
@@ -469,6 +490,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func quitEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         Self.quit()
+    }
+
+    /// The service watch's notification clicked: where it's fixed, open.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let tab = (response.notification.request.content.userInfo["settings"] as? String).flatMap(SettingsTab.init(rawValue:))
+        await MainActor.run {
+            if let tab { AppModel.current?.settingsTab = tab }
+            NSApp.activate()
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+    }
+
+    /// Shown even while Pond is the app in front.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 
     static func quit() {

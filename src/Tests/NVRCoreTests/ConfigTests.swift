@@ -29,6 +29,16 @@ import Testing
         }
     }
 
+    @Test func aCameraCanBeRecordedFromItsSubStream() throws {
+        var camera = try #require(Self.good.cameras.first)
+        #expect(camera.recordedStream == camera.main)
+        camera.recordsSub = true
+        #expect(camera.recordedStream == camera.sub)
+        // (One without a sub-stream: its main stream still.)
+        camera.sub = ""
+        #expect(camera.recordedStream == camera.main)
+    }
+
     @Test func theMeshRangesAreRanges() {
         var config = Self.good
         config.remote = .init(enabled: true, mesh: true, meshSubnets: ["100.64.0.0/10", "fd7a:115c:a1e0::/48", "10.8.0.0/24"])
