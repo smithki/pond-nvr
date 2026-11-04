@@ -49,6 +49,8 @@ public final class PathSessions: @unchecked Sendable {
         public var problem: String?
         /// Why no path was found, and what would fix it.
         public var diagnosis: String?
+        /// Found in mesh mode (its addresses the tunnel's).
+        public var mesh = false
 
         /// In a few words, without the addresses: "connected over IPv4, through the routers' public addresses, 23 ms".
         public var summary: String {
@@ -56,7 +58,7 @@ public final class PathSessions: @unchecked Sendable {
             guard let pair else { return diagnosis ?? "no path found" }
             let family = pair.remote.address.isIPv6 ? "IPv6" : "IPv4"
             let how = switch pair.remote.kind {
-            case .host: "on the same network, or straight to its own address"
+            case .host: mesh ? "over your mesh" : "on the same network, or straight to its own address"
             case .srflx, .prflx: "through the routers' public addresses"
             case .relay: "through the relay"
             }
@@ -376,7 +378,9 @@ public final class PathSessions: @unchecked Sendable {
         session.connectedAt = Date()
         session.connected()
         kept = true
-        return (Outcome(pair: pair, took: Date().timeIntervalSince(start)), session)
+        var outcome = Outcome(pair: pair, took: Date().timeIntervalSince(start))
+        if case .mesh = settings.mode { outcome.mesh = true }
+        return (outcome, session)
     }
 
     /// A session let go (the other side told).
@@ -391,15 +395,17 @@ public final class PathSessions: @unchecked Sendable {
     /// Whether a session's still open (not ended by either side, or its path lost).
     public func isOpen(_ session: Session) -> Bool { lock.withLock { sessions[session.id] != nil } }
 
+    /// Those connected now (by their ids), and how: "IPv6, directly", "IPv4, over the mesh".
     public var connected: [(peer: String, how: String)] {
-        lock.withLock { Array(sessions.values) }.compactMap { session in
+        let mesh = if case .mesh = settings.mode { true } else { false }
+        return lock.withLock { Array(sessions.values) }.compactMap { session in
             guard case let .connected(pair) = session.finder.state else { return nil }
             let how = switch (pair.local.kind, pair.remote.kind) {
             case (.relay, _), (_, .relay): "through the relay"
-            case (.host, .host): "directly"
+            case (.host, .host): mesh ? "over the mesh" : "directly"
             default: "through the routers"
             }
-            return (session.peer.name, "\(pair.remote.address.isIPv6 ? "IPv6" : "IPv4"), \(how)")
+            return (session.peer.id, "\(pair.remote.address.isIPv6 ? "IPv6" : "IPv4"), \(how)")
         }.sorted { $0.peer < $1.peer }
     }
 

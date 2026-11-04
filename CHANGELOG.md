@@ -5,6 +5,8 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 ## Unreleased
 
 ### Remote access
+- **Mesh mode, finished**: Settings › Remote Access shows whether this Mac has an address in the mesh (and which) as soon as it's on, and takes other ranges than Tailscale's (*Mesh ranges*, checked as they're saved); a connection over the mesh says so (it said "on the same network", or "directly"). **The mesh profile works**: Headscale is served over HTTPS by Caddy, at a domain of its own (`POND_MESH_DOMAIN`), as Tailscale's apps require (it was plain HTTP on 8443). ([docs/remote.md](docs/remote.md#using-a-mesh))
+- **Other Ponds show as connected** in the Recording button's menu and the camera rail while they are (connections were told by name, and looked for by id).
 - **Other Ponds in the app**, beside this Mac: the Recording button chooses which are shown (all, this Mac, or another), and says when something else changes that.
   - **Live**: their cameras live, over one session per Pond; the camera rail in a section per Pond (folding away, reordered here), with each camera's latest picture; their controls and privacy.
   - **Events**: their events among this Mac's, pictures fetched as shown, clips playing as they come; search asks every Pond shown; the camera filter grouped by Pond.

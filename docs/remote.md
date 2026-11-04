@@ -92,6 +92,16 @@ The fixes, in the order to try them:
 3. **Use a mesh**: Tailscale (or your own Headscale) on both, and `remote.mesh: true`. Connections then go only over the mesh's tunnel, which it makes work through almost anything.
 4. **Run a relay of your own**: `docker compose --profile relay up -d` in `deploy/`, then `remote.relay` on each Mac and its secret with `pond remote relay-secret`. Everything then goes through it when nothing better works; it's chosen last.
 
+## Using a mesh
+
+If your Macs are on Tailscale (or Headscale, or another WireGuard mesh) already, Pond can connect over it alone: only the tunnel's addresses are offered, so no public address is learned or exchanged, and no relay is used. The mesh is your own: Pond doesn't talk to Tailscale or need an account linked, it finds the tunnel's address on the Mac and connects over it.
+
+1. **Tailscale on both ends**, signed in to the same account (or the Pond's Mac shared with the other's tailnet), connected: the Mac has a `100.x.y.z` address.
+2. **Pair them** as usual (*Pair a Device…*, *Join Another Pond…*): pairing goes through the signaling service, mesh or not.
+3. **Settings › Remote Access › Connect: Only over my mesh**, on both (`remote.mesh: true`). Settings then shows this Mac's address in the mesh, or that it has none (Tailscale isn't connected). *Try Connecting* says it connected over your mesh.
+
+A tailnet with access rules stricter than Tailscale's default must let the two Macs reach each other over UDP; a fixed port (`remote.port`) makes that rule simple. A mesh with other ranges than Tailscale's (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`): give them under *Mesh ranges* (`remote.meshSubnets`). To run the control server yourself, `deploy/`'s `mesh` profile is Headscale behind Caddy's HTTPS ([deploy/README.md](../deploy/README.md)).
+
 ## What each party sees
 
 | Who | Sees | Never sees |

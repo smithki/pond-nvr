@@ -3,7 +3,8 @@
 #
 #   POND_SIGNAL_DOMAIN=signal.example.com docker compose up -d                   # signaling + STUN (+ HTTPS)
 #   POND_SIGNAL_DOMAIN=… docker compose --profile relay up -d                    # and a relay of your own (coturn)
-#   POND_SIGNAL_DOMAIN=… docker compose --profile mesh up -d                     # and a private mesh (Headscale)
+#   POND_SIGNAL_DOMAIN=… POND_MESH_DOMAIN=mesh.example.com \
+#     docker compose --profile mesh up -d                                        # and a private mesh (Headscale)
 #
 # See README.md here.
 services:
@@ -19,12 +20,14 @@ services:
       - "3478:3478/udp"
       - "3479:3479/udp"
 
-  # HTTPS for the signaling service (wss://your-domain), with a certificate from Let's Encrypt.
+  # HTTPS for the signaling service (wss://your-domain), and for Headscale at its own domain when the mesh runs,
+  # with certificates from Let's Encrypt.
   caddy:
     image: caddy:2
     restart: unless-stopped
     environment:
       - POND_SIGNAL_DOMAIN
+      - POND_MESH_DOMAIN
     ports:
       - "80:80"
       - "443:443"
@@ -45,14 +48,16 @@ services:
       - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
 
   # A private WireGuard mesh (Tailscale's open-source control server): Pond's "only over my mesh" connects over it
-  # alone. Join your Mac and devices with Tailscale's apps, pointed at this server.
+  # alone. Join your Mac and devices with Tailscale's apps, pointed at https://POND_MESH_DOMAIN. Its HTTPS is
+  # Caddy's; only its relay's STUN is its own.
   headscale:
     profiles: ["mesh"]
     image: headscale/headscale:0.26
     restart: unless-stopped
     command: serve
+    expose:
+      - "8080"
     ports:
-      - "8443:8080"
       - "3481:3481/udp"
     volumes:
       - ./headscale/config.yaml:/etc/headscale/config.yaml:ro

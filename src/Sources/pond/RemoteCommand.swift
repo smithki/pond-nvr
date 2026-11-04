@@ -104,14 +104,20 @@ final class RemoteAccess: @unchecked Sendable {
             var reply = ControlSocket.Reply()
             let (host, problem) = lock.withLock { (self.host, self.problem) }
             let relaySecret = Self.keys.relaySecret() != nil
-            guard let host else {
+            if let host {
+                reply.remote = .init(on: true, reachable: host.isReachable, signaling: host.signalingHost,
+                                     devices: host.devices().map { .init(id: $0.id, name: $0.name) },
+                                     connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
+                                     relaySecret: relaySecret, problem: problem)
+            } else {
                 reply.remote = .init(on: false, relaySecret: relaySecret, problem: problem)
-                return reply
             }
-            reply.remote = .init(on: true, reachable: host.isReachable, signaling: host.signalingHost,
-                                 devices: host.devices().map { .init(id: $0.id, name: $0.name) },
-                                 connected: host.paths.connected.map { .init(device: $0.peer, how: $0.how) },
-                                 relaySecret: relaySecret, problem: problem)
+            // In mesh mode, whether this Mac has an address in the mesh now (and which).
+            if let settings = lock.withLock({ applied?.settings }), settings.mesh {
+                let subnets = settings.meshSubnets?.compactMap(Subnet.init) ?? []
+                reply.remote?.meshAddresses = Gatherer.hosts(port: 0, mode: .mesh(subnets: subnets.isEmpty ? Gatherer.tailnet : subnets))
+                    .map { String($0.address.description.dropLast(2)).trimmingCharacters(in: CharacterSet(charactersIn: "[]")) }
+            }
             return reply
         case "remote.all-events":
             // Every other Pond's events, begun from `from` to `to`, or in the last `seconds` (for the app; `remote.events`

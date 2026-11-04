@@ -2,3 +2,10 @@
 {$POND_SIGNAL_DOMAIN} {
 	reverse_proxy signal:8080
 }
+
+# HTTPS for Headscale (profile mesh) at a domain of its own: Tailscale's apps log in to it only over HTTPS, and its
+# relay (DERP) is served the same way. Without POND_MESH_DOMAIN, this is localhost (Caddy's own certificate, no
+# request to Let's Encrypt), and unused.
+{$POND_MESH_DOMAIN:localhost} {
+	reverse_proxy headscale:8080
+}

@@ -29,6 +29,16 @@ import Testing
         }
     }
 
+    @Test func theMeshRangesAreRanges() {
+        var config = Self.good
+        config.remote = .init(enabled: true, mesh: true, meshSubnets: ["100.64.0.0/10", "fd7a:115c:a1e0::/48", "10.8.0.0/24"])
+        #expect(config.problems() == [])
+        for bad in ["100.64.0.0", "100.64.0.0/33", "300.1.1.1/8", "fd7a::/129", "mesh/8", "fd7a::1::2/64"] {
+            config.remote = .init(enabled: true, mesh: true, meshSubnets: [bad])
+            #expect(config.problems().count == 1, "\(bad)")
+        }
+    }
+
     @Test func missingSectionsGetDefaults() throws {
         let json = #"{"storage": {"recordings": "/Volumes/Pond/recordings", "database": "/tmp/pond.sqlite"}}"#
         let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))

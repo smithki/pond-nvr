@@ -41,7 +41,6 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 
 | Goal | Status | Notes |
 |---|---|---|
-| Mesh mode | in progress | "Only over my mesh": with Tailscale or Headscale, connections are made over the tunnel alone (candidates from its interface only, no STUN, no relay), so no public address is ever exchanged. Built and tested on a made-up network; still to try on a real tailnet (Tailscale's, or Headscale from `deploy/`). |
 | The iPhone app | later | A separate program (an App Store–friendly licence for the protocol it shares, which the CLA allows), on the same protocol: live, events, clips, search. |
 | A hosted service | later | Signaling, an opt-in relay and push alerts with a snapshot (APNs needs a sender of Pond's) run for those who'd rather not, for a small fee (a few dollars a month); open source too, to deploy oneself. Video stays end-to-end encrypted through the relay. |
 | Models | later | Detection models beyond the built-in one (packages, or fitted to a home's own scenes), perhaps from others, from an official Pond model marketplace. Any model's terms are its maker's and travel with its file; the built-in one is Ultralytics YOLO26 (AGPL-3.0, as Pond is). Should Pond need other terms one day (a commercial or App Store version), the ways out: Ultralytics' enterprise licence, another built-in model, or YOLO26 as an optional download from the marketplace. |

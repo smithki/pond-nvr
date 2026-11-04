@@ -5,7 +5,7 @@ Pond reaches your Mac from outside peer to peer: your devices connect to it dire
 | Service | What it does | What it sees |
 |---|---|---|
 | `signal` (always) | Passes envelopes between your Mac and your paired devices, so they can agree how to connect; answers STUN, so each learns the address the internet sees it at. | Which mailboxes (hashes of keys) talk, when, and how much. Never what's in an envelope: each is sealed to its recipient's key and signed by its sender. Keeps nothing. |
-| `caddy` (always) | HTTPS for the signaling service (`wss://your-domain`), with a free certificate. | The same. |
+| `caddy` (always) | HTTPS for the signaling service (`wss://your-domain`), and for Headscale when the mesh runs, with free certificates. | The same. |
 | `coturn` (profile `relay`) | A relay, for when your Mac and a device can't reach each other directly (both behind strict NAT or carrier-grade NAT, and no IPv6). Pond doesn't use one unless you set it. | Both ends' addresses, and the encrypted video passing through. |
 | `headscale` (profile `mesh`) | A private WireGuard mesh, for Pond's "only over my mesh" mode: no public address ever exchanged. | Your mesh's devices. |
 
@@ -18,7 +18,7 @@ POND_SIGNAL_DOMAIN=signal.example.com docker compose up -d
 
 Point a DNS name at the server first, and open TCP 80 and 443 (HTTPS) and UDP 3478 and 3479 (STUN: the second tells a Pond what kind of router it is behind, for diagnosing connections). Then in Pond: Settings › Remote Access › Signaling server: `wss://signal.example.com`.
 
-With a relay: set `static-auth-secret` in `turnserver.conf`, open UDP 3480 and 49160–49200, start with `--profile relay`, and give Pond the relay's address and the same secret. With the mesh: set `server_url` in `headscale/config.yaml`, open TCP 8443 and UDP 3481, start with `--profile mesh`, and join your Mac and devices with Tailscale's apps pointed at it.
+With a relay: set `static-auth-secret` in `turnserver.conf`, open UDP 3480 and 49160–49200, start with `--profile relay`, and give Pond the relay's address and the same secret. With the mesh: point a second DNS name at the server (`mesh.example.com`), set `server_url` in `headscale/config.yaml` to `https://` it, open UDP 3481 (its relay's STUN; HTTPS is Caddy's, on 443), and start with `POND_MESH_DOMAIN=mesh.example.com docker compose --profile mesh up -d`. Then make a user and a key to join with (`docker compose exec headscale headscale users create me`, then `… headscale preauthkeys create --user me`), and join your Mac and devices with Tailscale's apps pointed at `https://mesh.example.com` (on a Mac: `tailscale login --login-server https://mesh.example.com --auth-key …`).
 
 ## Updating the signaling service
 

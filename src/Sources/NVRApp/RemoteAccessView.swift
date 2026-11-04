@@ -16,6 +16,8 @@ struct RemoteAccessView: View {
     @State private var signaling = ""
     @State private var relay = ""
     @State private var port = ""
+    /// The mesh's ranges, comma separated (empty: Tailscale's).
+    @State private var meshSubnets = ""
     @State private var secret = ""
     @FocusState private var focused: Field?
     @State private var pairing: Pairing?
@@ -28,7 +30,7 @@ struct RemoteAccessView: View {
     @State private var tested: [String: (ok: Bool, words: String)] = [:]
     @State private var problem: String?
 
-    enum Field { case signaling, relay, port, secret }
+    enum Field { case signaling, relay, port, secret, meshSubnets }
 
     struct Pairing: Identifiable {
         var code: String
@@ -88,6 +90,15 @@ struct RemoteAccessView: View {
                     Text("Directly, over any network").tag(false)
                     Text("Only over my mesh (Tailscale, Headscale)").tag(true)
                 }
+                if remote.mesh {
+                    LabeledContent("Mesh") { meshLabel }
+                    LabeledContent("Mesh ranges") {
+                        TextField("Mesh ranges", text: $meshSubnets, prompt: Text("Tailscale\u{2019}s"))
+                            .labelsHidden()
+                            .focused($focused, equals: .meshSubnets)
+                            .onSubmit(saveFields)
+                    }
+                }
                 Toggle(isOn: Binding(get: { remote.shareLocalAddresses }, set: { share in save { $0.shareLocalAddresses = share } })) {
                     Text("Offer this Mac\u{2019}s own addresses")
                     Text("Only its temporary IPv6 addresses, never its fixed one. Off, devices on this network meet it through the router.")
@@ -122,7 +133,7 @@ struct RemoteAccessView: View {
                 Text("Connections")
             } footer: {
                 Text(remote.mesh
-                    ? "Connections are made over your mesh\u{2019}s tunnel alone: no public address is learned or offered, and no relay is used."
+                    ? "Connections are made over your mesh\u{2019}s tunnel alone: no public address is learned or offered, and no relay is used. Turn it on at both ends. Mesh ranges: Tailscale\u{2019}s (100.64.0.0/10, fd7a:115c:a1e0::/48) unless you give others, comma separated."
                     : "Direct paths are tried first, IPv6 and IPv4. When none works, a fixed port forwarded on your router, or a relay of your own (coturn, in deploy/), gets through; the relay is used only then.")
                     .foregroundStyle(.secondary)
             }
@@ -183,7 +194,7 @@ struct RemoteAccessView: View {
 
     @ViewBuilder
     func deviceRow(_ device: ControlSocket.RemoteDevice) -> some View {
-        let connection = status?.connected.first { $0.device == device.name }
+        let connection = status?.connected.first { $0.device == device.id }
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
@@ -223,9 +234,26 @@ struct RemoteAccessView: View {
         signaling = remote.signaling ?? ""
         relay = remote.relay ?? ""
         port = remote.port.map(String.init) ?? ""
+        meshSubnets = (remote.meshSubnets ?? []).joined(separator: ", ")
     }
 
     /// The text fields saved (those that changed); one that isn't right is put back, the alert saying why.
+    /// Whether this Mac is in the mesh now: its address there, or what to check.
+    @ViewBuilder var meshLabel: some View {
+        switch status?.meshAddresses {
+        case let addresses? where !addresses.isEmpty:
+            Label("Connected: \(addresses.joined(separator: ", "))", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .textSelection(.enabled)
+        case _?:
+            Label("This Mac has no address in the mesh. Is Tailscale (or your Headscale client) connected?",
+                  systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case nil:
+            Text("\u{2014}").foregroundStyle(.secondary)
+        }
+    }
+
     func saveFields() {
         let trimmed = (signaling: signaling.trimmingCharacters(in: .whitespaces), relay: relay.trimmingCharacters(in: .whitespaces),
                        port: port.trimmingCharacters(in: .whitespaces))
@@ -235,7 +263,9 @@ struct RemoteAccessView: View {
             port = remote.port.map(String.init) ?? ""
             return
         }
+        let ranges = meshSubnets.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         save {
+            $0.meshSubnets = ranges.isEmpty ? nil : ranges
             $0.signaling = trimmed.signaling.isEmpty ? nil : trimmed.signaling
             $0.relay = trimmed.relay.isEmpty ? nil : trimmed.relay
             $0.port = trimmed.port.isEmpty ? nil : fixedPort

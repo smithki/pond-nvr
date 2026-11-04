@@ -263,12 +263,14 @@ public enum ControlSocket {
         public var reachable: Bool
         public var signaling: String?
         public var devices: [RemoteDevice]
-        /// Those connected now, and how ("IPv6, directly").
+        /// Those connected now (by their ids), and how ("IPv6, directly").
         public var connected: [Connection]
         /// Whether a relay's secret is kept (the relay isn't used without one).
         public var relaySecret: Bool
         /// Why it's off or not working, if it's something the settings can fix.
         public var problem: String?
+        /// In mesh mode: this Mac's addresses in the mesh now (none: its Tailscale, or other client, isn't connected).
+        public var meshAddresses: [String]?
 
         public struct Connection: Codable, Equatable, Sendable {
             public var device: String

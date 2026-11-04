@@ -522,6 +522,9 @@ extension Config {
            URL(string: signaling).map({ ["ws", "wss"].contains($0.scheme) && $0.host() != nil }) != true {
             out.append("remote.signaling must be a wss:// address (ws:// only for testing).")
         }
+        for subnet in remote?.meshSubnets ?? [] where !Self.isSubnet(subnet) {
+            out.append("remote.meshSubnets: \(subnet) isn\u{2019}t a range of addresses (100.64.0.0/10, fd7a:115c:a1e0::/48).")
+        }
 
         var seen = Set<String>()
         for camera in cameras {
@@ -565,6 +568,20 @@ extension Config {
     public static func isSlug(_ s: String) -> Bool {
         guard let first = s.unicodeScalars.first, ("a" ... "z").contains(first) else { return false }
         return s.unicodeScalars.allSatisfy { ("a" ... "z").contains($0) || ("0" ... "9").contains($0) || $0 == "-" }
+    }
+
+    /// "100.64.0.0/10", "fd7a:115c:a1e0::/48": an address and how many of its bits are the range's.
+    static func isSubnet(_ text: String) -> Bool {
+        let parts = text.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, let bits = Int(parts[1]), bits >= 0 else { return false }
+        let address = parts[0]
+        if address.contains(":") {
+            let groups = address.split(separator: ":", omittingEmptySubsequences: false)
+            guard bits <= 128, groups.count >= 3, groups.count <= 8, address.components(separatedBy: "::").count <= 2 else { return false }
+            return groups.allSatisfy { $0.count <= 4 && $0.allSatisfy(\.isHexDigit) }
+        }
+        let octets = address.split(separator: ".", omittingEmptySubsequences: false)
+        return bits <= 32 && octets.count == 4 && octets.allSatisfy { Int($0).map { (0 ... 255).contains($0) } == true && !$0.isEmpty }
     }
 
     /// Why this stream address is unusable, or nil if it is fine.
