@@ -676,6 +676,17 @@ struct RecorderSettings: Equatable {
 }
 
 /// What the Events view keeps across visits.
+extension AppModel {
+    /// An event (from the Timeline) in the Events view: chosen there, its details open, the filters let it show.
+    func showInEvents(_ event: TimelineEvent) {
+        if let camera = eventsState.camera, camera != event.camera { eventsState.camera = nil }
+        eventsState.hidden.remove(event.kind)
+        // (The Events view opens on the one chosen, in view, when it next loads.)
+        eventsState.selected = event.id
+        mode = .events
+    }
+}
+
 struct EventsState: Equatable {
     /// The event whose details are open.
     var selected: String?

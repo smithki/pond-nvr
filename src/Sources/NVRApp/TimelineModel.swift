@@ -16,6 +16,7 @@
 // Seeking anywhere leaves it.
 import AVFoundation
 import Detection
+import Devices
 import NVRCore
 import Observation
 import Recorder
@@ -68,10 +69,13 @@ final class TimelineModel {
     private(set) var firstRecording: Date?
     /// When each camera's recordings begin (its first segment): where a camera added later starts.
     private(set) var cameraStarts: [String: Date] = [:]
-    /// A camera that began recording after the timeline's beginning (more than a segment or two later), and
-    /// when: marked on its lane as added then.
+    /// A camera that began recording after its Pond's first did (more than a segment or two later), and when: marked
+    /// on its lane as added then.
     func added(_ camera: String) -> Date? {
-        guard let start = cameraStarts[camera], let first = firstRecording, start.timeIntervalSince(first) > 180 else { return nil }
+        // (Against its own Pond's beginning: another Pond's may have begun at another time.)
+        let pond = ControlSocket.RemotePond.split(camera)?.pond
+        let first = cameraStarts.filter { ControlSocket.RemotePond.split($0.key)?.pond == pond }.values.min()
+        guard let start = cameraStarts[camera], let first, start.timeIntervalSince(first) > 180 else { return nil }
         return start
     }
     /// The stretch of time whose recordings and events are loaded.
@@ -113,6 +117,16 @@ final class TimelineModel {
     }
     /// Where events and private stretches are read from (set from the settings before loading).
     var source: EventSource?
+    /// Other Ponds' cameras' recorded stretches and events between two times (set by the view while other Ponds are
+    /// shown): their recordings stay at their Ponds, so only what's there is drawn, and only their events' clips play.
+    @ObservationIgnored var otherPonds: ((_ from: Date, _ to: Date) async
+        -> (coverage: [String: [ClosedRange<Date>]], events: [TimelineEvent], starts: [String: Date]))?
+    /// Other Ponds' cameras being read for the first time (their lanes not drawn yet): said so on them.
+    private(set) var awaitingOtherPonds: Set<String> = []
+    /// Another Pond's event whose clip is playing (in place of a recording: theirs stay at their Pond).
+    var remoteClip: TimelineEvent?
+    /// The camera chosen is another Pond's.
+    var isRemoteCamera: Bool { camera.map { ControlSocket.RemotePond.split($0) != nil } ?? false }
     /// Boxes drawn over the recording round what was found (as the service saw it); remembered.
     var showBoxes = UserDefaults.standard.bool(forKey: "timelineBoxes") {
         didSet {
@@ -386,11 +400,13 @@ final class TimelineModel {
         let to = min(horizon, calendar.startOfDay(for: visible.upperBound).addingTimeInterval(2 * 86400))
         let source = self.source
         let known = live.mapValues(\.path)
+        // (This Mac's cameras from its own recordings; other Ponds' as their Ponds say, below.)
+        let own = cameras.filter { ControlSocket.RemotePond.split($0) == nil }
         let (found, starts, kept, privacy, writing) = await Task.detached {
             var out: [String: [RecordedSpan]] = [:]
             var starts: [String: Date] = [:]
             var writing: [String: LiveSegment] = [:]
-            for c in cameras {
+            for c in own {
                 out[c] = RecordingIndex.spans(base: base, camera: c, from: from, to: to, writing: true)
                 starts[c] = RecordingIndex.earliest(base: base, camera: c)
                 writing[c] = RecordingIndex.beingWritten(base: base, camera: c, known: known[c])
@@ -402,7 +418,6 @@ final class TimelineModel {
             live[c] = segment
         }
         for c in cameras where writing[c].map({ Date().timeIntervalSince($0.through) >= Self.liveTimeout }) ?? true { live[c] = nil }
-        let first = starts.values.min()
         // Ends: the segment being written ends where it's written (its file's last write); a finished one the next
         // follows on from, at the next one's start; a finished one before a gap (the camera went private, or
         // dropped), where its video does: measured, once (finished files don't change).
@@ -424,11 +439,24 @@ final class TimelineModel {
             }
         }
         spans = trimmed
-        firstRecording = first
-        cameraStarts = starts
-        coverage = trimmed.mapValues { RecordingIndex.coverage($0) }
+        var covered = trimmed.mapValues { RecordingIndex.coverage($0) }
+        var others: [TimelineEvent] = []
+        var allStarts = starts
+        if own.count < cameras.count, let otherPonds {
+            // Those not read before (just shown, or the first time): waiting, said so, until they've answered.
+            awaitingOtherPonds = Set(cameras.filter { ControlSocket.RemotePond.split($0) != nil && coverage[$0] == nil })
+            let (spans, events, theirStarts) = await otherPonds(from, to)
+            awaitingOtherPonds = []
+            covered.merge(spans) { a, _ in a }
+            others = events.filter { cameras.contains($0.camera) && $0.start < to }
+            allStarts.merge(theirStarts.filter { cameras.contains($0.key) }) { a, _ in a }
+        }
+        // Where the cameras shown began recording (other Ponds' as they say): the timeline's beginning.
+        firstRecording = allStarts.values.min()
+        cameraStarts = allStarts
+        coverage = covered
         // (Only when they changed: a reload that found nothing new changes nothing, and draws nothing again.)
-        let next = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : kept
+        let next = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : (kept + others).sorted { $0.start < $1.start }
         if next != events { events = next }
         privateSpans = privacy
         privacyRead = min(to, Date())
@@ -471,6 +499,19 @@ final class TimelineModel {
     }
 
     func play(_ event: TimelineEvent) async {
+        // Another Pond's: its clip, in place of the recording (theirs stay at their Pond).
+        if ControlSocket.RemotePond.split(event.id) != nil {
+            leaveLive()
+            pause()
+            clearQueue()
+            window = nil
+            camera = event.camera
+            nothingRecorded = false
+            atEnd = false
+            playhead = event.start
+            remoteClip = event
+            return
+        }
         if event.camera != camera {
             camera = event.camera
             window = nil
@@ -517,6 +558,7 @@ final class TimelineModel {
     /// The selected camera live, the playhead at the present (today, followed as the clock runs).
     func goLive() {
         guard camera != nil else { return }
+        remoteClip = nil
         pause()
         generation += 1
         window = nil
@@ -627,6 +669,7 @@ final class TimelineModel {
 
     func seek(to time: Date) async {
         guard let camera else { return }
+        remoteClip = nil
         leaveLive()
         atEnd = false
         let time = min(time, Date())

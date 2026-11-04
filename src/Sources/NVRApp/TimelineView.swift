@@ -2,6 +2,7 @@
 // what was recorded that day. Click or drag on the lanes to move through the day; click a lane to switch
 // camera.
 import AVFoundation
+import Devices
 import ImageIO
 import NVRCore
 import SwiftUI
@@ -18,6 +19,8 @@ struct TimelineView: View {
     @State private var shown: EventHover?
     @State private var dismissal: Task<Void, Never>?
     @State private var calloutSize = CGSize.zero
+    /// Other Ponds' pictures fetched for the callout (it's drawn again with each).
+    @State private var calloutPictures = 0
 
     /// The lanes panel's share of the view's height, chosen by dragging the grip; below zero, automatic.
     @AppStorage("timelineLanesShare") private var lanesShare = -1.0
@@ -30,12 +33,15 @@ struct TimelineView: View {
     static let automaticShare = 0.4
     static let linger = Duration.milliseconds(350)
     static let slide = Animation.snappy(duration: 0.22)
+    /// The lanes' panel easing to a new height (other Ponds shown, or one folded).
+    static let resize = 0.35
 
     /// The coordinate space the lanes report their marks in, and the callout is placed in.
     static let space = "timeline"
 
     var body: some View {
-        let cameras = model.config?.cameras ?? []
+        // Every Pond's shown (others' as lanes of their own, under their Pond's heading).
+        let cameras = model.cameraGroups.flatMap(\.cameras)
         GeometryReader { geo in
             content(cameras: cameras, height: geo.size.height)
         }
@@ -49,54 +55,134 @@ struct TimelineView: View {
         return min(full, max(TimelineLanes.minimumHeight(cameras: n), chosen))
     }
 
-    func content(cameras: [Config.Camera], height total: Double) -> some View {
-        let lanes = lanesHeight(cameras: cameras.count, total: total)
-        return VStack(spacing: 8) {
-            ZStack {
-                Color.black
-                PlayerLayerView(player: timeline.player)
-                // What was found, boxed (the recording only: live has no kept sightings yet).
-                // Drawn every frame while playing, at the player's exact time (the playhead updates five times a second).
-                if timeline.showBoxes, !timeline.isLive, let id = timeline.camera, let at = timeline.playhead {
-                    SwiftUI.TimelineView(.animation(minimumInterval: 1 / 60, paused: !timeline.playing)) { _ in
-                        DetectionBoxes(boxes: timeline.boxes(at: timeline.exactPlayhead() ?? at), aspect: CameraAspect.known(id) ?? 16.0 / 9.0)
+    /// The video: the recording (boxed), live, or another Pond's event's clip; what's going on over it.
+    func picture(_ cameras: [Config.Camera]) -> some View {
+        ZStack {
+            Color.black
+            PlayerLayerView(player: timeline.player)
+            // What was found, boxed (the recording only: live has no kept sightings yet).
+            // Drawn every frame while playing, at the player's exact time (the playhead updates five times a second).
+            if timeline.showBoxes, !timeline.isLive, let id = timeline.camera, let at = timeline.playhead {
+                SwiftUI.TimelineView(.animation(minimumInterval: 1 / 60, paused: !timeline.playing)) { _ in
+                    DetectionBoxes(boxes: timeline.boxes(at: timeline.exactPlayhead() ?? at), aspect: CameraAspect.known(id) ?? 16.0 / 9.0)
+                }
+                .allowsHitTesting(false)
+            }
+            if timeline.isLive, let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
+                TimelineLive(camera: camera).id(camera.id)
+            }
+            // Another Pond's event: its clip, as it comes (their recordings stay at their Pond).
+            if let clip = timeline.remoteClip, !timeline.isLive {
+                RemoteClipPlayer(event: clip, client: model.controlClient).id(clip.id)
+            }
+            if timeline.atEnd, !timeline.isLive {
+                EndOfRecording(timeline: timeline)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 18)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            overlayMessage
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            if let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
+                Text(pictureName(camera))
+                    .font(.headline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(12)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if timeline.isLive {
+                LiveBadge().padding(12).transition(.opacity)
+            } else if let event = timeline.currentEvent {
+                EventBadge(event: event) { model.showInEvents(event) }.padding(12).transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: timeline.isLive)
+        .animation(.snappy(duration: 0.25), value: timeline.atEnd)
+        .animation(.easeInOut(duration: 0.2), value: timeline.currentEvent?.id)
+        .onTapGesture { timeline.togglePlay() }
+        .frame(minHeight: 140)
+    }
+
+    /// The chosen camera's name over the picture: with several Ponds shown, its Pond's too (nothing else near the
+    /// picture says which).
+    func pictureName(_ camera: Config.Camera) -> String {
+        guard model.shownPonds == .all, !model.remotePonds.isEmpty else { return camera.name }
+        let pond = AppModel.pond(of: camera.id).flatMap { id in model.remotePonds.first { $0.id == id }?.name } ?? model.thisPondName
+        return "\(camera.name) \u{00B7} \(pond)"
+    }
+
+    /// The kinds' filters, and the lanes (the ruler, a lane a camera, other Ponds' under their headings).
+    func lanesSection(_ cameras: [Config.Camera], height: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !timeline.dayEvents.isEmpty {
+                EventFilters(timeline: timeline)
+                    .transition(.opacity)
+            }
+            let visible = timeline.visible
+            // (Folded only under the headings, with several Ponds shown: one shown alone has no heading to open it.)
+            let laneList = lanes(cameras), folded = model.shownPonds == .all ? foldedPonds : []
+            // (Its scroll bar only when the rows won't fit once the panel's its new height: not while it grows to them.)
+            let fits = TimelineLanes.fullHeight(cameras: TimelineLanes.shownRows(laneList, folded: folded)) <= height + 0.5
+            TimelineLanes(timeline: timeline, cameras: laneList, folded: folded, fold: { fold($0) }, scrolls: !fits,
+                          start: visible.lowerBound.timeIntervalSinceReferenceDate,
+                          length: visible.upperBound.timeIntervalSince(visible.lowerBound),
+                          playhead: timeline.playhead?.timeIntervalSinceReferenceDate ?? .nan,
+                          hovered: $hovered, highlighted: shown.flatMap { $0.group.isEmpty ? $0.event.id : nil },
+                          highlightedGroup: Set(shown?.group.map(\.id) ?? []),
+                          reorder: { reorder($0, onto: $1) })
+                // A jump out of view (another day, live from long ago) cross-fades: the lanes are drawn
+                // afresh at the new place as the old ones fade.
+                .id(timeline.jumps)
+                .transition(.opacity)
+                // Following the playhead (a click, a drag, playing, a zoom), the view glides there; panned by
+                // hand (the ruler, two fingers), it follows the hand at once. Not while the view opens: it
+                // shows where it is at once instead of gliding from wherever it was last.
+                .animation(settled && timeline.panStart == nil ? .snappy(duration: 0.35) : nil, value: visible)
+                .animation(settled ? .snappy(duration: 0.35) : nil, value: timeline.playhead)
+                .animation(settled ? .easeInOut(duration: 0.25) : nil, value: timeline.jumps)
+                .frame(height: height)
+                // Panned away from the playhead: a way back to it, on the side it's on.
+                .overlay(alignment: playheadBefore(visible) == true ? .leading : .trailing) {
+                    if let before = playheadBefore(visible), let playhead = timeline.playhead {
+                        Button {
+                            withAnimation(.snappy(duration: 0.35)) { timeline.followPlayhead() }
+                        } label: {
+                            HStack(spacing: 5) {
+                                if before { Image(systemName: "chevron.left") }
+                                Text(playhead.formatted(Calendar.current.isDate(playhead, inSameDayAs: visible.lowerBound.addingTimeInterval(visible.upperBound.timeIntervalSince(visible.lowerBound) / 2))
+                                                        ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()))
+                                    .monospacedDigit()
+                                if !before { Image(systemName: "chevron.right") }
+                            }
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            // The whole capsule, not just its words.
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .help("Back to the playhead")
+                        .padding(before ? .leading : .trailing, before ? TimelineLanes.labelWidth + 24 : 24)
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     }
-                    .allowsHitTesting(false)
                 }
-                if timeline.isLive, let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
-                    TimelineLive(camera: camera).id(camera.id)
-                }
-                if timeline.atEnd, !timeline.isLive {
-                    EndOfRecording(timeline: timeline)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, 18)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-                overlayMessage
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if let id = timeline.camera, let camera = cameras.first(where: { $0.id == id }) {
-                    Text(camera.name)
-                        .font(.headline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .glassEffect(.regular, in: .capsule)
-                        .padding(12)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if timeline.isLive {
-                    LiveBadge().padding(12).transition(.opacity)
-                } else if let event = timeline.currentEvent {
-                    EventBadge(event: event).padding(12).transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: timeline.isLive)
-            .animation(.snappy(duration: 0.25), value: timeline.atEnd)
-            .animation(.easeInOut(duration: 0.2), value: timeline.currentEvent?.id)
-            .onTapGesture { timeline.togglePlay() }
-            .frame(minHeight: 140)
+                .animation(.snappy(duration: 0.25), value: playheadBefore(visible))
+        }
+    }
+
+    func content(cameras: [Config.Camera], height total: Double) -> some View {
+        // As tall as the rows showing (a folded Pond's lanes take none): folding one gives its room to the picture.
+        let rows = TimelineLanes.shownRows(lanes(cameras), folded: model.shownPonds == .all ? foldedPonds : [])
+        let lanes = lanesHeight(cameras: rows, total: total)
+        return VStack(spacing: 8) {
+            picture(cameras)
 
             SplitGrip { dy in
                 let start = dragStartHeight ?? lanes
@@ -112,63 +198,14 @@ struct TimelineView: View {
                 // Above what's below it: the filters' row, fading in or out as the layout moves, passes under it.
                 .zIndex(1)
 
-            VStack(alignment: .leading, spacing: 8) {
-                if !timeline.dayEvents.isEmpty {
-                    EventFilters(timeline: timeline)
-                        .transition(.opacity)
-                }
-                let visible = timeline.visible
-                TimelineLanes(timeline: timeline, cameras: cameras,
-                              start: visible.lowerBound.timeIntervalSinceReferenceDate,
-                              length: visible.upperBound.timeIntervalSince(visible.lowerBound),
-                              playhead: timeline.playhead?.timeIntervalSinceReferenceDate ?? .nan,
-                              hovered: $hovered, highlighted: shown.flatMap { $0.group.isEmpty ? $0.event.id : nil },
-                              highlightedGroup: Set(shown?.group.map(\.id) ?? []),
-                              reorder: { model.moveCamera($0, onto: $1) })
-                    // A jump out of view (another day, live from long ago) cross-fades: the lanes are drawn
-                    // afresh at the new place as the old ones fade.
-                    .id(timeline.jumps)
-                    .transition(.opacity)
-                    // Following the playhead (a click, a drag, playing, a zoom), the view glides there; panned by
-                    // hand (the ruler, two fingers), it follows the hand at once. Not while the view opens: it
-                    // shows where it is at once instead of gliding from wherever it was last.
-                    .animation(settled && timeline.panStart == nil ? .snappy(duration: 0.35) : nil, value: visible)
-                    .animation(settled ? .snappy(duration: 0.35) : nil, value: timeline.playhead)
-                    .animation(settled ? .easeInOut(duration: 0.25) : nil, value: timeline.jumps)
-                    .frame(height: lanes)
-                    // Panned away from the playhead: a way back to it, on the side it's on.
-                    .overlay(alignment: playheadBefore(visible) == true ? .leading : .trailing) {
-                        if let before = playheadBefore(visible), let playhead = timeline.playhead {
-                            Button {
-                                withAnimation(.snappy(duration: 0.35)) { timeline.followPlayhead() }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    if before { Image(systemName: "chevron.left") }
-                                    Text(playhead.formatted(Calendar.current.isDate(playhead, inSameDayAs: visible.lowerBound.addingTimeInterval(visible.upperBound.timeIntervalSince(visible.lowerBound) / 2))
-                                                            ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()))
-                                        .monospacedDigit()
-                                    if !before { Image(systemName: "chevron.right") }
-                                }
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.red)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                // The whole capsule, not just its words.
-                                .contentShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .help("Back to the playhead")
-                            .padding(before ? .leading : .trailing, before ? TimelineLanes.labelWidth + 24 : 24)
-                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                        }
-                    }
-                    .animation(.snappy(duration: 0.25), value: playheadBefore(visible))
-            }
+            lanesSection(cameras, height: lanes)
         }
         // The filters' row coming or going takes its room from the video: the picture's edge and the controls
         // under it move together, smoothly, and the row fades in (or out) in the room made.
         .animation(settled ? EventFilters.animation : nil, value: timeline.dayEvents.isEmpty)
+        // (Gently, as a Pond folds or opens, or other Ponds are shown: the lanes themselves at once, the room they take
+        // easing. The kinds' chips wait for it to settle before changing: see EventFilters.)
+        .animation(settled ? .smooth(duration: Self.resize) : nil, value: rows)
         .padding(16)
         .coordinateSpace(.named(Self.space))
         .overlay(alignment: .topLeading) { callout }
@@ -208,6 +245,7 @@ struct TimelineView: View {
             }
         }
         .task(id: cameras.map(\.id)) {
+            timeline.otherPonds = otherPonds
             timeline.source = EventSource(config: model.config)
             await timeline.load(base: model.config?.storage.recordingsPath ?? "", cameras: cameras.map(\.id))
             if let jump = model.timelineJump {
@@ -235,13 +273,63 @@ struct TimelineView: View {
         .onDisappear { timeline.pause() }
     }
 
+    /// A camera dragged onto another's lane: among one Pond's cameras only (another Pond's in the order kept here).
+    func reorder(_ id: String, onto target: String) {
+        guard AppModel.pond(of: id) == AppModel.pond(of: target) else { return }
+        if AppModel.pond(of: id) == nil { model.moveCamera(id, onto: target) } else { model.moveRemoteCamera(id, onto: target) }
+    }
+
+    /// Other Ponds folded away in the lanes (their ids), kept.
+    @AppStorage("timelineFoldedPonds") private var foldedText = ""
+    var foldedPonds: Set<String> { Set(foldedText.split(separator: ",").map(String.init)) }
+
+    func fold(_ pond: String) {
+        var set = foldedPonds
+        if set.contains(pond) { set.remove(pond) } else { set.insert(pond) }
+        // (At once: lanes shrinking or growing didn't animate well.)
+        foldedText = set.sorted().joined(separator: ",")
+    }
+
+    /// The lanes: this Mac's cameras, then (with this Mac's shown too) a heading for each other Pond, its cameras
+    /// under it (folded away, their lanes are drawn at no height).
+    func lanes(_ cameras: [Config.Camera]) -> [Config.Camera] {
+        guard model.shownPonds == .all, !model.remotePonds.isEmpty else { return cameras }
+        var out: [Config.Camera] = []
+        for group in model.cameraGroups {
+            if let pond = group.pond {
+                // (A folded Pond's cameras stay listed: their lanes shrink to nothing as it folds, and grow back.)
+                out.append(Config.Camera(id: TimelineLanes.headingPrefix + pond, name: group.name, main: "", sub: "", username: ""))
+            }
+            let ids = Set(group.cameras.map(\.id))
+            out += cameras.filter { ids.contains($0.id) }
+        }
+        return out
+    }
+
+    /// Other Ponds' cameras' recorded stretches and events between two times, as their Ponds say (through the service).
+    var otherPonds: ((Date, Date) async -> (coverage: [String: [ClosedRange<Date>]], events: [TimelineEvent], starts: [String: Date]))? {
+        guard model.shownPonds != .this, !model.remotePonds.isEmpty else { return nil }
+        let model = self.model
+        return { from, to in
+            var request = ControlSocket.Request(camera: "", action: "remote.coverage")
+            request.from = from
+            request.to = to
+            let reply = await model.controlClient.ask(request, timeout: 30)
+            let coverage = (reply.remoteCoverage ?? [:]).mapValues { list in
+                list.compactMap { $0.count == 2 ? Date(timeIntervalSince1970: $0[0]) ... Date(timeIntervalSince1970: max($0[0], $0[1])) : nil }
+            }
+            let starts = (reply.remoteEarliest ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+            return (coverage, await model.remoteEvents(since: from), starts)
+        }
+    }
+
     /// The hovered event's details, centred above its mark with an arrow down to it; near the window's edges
     /// the card slides inward and the arrow stays on the mark.
     @ViewBuilder
     var callout: some View {
         GeometryReader { geo in
             if let shown {
-                let cameraName = (model.config?.cameras ?? []).first { $0.id == shown.event.camera }?.name ?? ""
+                let cameraName = model.allCameraGroups.flatMap(\.cameras).first { $0.id == shown.event.camera }?.name ?? ""
                 let margin = 12.0
                 let left = min(max(margin, shown.anchor.x - calloutSize.width / 2),
                                geo.size.width - calloutSize.width - margin)
@@ -249,18 +337,23 @@ struct TimelineView: View {
                 ZStack(alignment: .topLeading) {
                     // Measured as it would be, unseen: the card below takes that size, animated, so what's in it never
                     // spills out, and it grows up from its arrow (its foot stays on the mark).
-                    EventCallout(event: shown.event, camera: cameraName, arrowX: 0, group: shown.group, canZoom: canZoom)
+                    EventCallout(event: shown.event, camera: cameraName, arrowX: 0, group: shown.group, canZoom: canZoom,
+                                 pictures: calloutPictures)
                         .hidden()
                         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                             if calloutSize == .zero { calloutSize = size } else { withAnimation(Self.slide) { calloutSize = size } }
                         }
                     EventCallout(event: shown.event, camera: cameraName, arrowX: shown.anchor.x - left, group: shown.group,
-                                 canZoom: canZoom, size: calloutSize)
+                                 canZoom: canZoom, size: calloutSize, pictures: calloutPictures)
                         .offset(x: left, y: shown.anchor.y - calloutSize.height - 4)
                         .opacity(calloutSize == .zero ? 0 : 1)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)
+                // Another Pond's event's picture, fetched as its card first shows (drawn again once it's here).
+                .task(id: shown.event.id) {
+                    if await AppModel.fetchPicture(shown.event, client: model.controlClient) { calloutPictures += 1 }
+                }
             }
         }
     }
@@ -289,6 +382,15 @@ struct TimelineView: View {
     var overlayMessage: some View {
         if timeline.loading {
             ProgressView().controlSize(.large)
+        } else if timeline.isRemoteCamera, !timeline.isLive, timeline.remoteClip == nil {
+            // Another Pond's camera: what's recorded is shown on its lane, but stays there; its events' clips play.
+            let pond = timeline.camera.flatMap(AppModel.pond(of:)).flatMap { id in model.remotePonds.first { $0.id == id }?.name } ?? "its Pond"
+            VStack(spacing: 8) {
+                Image(systemName: "house").font(.largeTitle).foregroundStyle(.secondary)
+                Text("Recordings stay at \(pond)").font(.headline)
+                Text("Click an event to play its clip, or watch live.").font(.callout).foregroundStyle(.secondary)
+            }
+            .environment(\.colorScheme, .dark)
         } else if timeline.nothingRecorded {
             VStack(spacing: 8) {
                 Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.secondary)
@@ -500,7 +602,18 @@ struct DayButton: View {
 /// it to play it. The ruler stays put while the lanes scroll, and lanes get thinner as cameras are added.
 struct TimelineLanes: View, @MainActor Animatable {
     let timeline: TimelineModel
+    /// A lane each, in order; another Pond's heading is a lane of its own (its id `pond:` and the Pond's).
     let cameras: [Config.Camera]
+    /// Other Ponds folded away, and folding one or opening it again.
+    var folded: Set<String> = []
+    var fold: (String) -> Void = { _ in }
+    /// The rows are more than the panel holds (at rest): a scroll bar.
+    var scrolls = true
+
+    static let headingPrefix = "pond:"
+
+    /// The Pond a heading lane is for; nil for a camera's.
+    static func heading(_ id: String) -> String? { id.hasPrefix(headingPrefix) ? String(id.dropFirst(headingPrefix.count)) : nil }
     /// The part of the timeline shown (seconds since the reference date, and its length), animated: a click
     /// or a drag moves the view smoothly to the new playhead instead of jumping.
     var start: Double
@@ -558,7 +671,15 @@ struct TimelineLanes: View, @MainActor Animatable {
         rulerHeight + laneHeight(cameras: n) * Double(min(max(n, 1), 2)) + 2 * padding
     }
 
-    var laneHeight: Double { Self.laneHeight(cameras: cameras.count) }
+    var laneHeight: Double { Self.laneHeight(cameras: Self.shownRows(cameras, folded: folded)) }
+
+    /// The rows showing: headings and cameras, less a folded Pond's cameras.
+    static func shownRows(_ cameras: [Config.Camera], folded: Set<String>) -> Int {
+        cameras.filter { camera in
+            guard heading(camera.id) == nil, let pond = ControlSocket.RemotePond.split(camera.id)?.pond else { return true }
+            return !folded.contains(pond)
+        }.count
+    }
 
     var body: some View {
         let visible = Date(timeIntervalSinceReferenceDate: start) ... Date(timeIntervalSinceReferenceDate: start + length)
@@ -592,7 +713,15 @@ struct TimelineLanes: View, @MainActor Animatable {
                 ScrollView(.vertical) {
                     HStack(alignment: .top, spacing: 0) {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(cameras) { camera in label(camera).id(camera.id) }
+                            ForEach(cameras) { camera in
+                                // A folded Pond's names take no room, as its lanes don't.
+                                let pond = Self.heading(camera.id) == nil ? ControlSocket.RemotePond.split(camera.id)?.pond : nil
+                                let shut = pond.map { folded.contains($0) } ?? false
+                                label(camera).id(camera.id)
+                                    .frame(height: shut ? 0 : laneHeight, alignment: .top)
+                                    .opacity(shut ? 0 : 1)
+                                    .clipped()
+                            }
                         }
                         .frame(width: Self.labelWidth)
 
@@ -637,9 +766,10 @@ struct TimelineLanes: View, @MainActor Animatable {
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lanesWidth = $0 }
                     }
-                    .frame(height: laneHeight * Double(cameras.count))
+                    .frame(height: restingHeight)
                 }
-                .scrollIndicators(.automatic)
+                // (Never, not hidden, when the rows fit: hidden gives way to "Show scroll bars: Always".)
+                .scrollIndicators(scrolls ? .automatic : .never)
                 .onChange(of: timeline.camera) { _, id in
                     // The camera being watched stays in view, whatever changed it.
                     if let id { withAnimation(.snappy) { proxy.scrollTo(id) } }
@@ -667,7 +797,7 @@ struct TimelineLanes: View, @MainActor Animatable {
 
     /// Zoomed in far enough on today that a second's growth shows: drawn every frame.
     var smoothNow: Bool { timeline.isToday && [.hour, .quarter].contains(timeline.zoom) }
-    var animating: Bool { smoothNow || !kindFades.isEmpty }
+    var animating: Bool { smoothNow || !kindFades.isEmpty || !timeline.awaitingOtherPonds.isEmpty }
 
     /// A kind's marks fading from one opacity to another.
     struct KindFade {
@@ -709,18 +839,55 @@ struct TimelineLanes: View, @MainActor Animatable {
         return ranges
     }
 
-    /// A camera's name: click to watch it, drag it up or down to change the cameras' order.
+    /// A camera's name: click to watch it, drag it up or down to change the cameras' order. Another Pond's heading:
+    /// its name, and a click folds its lanes away (or opens them).
+    @ViewBuilder
     func label(_ camera: Config.Camera) -> some View {
-        let selected = camera.id == timeline.camera
-        return Button { Task { await timeline.select(camera: camera.id) } } label: {
-            Text(camera.name)
-                .font(.callout.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        if let pond = Self.heading(camera.id) {
+            let isFolded = folded.contains(pond)
+            Button { fold(pond) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isFolded ? 0 : 90))
+                        .animation(.snappy(duration: 0.2), value: isFolded)
+                    Image(systemName: "house.fill").font(.caption).foregroundStyle(.secondary)
+                    Text(camera.name).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                    if timeline.awaitingOtherPonds.contains(where: { ControlSocket.RemotePond.split($0)?.pond == pond }) {
+                        ProgressView().controlSize(.mini)
+                        Text("Loading\u{2026}").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 .padding(.trailing, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(height: laneHeight)
+            .help(isFolded ? "Show \(camera.name)\u{2019}s cameras" : "Fold \(camera.name)\u{2019}s cameras away")
+        } else {
+            cameraLabel(camera)
+        }
+    }
+
+    func cameraLabel(_ camera: Config.Camera) -> some View {
+        let selected = camera.id == timeline.camera
+        // Its Pond not heard from yet, and no heading of its own to say so (that Pond shown alone): beside its name.
+        let pond = ControlSocket.RemotePond.split(camera.id)?.pond
+        let waiting = timeline.awaitingOtherPonds.contains(camera.id) && !cameras.contains { $0.id == Self.headingPrefix + (pond ?? "") }
+        return Button { Task { await timeline.select(camera: camera.id) } } label: {
+            HStack(spacing: 5) {
+                Text(camera.name)
+                    .font(.callout.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if waiting { ProgressView().controlSize(.mini) }
+            }
+            .padding(.trailing, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .frame(height: laneHeight)
@@ -761,7 +928,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let t = time(at: value.location.x, width: width, visible: visible)
                 let click = value.translation == .zero
                 timeline.scrubbing = nil
-                let lane = Int(value.location.y / laneHeight)
+                let lane = laneIndex(at: value.location.y) ?? -1
                 let group = click && inLanes ? self.group(at: value.location, width: width, visible: visible) : nil
                 let clicked = click && inLanes && group == nil ? event(at: value.location, width: width, visible: visible) : nil
                 Task {
@@ -787,6 +954,8 @@ struct TimelineLanes: View, @MainActor Animatable {
                         return
                     }
                     if click, inLanes, cameras.indices.contains(lane) {
+                        // (A Pond's heading isn't a camera: nothing's chosen, nothing moves.)
+                        if Self.heading(cameras[lane].id) != nil { return }
                         await timeline.select(camera: cameras[lane].id)
                     }
                     await timeline.seek(to: t)
@@ -803,8 +972,7 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// The shown event nearest a point in the lanes, within a few points, so the gaps between marks don't
     /// count as leaving them.
     func event(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> TimelineEvent? {
-        let lane = Int(point.y / laneHeight)
-        guard point.y >= 0, cameras.indices.contains(lane) else { return nil }
+        guard let lane = laneIndex(at: point.y) else { return nil }
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let slack = 14 / width * length
         let t = time(at: point.x, width: width, visible: visible)
@@ -818,8 +986,7 @@ struct TimelineLanes: View, @MainActor Animatable {
 
     /// The private stretch under a point (within a few points of a narrow one), as a hover card's "event".
     func privateStretch(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> TimelineEvent? {
-        let lane = Int(point.y / laneHeight)
-        guard point.y >= 0, cameras.indices.contains(lane) else { return nil }
+        guard let lane = laneIndex(at: point.y) else { return nil }
         let camera = cameras[lane].id
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let slack = 4 / width * length
@@ -832,9 +999,73 @@ struct TimelineLanes: View, @MainActor Animatable {
                              summary: "Not recorded, shown live or in the Home app.")
     }
 
-    /// A lane's bar, and an event's mark inside it, in the lanes canvas.
-    func laneRect(_ index: Int, width: Double) -> CGRect {
-        CGRect(x: 0, y: Double(index) * laneHeight + 5, width: width, height: laneHeight - 10)
+    /// A lane's bar, and an event's mark inside it, in the lanes canvas (a folded Pond's at no height).
+    func laneRect(_ index: Int, width: Double, at t: Date = Date()) -> CGRect {
+        let h = cameras.indices.contains(index) ? rowHeight(cameras[index], at: t) : laneHeight
+        let k = h / laneHeight
+        return CGRect(x: 0, y: rowTop(index, at: t) + 5 * k, width: width, height: max(0, (laneHeight - 10) * k))
+    }
+
+    /// How open another Pond's lanes are: 1 open, 0 folded away.
+    func openness(_ pond: String, at t: Date) -> Double { folded.contains(pond) ? 0 : 1 }
+
+    /// A row's height: a camera's lane (its Pond's openness of it), or a Pond's heading.
+    func rowHeight(_ camera: Config.Camera, at t: Date) -> Double {
+        guard Self.heading(camera.id) == nil, let pond = ControlSocket.RemotePond.split(camera.id)?.pond else { return laneHeight }
+        return laneHeight * openness(pond, at: t)
+    }
+
+    func rowTop(_ index: Int, at t: Date = Date()) -> Double {
+        cameras.prefix(index).reduce(0) { $0 + rowHeight($1, at: t) }
+    }
+
+    /// The row at a height in the lanes (nil past the last).
+    func laneIndex(at y: Double) -> Int? {
+        guard y >= 0 else { return nil }
+        var top = 0.0
+        let now = Date()
+        for (i, camera) in cameras.enumerated() {
+            let h = rowHeight(camera, at: now)
+            if y < top + h { return i }
+            top += h
+        }
+        return nil
+    }
+
+    /// The lanes by Pond (this Mac's, then each other's with its heading), each with where its rows are and when its
+    /// cameras began recording (the earliest of them).
+    func startSections(at t: Date) -> [(start: Date?, heading: ClosedRange<Double>?, rows: ClosedRange<Double>)] {
+        var out: [(key: String, start: Date?, heading: ClosedRange<Double>?, top: Double, bottom: Double)] = []
+        var top = 0.0
+        for camera in cameras {
+            let h = rowHeight(camera, at: t)
+            if let pond = Self.heading(camera.id) {
+                // A heading begins its Pond's section: a row of its own, apart from the lanes under it.
+                out.append((pond, nil, top ... top + h, top + h, top + h))
+            } else {
+                let key = ControlSocket.RemotePond.split(camera.id)?.pond ?? ""
+                let start = timeline.cameraStarts[camera.id]
+                if let last = out.last, last.key == key {
+                    out[out.count - 1].bottom = top + h
+                    if let start { out[out.count - 1].start = min(last.start ?? start, start) }
+                } else {
+                    out.append((key, start, nil, top, top + h))
+                }
+            }
+            top += h
+        }
+        return out.map { ($0.start, $0.heading, $0.top ... max($0.top, $0.bottom)) }
+    }
+
+    /// Where the first section's cameras began recording: the ruler's mark, over them.
+    var rulerStart: Date? { startSections(at: Date()).first?.start ?? timeline.firstRecording }
+
+    /// The rows' height, as they'll be (folded Ponds' lanes taking none).
+    var restingHeight: Double {
+        cameras.reduce(0) { total, camera in
+            let pond = Self.heading(camera.id) == nil ? ControlSocket.RemotePond.split(camera.id)?.pond : nil
+            return total + (pond.map { folded.contains($0) } == true ? 0 : laneHeight)
+        }
     }
 
     func markRect(_ event: TimelineEvent, width: Double, visible: ClosedRange<Date>) -> CGRect {
@@ -931,7 +1162,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                 .font(.caption2.weight(.semibold))).measure(in: size)
             return CGRect(x: px - 1, y: 0, width: box.width + 12, height: box.height + 4)
         }
-        if let first = timeline.firstRecording, visible.contains(first) {
+        if let first = rulerStart, visible.contains(first) {
             let px = x(first, width: size.width, visible: visible)
             let box = context.resolve(Text("\(Image(systemName: "flag.fill")) Recording starts")
                 .font(.caption2.weight(.semibold))).measure(in: size)
@@ -956,7 +1187,7 @@ struct TimelineLanes: View, @MainActor Animatable {
             line.addLine(to: CGPoint(x: px, y: size.height))
             context.stroke(line, with: .style(.primary.opacity(0.45)), lineWidth: 1.5)
         }
-        if let first = timeline.firstRecording, visible.contains(first) {
+        if let first = rulerStart, visible.contains(first) {
             let px = x(first, width: size.width, visible: visible)
             let label = context.resolve(Text("\(Image(systemName: "flag.fill")) Recording starts")
                 .font(.caption2.weight(.semibold)).foregroundStyle(.tint))
@@ -1105,8 +1336,27 @@ struct TimelineLanes: View, @MainActor Animatable {
         // With events, recording is the background they sit on, so it is drawn quieter.
         let withEvents = !timeline.events.isEmpty
         for (i, camera) in cameras.enumerated() {
-            let lane = laneRect(i, width: size.width)
+            // (A Pond's heading: its name, in the labels; nothing drawn across.)
+            if Self.heading(camera.id) != nil { continue }
+            let lane = laneRect(i, width: size.width, at: frame)
+            // (Folded away: nothing to draw.)
+            if lane.height < 1 { continue }
             let selected = camera.id == timeline.camera
+            // Another Pond's: its recordings stay there, so they're drawn as there but not here (grey, outlined),
+            // its events bright over them as ever (their clips play).
+            let elsewhere = ControlSocket.RemotePond.split(camera.id) != nil
+            // Its Pond not heard from yet: a soft light sweeping along the lane, until it has.
+            if timeline.awaitingOtherPonds.contains(camera.id) {
+                let t = frame.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                let band = lane.width * 0.35
+                let cx = -band + (lane.width + 2 * band) * t
+                let gradient = Gradient(stops: [.init(color: .white.opacity(0), location: 0), .init(color: .white.opacity(0.09), location: 0.5),
+                                                .init(color: .white.opacity(0), location: 1)])
+                var clipped = context
+                clipped.clip(to: Path(roundedRect: lane, cornerRadius: 6))
+                clipped.fill(Path(CGRect(x: cx - band / 2, y: lane.minY, width: band, height: lane.height)),
+                             with: .linearGradient(gradient, startPoint: CGPoint(x: cx - band / 2, y: 0), endPoint: CGPoint(x: cx + band / 2, y: 0)))
+            }
             context.fill(Path(roundedRect: lane, cornerRadius: 6), with: .style(.quaternary.opacity(selected ? 1 : 0.6)))
             if let added = timeline.added(camera.id) { drawAdded(context, camera: camera, at: added, lane: lane, size: size, visible: visible) }
             // Being recorded now (not playable yet): drawn after the recording it continues, joined to it.
@@ -1138,7 +1388,12 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
                     topLeading: opens ? 0 : 6, bottomLeading: opens ? 0 : 6,
                     bottomTrailing: joined ? 0 : 6, topTrailing: joined ? 0 : 6))
-                context.fill(shape, with: .style(.tint.opacity(strength)))
+                if elsewhere {
+                    context.fill(shape, with: .style(.secondary.opacity(selected ? 0.22 : 0.14)))
+                    context.stroke(shape, with: .style(.secondary.opacity(selected ? 0.55 : 0.4)), lineWidth: 1)
+                } else {
+                    context.fill(shape, with: .style(.tint.opacity(strength)))
+                }
                 if range.upperBound > clockNow.addingTimeInterval(-3600) { recorded.append(shape) }
             }
             // Being recorded now, not playable yet: lighter and hatched, up to the present. Square on the left,
@@ -1272,10 +1527,29 @@ struct TimelineLanes: View, @MainActor Animatable {
         }
 
         // Before the first recording there is nothing: dimmed and hatched, with the start marked.
-        if let first = timeline.firstRecording, first > visible.lowerBound {
+        // Before recording began, hatched: each Pond's rows up to its own beginning (their cameras' earliest), so one
+        // that began later isn't marked by another's.
+        for section in startSections(at: frame) {
+            guard let first = section.start, first > visible.lowerBound else { continue }
             let px = min(size.width, x(first, width: size.width, visible: visible))
-            let area = CGRect(x: 0, y: 0, width: px, height: size.height)
+            // Another Pond's heading row: clear, its own "Recording starts" in it, ending at its line (as the ruler's
+            // does at the first section's).
+            // (Not while it's folded away: its heading alone shows, with nothing under it to mark.)
+            if let heading = section.heading, visible.contains(first), section.rows.upperBound - section.rows.lowerBound > 1 {
+                let label = context.resolve(Text("\(Image(systemName: "flag.fill")) Recording starts")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.tint))
+                let box = label.measure(in: size)
+                let labelY = heading.upperBound - box.height / 2 - 4
+                context.draw(label, at: CGPoint(x: Self.startLabelX(line: px, width: box.width), y: labelY))
+                // From the label down (clear of the lanes above, as the ruler's line is of the ruler's top).
+                var line = Path()
+                line.move(to: CGPoint(x: px, y: labelY - box.height / 2))
+                line.addLine(to: CGPoint(x: px, y: heading.upperBound))
+                context.stroke(line, with: .style(.tint), lineWidth: 1.5)
+            }
+            let area = CGRect(x: 0, y: section.rows.lowerBound, width: px, height: section.rows.upperBound - section.rows.lowerBound)
             context.fill(Path(area), with: .style(.background.opacity(0.6)))
+            // (The stripes as one pattern over the whole height, each section showing its part: they line up.)
             var hatch = Path()
             var hx = -size.height
             while hx < px {
@@ -1288,8 +1562,8 @@ struct TimelineLanes: View, @MainActor Animatable {
             clipped.stroke(hatch, with: .style(.secondary.opacity(0.18)), lineWidth: 1)
             if visible.contains(first) {
                 var line = Path()
-                line.move(to: CGPoint(x: px, y: 0))
-                line.addLine(to: CGPoint(x: px, y: size.height))
+                line.move(to: CGPoint(x: px, y: area.minY))
+                line.addLine(to: CGPoint(x: px, y: area.maxY))
                 context.stroke(line, with: .style(.tint), lineWidth: 1.5)
             }
         }
@@ -1378,23 +1652,26 @@ struct PlayerLayerView: NSViewRepresentable {
 /// Show or hide each kind of event, with how many there are that day.
 struct EventFilters: View {
     @Bindable var timeline: TimelineModel
-    @Namespace private var glass
 
     /// Only kinds with events that day (a filter for nothing is noise).
     var kinds: [TimelineEvent.Kind] { timeline.dayKinds }
+    /// The chips shown: the kinds, as of when the layout last settled. They change after the lanes' panel has eased
+    /// to its new height (showing other Ponds moves this row), so they fade in and out where they stay, not in a row
+    /// that's still moving (they seemed to fly in from above, and off to the left).
+    @State private var listed: [TimelineEvent.Kind]?
 
     static let animation = Animation.snappy(duration: 0.35)
 
     var body: some View {
         HStack(spacing: 8) {
-            // One glass surface: a chip coming or going grows out of (or into) its neighbours, which slide over
-            // to make room or close the gap.
+            // A chip coming or going fades in (or out) where it is, a little scaled, the same both ways; its neighbours
+            // slide over to make room or close the gap. (Not morphing out of their glass: several at once, switching
+            // Ponds, flew in from above and off to the left.)
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
-                    ForEach(kinds) { kind in
+                    ForEach(listed ?? kinds) { kind in
                         chip(kind)
-                            .glassEffectID(kind, in: glass)
-                            .transition(.opacity)
+                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
                     }
                 }
             }
@@ -1404,8 +1681,14 @@ struct EventFilters: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
-        .animation(Self.animation, value: kinds)
         .animation(Self.animation, value: timeline.dayEvents.count)
+        .task(id: kinds) {
+            guard listed != nil else { return listed = kinds }
+            guard listed != kinds else { return }
+            try? await Task.sleep(for: .seconds(TimelineView.resize))
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.25)) { listed = kinds }
+        }
     }
 
     func chip(_ kind: TimelineEvent.Kind) -> some View {
@@ -1460,6 +1743,8 @@ struct EventCallout: View {
     /// The card's size (animated by its owner): what's in it is held to that, clipped; nil, its own size, bare (to
     /// be measured).
     var size: CGSize?
+    /// Other Ponds' pictures fetched so far (one arriving draws the card again, the same card, with it).
+    var pictures = 0
 
     static let arrowSize = CGSize(width: 26, height: 10)
 
@@ -1643,18 +1928,40 @@ struct CalloutShape: Shape {
 /// On the video while an event is playing.
 struct EventBadge: View {
     let event: TimelineEvent
+    /// Its details in the Events view.
+    var open: (() -> Void)?
+
+    /// The widest it gets: a longer sentence is cut short.
+    static let widest = 420.0
 
     var body: some View {
+        // As wide as what it says, up to its widest (then cut short there); a click shows it in Events.
+        Button { open?() } label: {
+            ViewThatFits(in: .horizontal) {
+                badge.fixedSize()
+                badge.frame(width: Self.widest, alignment: .leading)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(open == nil)
+        .glassEffect(open == nil ? .regular : .regular.interactive(), in: .capsule)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: Self.widest, alignment: .trailing)
+        .help(open == nil ? "" : "Show this event in Events")
+    }
+
+    var badge: some View {
         HStack(spacing: 8) {
             Image(systemName: event.kind.symbol).foregroundStyle(event.kind.color)
             Text(event.kind.title).font(.headline)
             Text(event.summary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            if open != nil {
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .frame(maxWidth: 420, alignment: .leading)
-        .glassEffect(.regular, in: .capsule)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

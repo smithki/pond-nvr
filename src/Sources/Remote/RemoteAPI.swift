@@ -11,6 +11,8 @@
 //
 // A file comes a few pieces at a time (as many in flight as fill a fast link), kept in order as they come, so a
 // download that's cut off carries on from where it got to; checked against its SHA-256 at the end.
+//   coverage          CoverageRequest (from, to) → Coverage: each camera's recorded stretches then ([start, end],
+//                     seconds), and when its recordings begin
 //   still             StillRequest (a camera) → Still: its latest recorded picture (JPEG), and when
 //   control           a ControlSocket.Request → its Reply: the cameras' controls, privacy and search, as the app asks
 //                     for them on the Mac itself (not pairing, the settings or talking back)
@@ -25,6 +27,7 @@ import Devices
 import Foundation
 import Ingest
 import NVRCore
+import Recorder
 import Understanding
 import Watch
 
@@ -103,6 +106,22 @@ public enum RemoteAPI {
     public struct FileInfo: Codable, Sendable {
         public var bytes: Int
         public var sha256: String
+    }
+
+    /// The stretch of time a camera's recordings are asked about.
+    public struct CoverageRequest: Codable, Sendable {
+        public var from: Date
+        public var to: Date
+        public init(from: Date, to: Date) {
+            self.from = from
+            self.to = to
+        }
+    }
+
+    /// Each camera's recorded stretches (start and end, seconds since 1970), and when its recordings begin.
+    public struct Coverage: Codable, Sendable {
+        public var spans: [String: [[Double]]]
+        public var earliest: [String: Double]
     }
 
     /// A camera's latest recorded picture: asked for by its id.
@@ -184,6 +203,19 @@ public enum RemoteAPI {
                 guard let still = await LatestStill.of(camera: camera.id, recordings: recordings()),
                       let jpeg = LatestStill.jpeg(still.image) else { return (nil, "nothing recorded lately") }
                 return Self.encoded(Still(time: still.time, jpeg: jpeg))
+            case "coverage":
+                // Each camera's recorded stretches between two times (not a private one's: nothing's recorded then).
+                guard let body, let ask = try? JSONDecoder().decode(CoverageRequest.self, from: body), ask.to > ask.from else {
+                    return (nil, "when?")
+                }
+                let base = recordings()
+                var out = Coverage(spans: [:], earliest: [:])
+                for camera in cameras() {
+                    let spans = RecordingIndex.spans(base: base, camera: camera.id, from: ask.from, to: ask.to, writing: true)
+                    out.spans[camera.id] = RecordingIndex.coverage(spans).map { [$0.lowerBound.timeIntervalSince1970, $0.upperBound.timeIntervalSince1970] }
+                    out.earliest[camera.id] = RecordingIndex.earliest(base: base, camera: camera.id)?.timeIntervalSince1970
+                }
+                return Self.encoded(out)
             case "picture", "clip":
                 return piece(action, body)
             case "control":
@@ -325,6 +357,11 @@ public struct RemoteClient: Sendable {
 
     public func cameras() async throws(Failure) -> [RemoteAPI.Camera] {
         try decoded(await call("cameras"))
+    }
+
+    /// Each camera's recorded stretches between two times.
+    public func coverage(from: Date, to: Date) async throws(Failure) -> RemoteAPI.Coverage {
+        try decoded(await call("coverage", encoded(RemoteAPI.CoverageRequest(from: from, to: to)), timeout: 30))
     }
 
     public func still(_ camera: String) async throws(Failure) -> RemoteAPI.Still {

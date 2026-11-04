@@ -92,11 +92,8 @@ struct ContentView: View {
             if model.config == nil {
                 SetupView()
             } else {
-                // Live and Events show every Pond shown; the Timeline only this Mac's for now.
                 switch model.mode {
                 case .live: LiveView()
-                case .timeline where model.shownPonds != .all && model.shownPonds != .this:
-                    OtherPondView(name: model.shownName, what: "Timelines")
                 case .timeline: TimelineView()
                 case .events: EventsView()
                 }
@@ -224,6 +221,11 @@ struct ContentView: View {
                     if !model.otherPonds.isEmpty, let ponds = await model.controlClient.ask(.init(camera: "", action: "remote.ponds"), timeout: 30).ponds,
                        ponds != model.remotePonds {
                         model.remotePonds = ponds
+                        // --ponds NAME: that Pond alone shown, once it's known (for trying it, and pictures of it).
+                        if let name = launchArgument("--ponds"), model.shownPonds == .all,
+                           let pond = ponds.first(where: { $0.name == name }) {
+                            model.shownPonds = .pond(pond.id)
+                        }
                         model.refreshPrivacy()
                     }
                 }

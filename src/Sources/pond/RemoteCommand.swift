@@ -119,6 +119,14 @@ final class RemoteAccess: @unchecked Sendable {
             var reply = ControlSocket.Reply()
             reply.remoteEvents = await viewing.allEvents(seconds: request.seconds ?? 86400)
             return reply
+        case "remote.coverage":
+            // Every other Pond's cameras' recorded stretches, from `from` to `to`.
+            guard let viewing = lock.withLock({ viewing }), let from = request.from, let to = request.to else {
+                return ControlSocket.Reply(error: .failed("when?"))
+            }
+            var reply = ControlSocket.Reply()
+            (reply.remoteCoverage, reply.remoteEarliest) = await viewing.allCoverage(from: from, to: to)
+            return reply
         case "remote.event-file":
             // An event's picture or clip (`file`: "picture" or "clip"), fetched or on its way.
             guard let viewing = lock.withLock({ viewing }), let event = request.event else {

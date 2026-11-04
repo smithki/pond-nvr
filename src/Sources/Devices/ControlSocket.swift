@@ -56,6 +56,9 @@ public enum ControlSocket {
         public var size: String?
         /// "remote.picture", "remote.clip": the event's id.
         public var event: String?
+        /// "remote.coverage": the stretch of time asked about.
+        public var from: Date?
+        public var to: Date?
 
         public init(camera: String, action: String, velocity: PTZVelocity? = nil, preset: String? = nil,
                     name: String? = nil, item: String? = nil, value: Config.Controls.Value? = nil) {
@@ -106,6 +109,11 @@ public enum ControlSocket {
         public var remoteEvents: [RemoteEvent]?
         /// "remote.event-file": an event's picture or clip, fetched (or on its way).
         public var remoteFile: RemoteFile?
+        /// "remote.coverage": other Ponds' cameras' recorded stretches (by `camera@pond`; each start and end, seconds
+        /// since 1970).
+        public var remoteCoverage: [String: [[Double]]]?
+        /// "remote.coverage": when each of those cameras' recordings begin (seconds since 1970).
+        public var remoteEarliest: [String: Double]?
         /// "remote.still": when the picture in `body` (a JPEG) was recorded.
         public var taken: Date?
         /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.

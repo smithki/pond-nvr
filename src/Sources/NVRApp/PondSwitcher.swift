@@ -220,22 +220,6 @@ enum ShownPonds: Hashable {
     }
 }
 
-/// Another Pond shown on its own, in a view that doesn't show other Ponds yet (the Timeline).
-struct OtherPondView: View {
-    @Environment(AppModel.self) private var model
-    let name: String
-    let what: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(name, systemImage: "house")
-        } description: {
-            Text("\(what) of other Ponds aren\u{2019}t shown yet. Live shows their cameras.")
-        } actions: {
-            Button("Show \(model.thisPondName)") { model.shownPonds = .this }
-        }
-    }
-}
 
 /// A Pond's section in the camera rail: its name, for another Pond whether it's connected (or why it can't be
 /// reached), and a chevron that folds it away.
@@ -249,14 +233,16 @@ struct PondHeading: View {
 
     var body: some View {
         let other = pond.flatMap { id in model.remotePonds.first { $0.id == id } }
+        // Folded or opened at once (only the chevron turns): the rail's cameras moving to make room didn't animate well.
         Button {
-            withAnimation(.snappy(duration: 0.25)) { folded.toggle() }
+            folded.toggle()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(folded ? 0 : 90))
+                    .animation(.snappy(duration: 0.2), value: folded)
                 Image(systemName: pond == nil ? "desktopcomputer" : "house.fill")
                     .foregroundStyle(pond == nil ? .secondary : other?.problem == nil ? Color.green : .orange)
                     .font(.caption)

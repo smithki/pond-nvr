@@ -580,6 +580,8 @@ struct CameraRail: View {
     static let railSpace = "rail"
     /// Ponds whose cameras are folded away in the rail (their ids; "" this Mac), kept.
     @AppStorage("railFoldedPonds") private var foldedText = ""
+    /// The same, once changed here (the view's own state: what's kept is read again only when the rail appears).
+    @State private var folded: Set<String>?
 
     static let defaultWidth = 220.0
     /// Between the Ponds' panels, and above the first.
@@ -614,7 +616,6 @@ struct CameraRail: View {
                                 PondHeading(name: group.name, pond: group.pond, count: ids.count, folded: folding(key))
                                 if !foldedPonds.contains(key) {
                                     grid(cameras.filter { ids.contains($0.id) })
-                                        .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             }
                             .padding(8)
@@ -716,12 +717,17 @@ extension CameraRail {
         Rectangle().fill(.separator).frame(height: 1).opacity(shown ? 1 : 0).animation(.easeOut(duration: 0.15), value: shown)
     }
 
-    var foldedPonds: Set<String> { Set(foldedText.split(separator: ",").map { $0 == "-" ? "" : String($0) }) }
+    /// Folded away: as kept (read once, when the rail first appears), then as changed here.
+    var foldedPonds: Set<String> {
+        folded ?? Set(foldedText.split(separator: ",").map { $0 == "-" ? "" : String($0) })
+    }
 
+    /// Folding a Pond's section (at once), and kept.
     func folding(_ key: String) -> Binding<Bool> {
         Binding(get: { foldedPonds.contains(key) }, set: { fold in
             var set = foldedPonds
             if fold { set.insert(key) } else { set.remove(key) }
+            folded = set
             // ("" is this Mac: kept as "-" so it isn't lost among the commas.)
             foldedText = set.map { $0.isEmpty ? "-" : $0 }.sorted().joined(separator: ",")
         })
@@ -2075,42 +2081,66 @@ struct TileMessage: View {
     let title: String
     let detail: String
     var compact = false
-    /// What to do about it, as a button under the detail (not on small tiles).
+    /// What to do about it, as a button under the detail (smaller, or left to the tooltip, on small tiles).
     var action: (label: String, perform: () -> Void)?
 
+    /// Room kept clear above and below: the tile's badges (its state at the top; its name, REC and the rest at the
+    /// bottom).
+    static let clearTop = 44.0, clearBottom = 54.0
+    static let detailWidth = 260.0
+
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol).font(.title2).foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-                // The detail hangs from the title, so the icon and title stay put whether it shows or not;
-                // on small tiles it fades out.
-                .overlay(alignment: .bottom) {
-                    VStack(spacing: 10) {
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(3)
-                            .frame(width: Self.detailWidth)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let action {
-                            Button(action.label, action: action.perform)
-                                .buttonStyle(.glass)
-                                .controlSize(.regular)
-                                // Its own width, not the title's (which the detail hangs from).
-                                .fixedSize()
-                        }
-                    }
-                    .alignmentGuide(.bottom) { $0[.top] - 6 }
-                    .opacity(compact ? 0 : 1)
-                    .allowsHitTesting(!compact)
-                }
+        // As much of it as fits the room between the badges: all of it; without the detail; the symbol and title with
+        // a small button; the symbol alone (the rest in its tooltip).
+        ViewThatFits {
+            if !compact { full }
+            titled(button: .regular)
+            titled(button: .small)
+            Image(systemName: symbol).font(.title3).foregroundStyle(.secondary)
+                .help("\(title). \(detail)")
         }
+        .padding(.horizontal, 12)
+        .padding(.top, Self.clearTop)
+        .padding(.bottom, Self.clearBottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
     }
 
-    static let detailWidth = 260.0
+    var full: some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(.secondary)
+            Text(title).font(.headline)
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .frame(maxWidth: Self.detailWidth)
+                .fixedSize(horizontal: false, vertical: true)
+            if let action {
+                Button(action.label, action: action.perform)
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .fixedSize()
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    func titled(button size: ControlSize) -> some View {
+        VStack(spacing: size == .small ? 4 : 6) {
+            Image(systemName: symbol).font(size == .small ? .title3 : .title2).foregroundStyle(.secondary)
+            Text(title).font(size == .small ? .callout.weight(.semibold) : .headline).lineLimit(1)
+            if let action {
+                Button(action.label, action: action.perform)
+                    .buttonStyle(.glass)
+                    .controlSize(size)
+                    .fixedSize()
+                    .padding(.top, 2)
+            }
+        }
+        .help(detail)
+    }
 }
 
 /// Shows an AVSampleBufferDisplayLayer, kept the size of the view.

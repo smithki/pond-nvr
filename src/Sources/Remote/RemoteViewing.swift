@@ -144,6 +144,38 @@ public final class RemoteViewing: @unchecked Sendable {
         }
     }
 
+    /// Each Pond's cameras' recorded stretches, as last asked (for which stretch of time), and when.
+    private var coverage: [String: (asked: Date, from: Date, to: Date, spans: RemoteAPI.Coverage)] = [:]
+
+    /// Every Pond's cameras' recorded stretches between two times, and when their recordings begin (by `camera@pond`):
+    /// asked of each at most every 20 s for the same stretch.
+    public func allCoverage(from: Date, to: Date) async -> (spans: [String: [[Double]]], earliest: [String: Double]) {
+        await withTaskGroup(of: RemoteAPI.Coverage.self) { group in
+            for peer in host.devices() {
+                group.addTask { [self] in
+                    var found = lock.withLock { coverage[peer.id] }.flatMap { k in
+                        k.from == from && k.to == to && Date().timeIntervalSince(k.asked) < 20 ? k.spans : nil
+                    }
+                    if found == nil, let session = await session(peer.id),
+                       let fresh = try? await RemoteClient(session: session).coverage(from: from, to: to) {
+                        lock.withLock { coverage[peer.id] = (Date(), from, to, fresh) }
+                        found = fresh
+                    }
+                    func here<V>(_ d: [String: V]) -> [String: V] {
+                        Dictionary(uniqueKeysWithValues: d.map { (ControlSocket.RemotePond.cameraID($0.key, pond: peer.id), $0.value) })
+                    }
+                    return RemoteAPI.Coverage(spans: here(found?.spans ?? [:]), earliest: here(found?.earliest ?? [:]))
+                }
+            }
+            var spans: [String: [[Double]]] = [:], earliest: [String: Double] = [:]
+            for await some in group {
+                spans.merge(some.spans) { a, _ in a }
+                earliest.merge(some.earliest) { a, _ in a }
+            }
+            return (spans, earliest)
+        }
+    }
+
     /// An event's picture or clip (`event@pond`): fetched into the cache if it isn't there or on its way, and how
     /// that's going (asked again for news).
     public func file(_ id: String, clip: Bool) -> ControlSocket.RemoteFile {

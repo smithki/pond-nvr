@@ -7,6 +7,7 @@ import Detection
 import Devices
 import Foundation
 import NVRCore
+import SwiftUI
 import UniformTypeIdentifiers
 
 extension TimelineEvent {
@@ -131,5 +132,41 @@ final class GrowingFileLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
             try? await Task.sleep(for: .milliseconds(100))
         }
         if !request.isCancelled { request.finishLoading(with: CocoaError(.fileReadUnknown)) }
+    }
+}
+
+/// Another Pond's event's clip, looping and muted, as it comes (the Timeline's, in place of a recording: theirs stay
+/// at their Pond).
+struct RemoteClipPlayer: View {
+    let event: TimelineEvent
+    let client: ControlClient
+    @State private var player: AVQueuePlayer?
+    @State private var looper: AVPlayerLooper?
+    @State private var loader: GrowingFileLoader?
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let player { PlayerLayerView(player: player) }
+        }
+        .task {
+            guard let clip = event.clip else { return }
+            let item: AVPlayerItem
+            if FileManager.default.fileExists(atPath: clip.path) {
+                item = AVPlayerItem(asset: AVURLAsset(url: clip))
+            } else {
+                let (asset, loader) = GrowingFileLoader.asset(event: event.id, client: client)
+                self.loader = loader
+                item = AVPlayerItem(asset: asset)
+            }
+            let length = (event.ongoing ? Date() : event.end).timeIntervalSince(event.clipStart ?? event.start) + 3
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            looper = AVPlayerLooper(player: player, templateItem: item,
+                                    timeRange: CMTimeRange(start: .zero, duration: CMTime(seconds: max(1, length), preferredTimescale: 600)))
+            self.player = player
+            player.play()
+        }
+        .onDisappear { player?.pause() }
     }
 }
