@@ -47,6 +47,8 @@ final class AppModel {
     /// tile shows (to take them from); and the position a camera was last sent to, until it's moved by hand.
     var presetPictures: [String: NSImage] = [:]
     @ObservationIgnored var liveFeeds: [String: LiveStream] = [:]
+    /// Tiles' live pictures taken for their stand-ins, and when (`liveStill`).
+    @ObservationIgnored var liveStills: [String: (image: CGImage, at: Date)] = [:]
     @ObservationIgnored var atPreset: [String: String] = [:]
     /// The camera whose other positions are open above the dock's More card.
     var morePositionsOpen: String?

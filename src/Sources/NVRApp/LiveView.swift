@@ -1011,6 +1011,7 @@ struct RailThumbnail: View {
 
 /// The chosen cameras, in as many columns as make the tiles largest, the last row centred.
 struct Stage: View {
+    @Environment(AppModel.self) private var model
     let cameras: [Config.Camera]
     /// Every camera, for stand-ins of ones that have just left the stage.
     var allCameras: [Config.Camera] = []
@@ -1249,12 +1250,14 @@ struct Stage: View {
         return all
     }
 
-    /// A still of a tile at a place it is leaving, showing what the tile showed.
+    /// A still of a tile at a place it is leaving, showing what the tile showed: its live picture at that moment
+    /// (else its latest recorded one).
     func standIn(_ ghost: Ghost) -> some View {
         Group {
             if let camera = cameras.first(where: { $0.id == ghost.camera }) ?? departedCamera(ghost.camera) {
                 CameraTile(camera: camera, mainStream: false, cornerRadius: ghost.frame.width > 600 ? 22 : 16,
-                           snapshot: snapshots[ghost.camera]?.image, frozen: statuses[ghost.camera] ?? .connecting,
+                           snapshot: model.liveStill(ghost.camera) ?? snapshots[ghost.camera]?.image,
+                           frozen: statuses[ghost.camera] ?? .connecting,
                            compact: ghost.frame.height < Self.compactHeight)
             }
         }

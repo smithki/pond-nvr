@@ -157,12 +157,27 @@ extension AppModel {
 }
 
 extension LiveStream {
+    /// One context for every picture taken (making one is costly: a tile's stand-in takes a picture mid-animation).
+    static let pictures = CIContext()
+
     /// The picture showing now, at most `width` pixels wide.
     func picture(width: Int) -> CGImage? {
         guard let buffer = layer.sampleBufferRenderer.displayedPixelBuffer() else { return nil }
         let image = CIImage(cvPixelBuffer: buffer)
         let scale = min(1, CGFloat(width) / image.extent.width)
         let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        return CIContext().createCGImage(scaled, from: scaled.extent)
+        return Self.pictures.createCGImage(scaled, from: scaled.extent)
+    }
+}
+
+extension AppModel {
+    /// What a camera's tile shows now, live (for a stand-in at a place the tile is leaving): taken once and kept for
+    /// a moment, so a stand-in drawn again mid-fade shows the same picture, not a newer one. Nil while it isn't
+    /// playing.
+    func liveStill(_ camera: String) -> CGImage? {
+        if let kept = liveStills[camera], Date().timeIntervalSince(kept.at) < 1 { return kept.image }
+        guard let stream = liveFeeds[camera], stream.state == .playing, let image = stream.picture(width: 1280) else { return nil }
+        liveStills[camera] = (image, Date())
+        return image
     }
 }
