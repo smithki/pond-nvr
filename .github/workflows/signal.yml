@@ -1,0 +1,61 @@
+# The signaling service, deployed to a server of your own when what it's built from changes on main (or by hand, from
+# the Actions tab). Built here (x86), sent over SSH to deploy/receive-signal.sh on the server, which loads and starts
+# it; then its /health is checked. Skipped unless the repository has its settings (deploy/README.md, "Deploying from
+# CI"): the variable SIGNAL_HOST, and the secrets SIGNAL_SSH_KEY and SIGNAL_KNOWN_HOSTS.
+name: Signaling service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/Sources/Signal/**
+      - src/Sources/Traversal/**
+      - src/Sources/pond-signal/**
+      - src/Package.swift
+      - deploy/Dockerfile.signal
+      - deploy/receive-signal.sh
+      - .github/workflows/signal.yml
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the one under way.
+concurrency:
+  group: signal-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.SIGNAL_HOST != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -f deploy/Dockerfile.signal -t deploy-signal:latest .
+
+      - name: Send to the server
+        env:
+          HOST: ${{ vars.SIGNAL_HOST }}
+          USER_NAME: ${{ vars.SIGNAL_USER || 'root' }}
+          KEY: ${{ secrets.SIGNAL_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SIGNAL_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # (The key's own command on the server receives it: what's asked for here is ignored.)
+          docker save deploy-signal:latest | gzip | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes "$USER_NAME@$HOST" deploy
+
+      - name: Check it answers
+        env:
+          HOST: ${{ vars.SIGNAL_HOST }}
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$HOST/health"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "::error::https://$HOST/health didn't answer after a minute"
+          exit 1

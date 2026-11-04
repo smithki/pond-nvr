@@ -307,7 +307,7 @@ struct TimelineView: View {
     }
 
     /// Other Ponds' cameras' recorded stretches and events between two times, as their Ponds say (through the service).
-    var otherPonds: ((Date, Date) async -> (coverage: [String: [ClosedRange<Date>]], events: [TimelineEvent], starts: [String: Date]))? {
+    var otherPonds: ((Date, Date) async -> TimelineModel.OtherPonds)? {
         guard model.shownPonds != .this, !model.remotePonds.isEmpty else { return nil }
         let model = self.model
         return { from, to in
@@ -315,11 +315,15 @@ struct TimelineView: View {
             request.from = from
             request.to = to
             let reply = await model.controlClient.ask(request, timeout: 30)
-            let coverage = (reply.remoteCoverage ?? [:]).mapValues { list in
-                list.compactMap { $0.count == 2 ? Date(timeIntervalSince1970: $0[0]) ... Date(timeIntervalSince1970: max($0[0], $0[1])) : nil }
+            func ranges(_ d: [String: [[Double]]]?) -> [String: [ClosedRange<Date>]] {
+                (d ?? [:]).mapValues { list in
+                    list.compactMap { $0.count == 2 ? Date(timeIntervalSince1970: $0[0]) ... Date(timeIntervalSince1970: max($0[0], $0[1])) : nil }
+                }
             }
             let starts = (reply.remoteEarliest ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
-            return (coverage, await model.remoteEvents(since: from), starts)
+            // (Just the stretch loaded: a Pond sends at most a thousand events at a time.)
+            return TimelineModel.OtherPonds(coverage: ranges(reply.remoteCoverage), events: await model.remoteEvents(since: from, until: to),
+                                            starts: starts, privacy: ranges(reply.remotePrivate))
         }
     }
 

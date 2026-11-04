@@ -4,7 +4,13 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 
 ## Unreleased
 
-### Remote access (being built)
+### Remote access
+- **Other Ponds in the app**, beside this Mac: the Recording button chooses which are shown (all, this Mac, or another), and says when something else changes that.
+  - **Live**: their cameras live, over one session per Pond; the camera rail in a section per Pond (folding away, reordered here), with each camera's latest picture; their controls and privacy.
+  - **Events**: their events among this Mac's, pictures fetched as shown, clips playing as they come; search asks every Pond shown; the camera filter grouped by Pond.
+  - **Timeline**: their cameras as lanes under a heading each (folding away): what they recorded (grey: it stays there), their private stretches, their events (a click plays the clip), and where each Pond's recordings begin. The event under the playhead opens in Events at a click.
+  - This Pond's name in Settings › General; other Ponds renamed in Settings › Remote Access.
+- **Demo mode**: made-up cameras, drawn and encoded as a camera's stream, recorded, watched and controlled like real ones, in worlds of their own (`pond demo`, `make demo`): a home with a second home to reach, many cameras, troubles, a first run, a slow or unreachable second home.
 - **Pairing** a device or another Pond with a code (`pond remote pair`, `join`), its keys in the Keychain; a **signaling service of your own** (`pond-signal`, `deploy/`) that passes sealed messages it can't read and answers STUN.
 - **Paths between Ponds**, peer to peer: the Mac's own addresses (only temporary IPv6 ones), its public one, a relay of your own (coturn) or only a mesh (Tailscale, Headscale); checks signed per attempt; found again when the network changes; and when there's none, why, and what would fix it (`pond remote connect`).
 - **An encrypted session** over the path, with keys for it alone: a reliable control channel, and **live video** from a camera, passed through or re-encoded for a weak link (`pond remote watch`).

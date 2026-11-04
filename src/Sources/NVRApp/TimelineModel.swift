@@ -119,8 +119,16 @@ final class TimelineModel {
     var source: EventSource?
     /// Other Ponds' cameras' recorded stretches and events between two times (set by the view while other Ponds are
     /// shown): their recordings stay at their Ponds, so only what's there is drawn, and only their events' clips play.
-    @ObservationIgnored var otherPonds: ((_ from: Date, _ to: Date) async
-        -> (coverage: [String: [ClosedRange<Date>]], events: [TimelineEvent], starts: [String: Date]))?
+    @ObservationIgnored var otherPonds: ((_ from: Date, _ to: Date) async -> OtherPonds)?
+
+    /// What other Ponds say of their cameras between two times.
+    struct OtherPonds {
+        var coverage: [String: [ClosedRange<Date>]]
+        var events: [TimelineEvent]
+        /// When each began recording, and when each was private.
+        var starts: [String: Date]
+        var privacy: [String: [ClosedRange<Date>]]
+    }
     /// Other Ponds' cameras being read for the first time (their lanes not drawn yet): said so on them.
     private(set) var awaitingOtherPonds: Set<String> = []
     /// Another Pond's event whose clip is playing (in place of a recording: theirs stay at their Pond).
@@ -442,14 +450,16 @@ final class TimelineModel {
         var covered = trimmed.mapValues { RecordingIndex.coverage($0) }
         var others: [TimelineEvent] = []
         var allStarts = starts
+        var allPrivacy = privacy
         if own.count < cameras.count, let otherPonds {
             // Those not read before (just shown, or the first time): waiting, said so, until they've answered.
             awaitingOtherPonds = Set(cameras.filter { ControlSocket.RemotePond.split($0) != nil && coverage[$0] == nil })
-            let (spans, events, theirStarts) = await otherPonds(from, to)
+            let theirs = await otherPonds(from, to)
             awaitingOtherPonds = []
-            covered.merge(spans) { a, _ in a }
-            others = events.filter { cameras.contains($0.camera) && $0.start < to }
-            allStarts.merge(theirStarts.filter { cameras.contains($0.key) }) { a, _ in a }
+            covered.merge(theirs.coverage) { a, _ in a }
+            others = theirs.events.filter { cameras.contains($0.camera) && $0.start < to }
+            allStarts.merge(theirs.starts.filter { cameras.contains($0.key) }) { a, _ in a }
+            allPrivacy.merge(theirs.privacy.filter { cameras.contains($0.key) }) { a, _ in a }
         }
         // Where the cameras shown began recording (other Ponds' as they say): the timeline's beginning.
         firstRecording = allStarts.values.min()
@@ -458,7 +468,7 @@ final class TimelineModel {
         // (Only when they changed: a reload that found nothing new changes nothing, and draws nothing again.)
         let next = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : (kept + others).sorted { $0.start < $1.start }
         if next != events { events = next }
-        privateSpans = privacy
+        privateSpans = allPrivacy
         privacyRead = min(to, Date())
         loaded = from ... to
     }

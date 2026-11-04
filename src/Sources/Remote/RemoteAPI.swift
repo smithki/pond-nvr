@@ -3,8 +3,8 @@
 // a body or why not:
 //
 //   cameras           → [Camera]: each camera's id, name and kind, whether it's private (or waking), its model
-//   events            EventsRequest (begun since a time, or by their ids; one camera's or all; at most `limit`, the
-//                     newest) → [Event], oldest first: what was seen, its sentence, its picture and clip
+//   events            EventsRequest (begun since a time, and before another if asked, or by their ids; one camera's
+//                     or all; at most `limit`, the newest) → [Event], oldest first: what was seen, its sentence, its picture and clip
 //   picture.info,     Piece (an event's; `offset` and `length` unused) → FileInfo: its size and SHA-256
 //   clip.info
 //   picture, clip     Piece (an event's, from `offset`, at most `length`, up to 1 MB) → the file's bytes as they are
@@ -12,7 +12,7 @@
 // A file comes a few pieces at a time (as many in flight as fill a fast link), kept in order as they come, so a
 // download that's cut off carries on from where it got to; checked against its SHA-256 at the end.
 //   coverage          CoverageRequest (from, to) → Coverage: each camera's recorded stretches then ([start, end],
-//                     seconds), and when its recordings begin
+//                     seconds), when its recordings begin, and when it was private
 //   still             StillRequest (a camera) → Still: its latest recorded picture (JPEG), and when
 //   control           a ControlSocket.Request → its Reply: the cameras' controls, privacy and search, as the app asks
 //                     for them on the Mac itself (not pairing, the settings or talking back)
@@ -55,12 +55,15 @@ public enum RemoteAPI {
         public var camera: String?
         /// At most this many, the newest (200 unless asked; never more than 1,000).
         public var limit: Int?
+        /// Begun before then (with `since`: a stretch of time, as the Timeline shows one).
+        public var until: Date?
 
-        public init(since: Date? = nil, ids: [String]? = nil, camera: String? = nil, limit: Int? = nil) {
+        public init(since: Date? = nil, ids: [String]? = nil, camera: String? = nil, limit: Int? = nil, until: Date? = nil) {
             self.since = since
             self.ids = ids
             self.camera = camera
             self.limit = limit
+            self.until = until
         }
     }
 
@@ -122,6 +125,8 @@ public enum RemoteAPI {
     public struct Coverage: Codable, Sendable {
         public var spans: [String: [[Double]]]
         public var earliest: [String: Double]
+        /// When each was private then (start and end, as `spans`).
+        public var `private`: [String: [[Double]]]?
     }
 
     /// A camera's latest recorded picture: asked for by its id.
@@ -153,6 +158,8 @@ public enum RemoteAPI {
         let eventsFolder: @Sendable () -> String
         /// The recordings folder (for cameras' latest pictures).
         let recordings: @Sendable () -> String
+        /// When each camera was private, between two times (the service's camera health).
+        let privateSpans: @Sendable (Date, Date) -> [String: [ClosedRange<Date>]]
         let control: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
         let privacy: PrivacyState
         public let live: LiveSender
@@ -162,6 +169,7 @@ public enum RemoteAPI {
         public init(cameras: @escaping @Sendable () -> [Config.Camera], password: @escaping @Sendable (String) -> String?,
                     events: EventStore?, eventsFolder: @escaping @Sendable () -> String,
                     recordings: @escaping @Sendable () -> String = { "" },
+                    privateSpans: @escaping @Sendable (Date, Date) -> [String: [ClosedRange<Date>]] = { _, _ in [:] },
                     control: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?, privacy: PrivacyState = .shared,
                     live: LiveSender) {
             self.cameras = cameras
@@ -169,6 +177,7 @@ public enum RemoteAPI {
             self.events = events
             self.eventsFolder = eventsFolder
             self.recordings = recordings
+            self.privateSpans = privateSpans
             self.control = control
             self.privacy = privacy
             self.live = live
@@ -192,6 +201,7 @@ public enum RemoteAPI {
                 var kept = ask.ids.map { events.events(ids: Array($0.prefix(RemoteAPI.mostEvents))) }
                     ?? events.events(since: ask.since ?? Date(), camera: camera)
                 if let camera { kept = kept.filter { $0.event.camera == camera } }
+                if let until = ask.until { kept = kept.filter { $0.event.start < until } }
                 return Self.encoded(described(kept.suffix(min(RemoteAPI.mostEvents, ask.limit ?? RemoteAPI.eventsLimit)), in: events))
             case "picture.info", "clip.info":
                 return info(String(action.dropLast(5)), body)
@@ -209,11 +219,13 @@ public enum RemoteAPI {
                     return (nil, "when?")
                 }
                 let base = recordings()
-                var out = Coverage(spans: [:], earliest: [:])
+                var out = Coverage(spans: [:], earliest: [:], private: [:])
+                let kept = privateSpans(ask.from, ask.to)
                 for camera in cameras() {
                     let spans = RecordingIndex.spans(base: base, camera: camera.id, from: ask.from, to: ask.to, writing: true)
                     out.spans[camera.id] = RecordingIndex.coverage(spans).map { [$0.lowerBound.timeIntervalSince1970, $0.upperBound.timeIntervalSince1970] }
                     out.earliest[camera.id] = RecordingIndex.earliest(base: base, camera: camera.id)?.timeIntervalSince1970
+                    out.private?[camera.id] = (kept[camera.id] ?? []).map { [$0.lowerBound.timeIntervalSince1970, $0.upperBound.timeIntervalSince1970] }
                 }
                 return Self.encoded(out)
             case "picture", "clip":

@@ -262,14 +262,26 @@ struct EventsView: View {
             if searching { withAnimation(.easeOut(duration: 0.2)) { slow = true } }
         }
         Task {
-            let answer = await EventSearcher.search(text, reading: reading, client: model.controlClient)
+            // This Mac's answer, and (with others shown) the other Ponds', at once.
+            let client = model.controlClient, shown = model.shownPonds
+            async let mine = EventSearcher.search(text, reading: reading, client: client)
+            let asksOthers = shown != .this && !model.otherPonds.isEmpty
+            async let theirs: (results: [SearchResult], events: [TimelineEvent]) = asksOthers
+                ? EventSearcher.others(text, reading: reading, client: client, shown: shown) : ([], [])
+            let (answer, others) = await (mine, theirs)
             // (Answered after another was asked: not this one's to show.)
             guard question.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
             searching = false
             slow = false
             switch answer {
             case let .success(result):
-                withAnimation(.snappy(duration: 0.3)) { search = result }
+                // Their events found that aren't in the grid yet (older than the newest it reads): added, so they show.
+                let known = Set(events.map(\.id))
+                let added = others.events.filter { !known.contains($0.id) && !deleted.contains($0.id) }
+                withAnimation(.snappy(duration: 0.3)) {
+                    if !added.isEmpty { events = (events + added).sorted { $0.start > $1.start } }
+                    search = EventSearcher.merged(result, others.results, includeMine: shown.includes(nil))
+                }
                 request = GridScroll(kind: .top, animated: false)
             case let .failure(problem):
                 searchProblem = problem

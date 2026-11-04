@@ -12,7 +12,9 @@ Work in progress. What works today:
 - **Camera health**: a doctor for each camera, saying what's going wrong, since when, and what to try.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
 
-Under way: reaching a Pond from away (another Mac, then an iPhone), and demo mode. See [docs/roadmap.md](docs/roadmap.md).
+- **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, through a signaling service of your own; its cameras, events and timeline beside this Mac's ([docs/remote.md](docs/remote.md)).
+
+Under way: the iPhone app, groups of cameras, and the rest of demo mode. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 

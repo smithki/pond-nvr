@@ -27,11 +27,12 @@ extension TimelineEvent {
 }
 
 extension AppModel {
-    /// Other Ponds' events begun since `from`, as shown (none while this Mac alone is).
-    func remoteEvents(since from: Date) async -> [TimelineEvent] {
+    /// Other Ponds' events begun since `from` (and before `to`, if given), as shown (none while this Mac alone is).
+    func remoteEvents(since from: Date, until to: Date? = nil) async -> [TimelineEvent] {
         guard shownPonds != .this, !otherPonds.isEmpty else { return [] }
         var request = ControlSocket.Request(camera: "", action: "remote.all-events")
-        request.seconds = Date().timeIntervalSince(from)
+        request.from = from
+        request.to = to
         let found = await controlClient.ask(request, timeout: 30).remoteEvents ?? []
         return found.filter { shownPonds.includes($0.pond) }.map(TimelineEvent.init(remote:))
     }

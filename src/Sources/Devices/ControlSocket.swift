@@ -107,6 +107,9 @@ public enum ControlSocket {
         public var remote: RemoteStatus?
         /// "remote.all-events": other Ponds' events (begun in the last `seconds` of the request).
         public var remoteEvents: [RemoteEvent]?
+        /// "remote.search-all": each other Pond's answer to the question (its events' ids here, `event@pond`, best first),
+        /// with those events in `remoteEvents`.
+        public var remoteSearches: [SearchResult]?
         /// "remote.event-file": an event's picture or clip, fetched (or on its way).
         public var remoteFile: RemoteFile?
         /// "remote.coverage": other Ponds' cameras' recorded stretches (by `camera@pond`; each start and end, seconds
@@ -114,6 +117,8 @@ public enum ControlSocket {
         public var remoteCoverage: [String: [[Double]]]?
         /// "remote.coverage": when each of those cameras' recordings begin (seconds since 1970).
         public var remoteEarliest: [String: Double]?
+        /// "remote.coverage": when each of those cameras was private (as `remoteCoverage`).
+        public var remotePrivate: [String: [[Double]]]?
         /// "remote.still": when the picture in `body` (a JPEG) was recorded.
         public var taken: Date?
         /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.

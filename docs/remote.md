@@ -1,6 +1,6 @@
 # Remote access
 
-Reaching a Pond from outside its network: another Mac first (another Pond, the start of "sites"), then the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. It's still being built: pairing, finding a path between two Ponds, and an encrypted session over it carrying live video and the remote API (cameras, events, pictures, clips, search, controls) work, from the command line; the apps come next. See the roadmap's *Away from home*.
+Reaching a Pond from outside its network: from another Mac's Pond (the start of "sites"), and later the iPhone app. Peer to peer: the two ends connect directly wherever they can, and nothing in between can read what they say. Pairing, finding a path between two Ponds, and an encrypted session over it carrying live video and the remote API (cameras, events, pictures, clips, search, controls) work from the app and the command line; the iPhone app comes later. See the roadmap's *Away from home*.
 
 ## The pieces
 
@@ -14,6 +14,16 @@ Reaching a Pond from outside its network: another Mac first (another Pond, the s
 2. On each Mac, in Settings › Remote Access: the signaling server (`wss://signal.example.com`), then turn on *Reach this Mac from elsewhere*. The status says when it's reachable. (Or in the settings file: `"remote": { "enabled": true, "signaling": "wss://signal.example.com" }`, then `pond service reload`; [configuration.md](configuration.md#remote-access) has the rest.)
 3. Pair: on the Pond to be reached, *Pair a Device…* shows a code and its QR code, good once for ten minutes; on the other, *Join Another Pond…* and paste it. (Or `pond remote pair`, then `pond remote join CODE`.) Each lists the other under Paired devices, with *Try Connecting* to see how a connection's made.
 4. Try it: `pond remote connect DEVICE` (by its name or id) finds a path and says how it went. `pond remote watch DEVICE CAMERA` watches one of its cameras for ten seconds (`--seconds N`; `--main` for the main stream; `--kbps N [--size WxH]` to have it re-encoded smaller, as for a weak link), keeps what came as an MP4 (`--out PATH`), and says how it went: pictures, frame rate, bitrate, loss, how soon the first came. `pond remote cameras DEVICE` lists its cameras; `pond remote events DEVICE` its last day's events (`--hours N`, `--camera CAMERA`), each with its id; `pond remote search DEVICE QUESTION` asks it a question; `pond remote picture DEVICE EVENT` and `pond remote clip DEVICE EVENT` fetch an event's picture or clip (`--out PATH`), and say how big it was and how fast it came; a download that's cut off carries on where it got to, when asked again.
+
+## Other Ponds in the app
+
+Once a Pond is paired with this one, the app shows it beside this Mac: the Recording button in the toolbar becomes the Pond chooser ("All Ponds", this Mac's name, each other Pond's). This Mac's name is set in Settings › General; another Pond can be renamed here in Settings › Remote Access (it keeps its own name).
+
+- **Live**: its cameras play beside this Mac's, through this Mac's service (one session to each Pond, kept open while any of it is shown, closed a minute after; every camera watched over it). The camera rail has a section for each Pond, folding away, with each camera's latest picture as its Pond sends it. Their controls (moving, positions, day and night, privacy) work as at home, asked of their Pond.
+- **Events**: its events among this Mac's, newest first; pictures fetched as their cards first show, and a clip played as it comes (it starts before the whole of it has). Search asks every Pond shown, and their answers are put together. The camera filter lists every Pond's cameras, those of Ponds not shown last; choosing one shows its Pond too.
+- **Timeline**: its cameras as lanes under a heading of its own, with what it recorded when (grey: its recordings stay there, and aren't played from here), its private stretches, its events, and where its recordings begin. Clicking one of its events plays the event's clip.
+
+What's fetched (pictures and clips) is kept in a cache, `~/Library/Caches/camera.pond/Remote`, which can be cleared at any time. To try all of this without a second home, see the demo: `make demo` runs a second Pond, the "Lake House", beside a made-up home on this Mac.
 
 ## Trying it across two networks
 

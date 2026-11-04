@@ -6,6 +6,7 @@ import Devices
 import Foundation
 import Ingest
 import NVRCore
+import Understanding
 
 public final class RemoteViewing: @unchecked Sendable {
     public static let scheme = "pond-remote"
@@ -108,34 +109,28 @@ public final class RemoteViewing: @unchecked Sendable {
         return still
     }
 
-    /// Each Pond's events as last asked (for how far back), and when: asked again at most every 10 s.
-    private var events: [String: (asked: Date, seconds: Double, events: [RemoteAPI.Event])] = [:]
+    /// Each Pond's events as last asked (for which stretch), and when: asked again at most every 10 s.
+    private var events: [String: (asked: Date, from: Date, to: Date?, events: [RemoteAPI.Event])] = [:]
     /// Pictures and clips being fetched, or fetched (by `kind/event@pond`).
     private var files: [String: ControlSocket.RemoteFile] = [:]
 
-    /// Every Pond's events begun in the last `seconds`, newest last, as each sends them (one that can't be reached: its
-    /// last ones, if any).
-    public func allEvents(seconds: Double) async -> [ControlSocket.RemoteEvent] {
+    /// Every Pond's events begun from `from` (and before `to`, if given), newest last, as each sends them (one that can't
+    /// be reached: its last ones, if any).
+    public func allEvents(from: Date, to: Date? = nil) async -> [ControlSocket.RemoteEvent] {
         await withTaskGroup(of: [ControlSocket.RemoteEvent].self) { group in
             for peer in host.devices() {
                 group.addTask { [self] in
                     let kept = lock.withLock { events[peer.id] }
-                    var found = kept?.events
-                    if kept == nil || Date().timeIntervalSince(kept!.asked) > 10 || kept!.seconds < seconds,
+                    // (The same stretch, give or take a minute, asked again within 10 s: as it was.)
+                    let same = kept.map { abs($0.from.timeIntervalSince(from)) < 60 && $0.to == to } ?? false
+                    var found = same ? kept?.events : nil
+                    if !same || Date().timeIntervalSince(kept!.asked) > 10,
                        let session = await session(peer.id),
-                       let fresh = try? await RemoteClient(session: session).events(.init(since: Date().addingTimeInterval(-seconds),
-                                                                                         limit: RemoteAPI.mostEvents)) {
-                        lock.withLock { events[peer.id] = (Date(), seconds, fresh) }
+                       let fresh = try? await RemoteClient(session: session).events(.init(since: from, limit: RemoteAPI.mostEvents, until: to)) {
+                        lock.withLock { events[peer.id] = (Date(), from, to, fresh) }
                         found = fresh
                     }
-                    return (found ?? []).map { e in
-                        let id = ControlSocket.RemotePond.cameraID(e.id, pond: peer.id)
-                        return ControlSocket.RemoteEvent(
-                            id: id, pond: peer.id, camera: ControlSocket.RemotePond.cameraID(e.camera, pond: peer.id), start: e.start,
-                            end: e.end, ongoing: e.ongoing, category: e.category, labels: e.labels,
-                            summary: e.sentence ?? e.seen, zones: e.zones, picture: e.picture, clipBytes: e.clipBytes,
-                            clipStart: e.clipStart, box: e.box.map { [$0.x, $0.y, $0.width, $0.height] }, confidence: e.confidence)
-                    }
+                    return (found ?? []).map { Self.here($0, pond: peer.id) }
                 }
             }
             var all: [ControlSocket.RemoteEvent] = []
@@ -149,7 +144,7 @@ public final class RemoteViewing: @unchecked Sendable {
 
     /// Every Pond's cameras' recorded stretches between two times, and when their recordings begin (by `camera@pond`):
     /// asked of each at most every 20 s for the same stretch.
-    public func allCoverage(from: Date, to: Date) async -> (spans: [String: [[Double]]], earliest: [String: Double]) {
+    public func allCoverage(from: Date, to: Date) async -> (spans: [String: [[Double]]], earliest: [String: Double], private: [String: [[Double]]]) {
         await withTaskGroup(of: RemoteAPI.Coverage.self) { group in
             for peer in host.devices() {
                 group.addTask { [self] in
@@ -164,15 +159,53 @@ public final class RemoteViewing: @unchecked Sendable {
                     func here<V>(_ d: [String: V]) -> [String: V] {
                         Dictionary(uniqueKeysWithValues: d.map { (ControlSocket.RemotePond.cameraID($0.key, pond: peer.id), $0.value) })
                     }
-                    return RemoteAPI.Coverage(spans: here(found?.spans ?? [:]), earliest: here(found?.earliest ?? [:]))
+                    return RemoteAPI.Coverage(spans: here(found?.spans ?? [:]), earliest: here(found?.earliest ?? [:]),
+                                              private: here(found?.private ?? [:]))
                 }
             }
-            var spans: [String: [[Double]]] = [:], earliest: [String: Double] = [:]
+            var spans: [String: [[Double]]] = [:], earliest: [String: Double] = [:], hidden: [String: [[Double]]] = [:]
             for await some in group {
                 spans.merge(some.spans) { a, _ in a }
                 earliest.merge(some.earliest) { a, _ in a }
+                hidden.merge(some.private ?? [:]) { a, _ in a }
             }
-            return (spans, earliest)
+            return (spans, earliest, hidden)
+        }
+    }
+
+    /// Another Pond's event as this Mac's app has it (its id and its camera's `…@pond`).
+    static func here(_ e: RemoteAPI.Event, pond: String) -> ControlSocket.RemoteEvent {
+        ControlSocket.RemoteEvent(
+            id: ControlSocket.RemotePond.cameraID(e.id, pond: pond), pond: pond, camera: ControlSocket.RemotePond.cameraID(e.camera, pond: pond),
+            start: e.start, end: e.end, ongoing: e.ongoing, category: e.category, labels: e.labels, summary: e.sentence ?? e.seen,
+            zones: e.zones, picture: e.picture, clipBytes: e.clipBytes, clipStart: e.clipStart,
+            box: e.box.map { [$0.x, $0.y, $0.width, $0.height] }, confidence: e.confidence)
+    }
+
+    /// A question asked of every other Pond at once (as the app asks this Mac's: the reading, if a part was taken off
+    /// it, answered again): each one's answer (its events' ids here, best first), and those events.
+    public func searchAll(_ request: ControlSocket.Request) async -> (results: [SearchResult], events: [ControlSocket.RemoteEvent]) {
+        await withTaskGroup(of: (SearchResult, [ControlSocket.RemoteEvent])?.self) { group in
+            for peer in host.devices() {
+                group.addTask { [self] in
+                    guard let session = await session(peer.id) else { return nil }
+                    let client = RemoteClient(session: session)
+                    var asked = request
+                    asked.action = "search"
+                    asked.camera = ""
+                    guard let reply = try? await client.control(asked), var result = reply.search,
+                          let found = try? await client.events(.init(ids: result.ids, limit: RemoteAPI.mostEvents)) else { return nil }
+                    result.ids = result.ids.map { ControlSocket.RemotePond.cameraID($0, pond: peer.id) }
+                    return (result, found.map { Self.here($0, pond: peer.id) })
+                }
+            }
+            var results: [SearchResult] = [], events: [ControlSocket.RemoteEvent] = []
+            for await answer in group {
+                guard let (result, found) = answer else { continue }
+                results.append(result)
+                events += found
+            }
+            return (results, events)
         }
     }
 

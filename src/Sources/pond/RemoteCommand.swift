@@ -114,10 +114,13 @@ final class RemoteAccess: @unchecked Sendable {
                                  relaySecret: relaySecret, problem: problem)
             return reply
         case "remote.all-events":
-            // Every other Pond's events, begun in the last `seconds` (for the app; `remote.events` is one Pond's, for `pond`).
+            // Every other Pond's events, begun from `from` to `to`, or in the last `seconds` (for the app; `remote.events`
+            // is one Pond's, for `pond`).
             guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }
             var reply = ControlSocket.Reply()
-            reply.remoteEvents = await viewing.allEvents(seconds: request.seconds ?? 86400)
+            // (From `from` to `to` if asked: a stretch, as the Timeline shows; else the last `seconds`.)
+            let from = request.from ?? Date().addingTimeInterval(-(request.seconds ?? 86400))
+            reply.remoteEvents = await viewing.allEvents(from: from, to: request.to)
             return reply
         case "remote.coverage":
             // Every other Pond's cameras' recorded stretches, from `from` to `to`.
@@ -125,7 +128,13 @@ final class RemoteAccess: @unchecked Sendable {
                 return ControlSocket.Reply(error: .failed("when?"))
             }
             var reply = ControlSocket.Reply()
-            (reply.remoteCoverage, reply.remoteEarliest) = await viewing.allCoverage(from: from, to: to)
+            (reply.remoteCoverage, reply.remoteEarliest, reply.remotePrivate) = await viewing.allCoverage(from: from, to: to)
+            return reply
+        case "remote.search-all":
+            // The question (or a reading of it) asked of every other Pond.
+            guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }
+            var reply = ControlSocket.Reply()
+            (reply.remoteSearches, reply.remoteEvents) = await viewing.searchAll(request)
             return reply
         case "remote.event-file":
             // An event's picture or clip (`file`: "picture" or "clip"), fetched or on its way.

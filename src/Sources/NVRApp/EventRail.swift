@@ -196,9 +196,11 @@ struct ActivityRail: View {
         guard let window else { return nil }
         let calendar = Calendar.current
         let oldest = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        // By the calendar: the day's row and the hour's cell (a day the clocks change has 23 or 25 hours, but its row
+        // has 24 cells, as every row does: counting hours since the first row put the outline an hour off after one).
         func index(_ date: Date) -> Double {
-            let hour = calendar.dateInterval(of: .hour, for: date)?.start ?? date
-            return (hour.timeIntervalSince(oldest) / 3600).rounded()
+            let days = calendar.dateComponents([.day], from: oldest, to: calendar.startOfDay(for: date)).day ?? 0
+            return Double(days * 24 + calendar.component(.hour, from: date))
         }
         let start = max(0, index(window.lowerBound)), end = min(Double(days * 24), index(window.upperBound) + 1)
         return end > start ? RailSpan(start: start, end: end) : nil
