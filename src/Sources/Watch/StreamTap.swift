@@ -1,7 +1,8 @@
 // A camera's main stream, decoded only while it's wanted: the watcher asks for it while something moves, for a
 // closer look at full resolution. Opened through the StreamHub (the recorder's connection, shared: nothing more
 // is asked of the camera), with a replay of the video since its latest keyframe, so a picture is at hand within
-// a moment; let go a few seconds after it was last asked for. Only so many decode at once (TapSlots); decoded in
+// a moment; let go a few seconds after it was last asked for. Only so many decode at once (TapSlots), and only while
+// the media engine has room (MediaBudget: the first to close when it's full); decoded in
 // the decoder's own 4:2:0 at no more than 2560 wide (FrameDecoder.closeUp), whatever the camera's size.
 import CoreVideo
 import Foundation
@@ -28,11 +29,14 @@ final class StreamTap: @unchecked Sendable {
     /// Not H.264 (or it failed to open): not tried again.
     private var unusable = false
 
-    init(url: String, username: String, password: String, slots: TapSlots = .shared) {
+    let budget: MediaBudget
+
+    init(url: String, username: String, password: String, slots: TapSlots = .shared, budget: MediaBudget = .shared) {
         self.url = url
         self.username = username
         self.password = password
         self.slots = slots
+        self.budget = budget
     }
 
     /// Every tap closed, and none opened, until then (the video decoder holding too much: see VideoMemoryGuard).
@@ -85,6 +89,12 @@ final class StreamTap: @unchecked Sendable {
             return
         }
         var depacketizer = H264Depacketizer(spropParameterSets: source.video.format["sprop-parameter-sets"])
+        // Its share of the media engine: none, or taken back for something that matters more, and it closes.
+        let cost = MediaBudget.decode(sps: depacketizer.sps, fallback: (3840, 2160))
+        guard case let .granted(grant) = budget.claim(.closerLook, cost: cost, label: url, onShed: { [weak self] shed in
+            if shed { self?.yield() }
+        }) else { return }
+        defer { grant.release() }
         let decoder = FrameDecoder.closeUp()
         defer { decoder.close() }
         while wanted {

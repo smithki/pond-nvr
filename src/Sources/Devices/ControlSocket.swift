@@ -125,6 +125,8 @@ public enum ControlSocket {
         public var ponds: [RemotePond]?
         /// "remote.health": how each paired Pond's recording is going, for the app to say when one goes quiet.
         public var pondHealth: [PondHealth]?
+        /// "media.budget": the media engine's budget, as used now (MediaBudget).
+        public var media: MediaBudget.Report?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -523,6 +525,9 @@ public final class ControlServer: @unchecked Sendable {
 
     /// Remote access (set by the service, when it's on): the "remote." actions.
     public var remote: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
+    /// The media engine's budget (set by the service): "media.budget", how it's used; "media.app", what the app's live
+    /// views decode (`value`: pixels a second).
+    public var media: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
     /// Another Pond's camera's request (its id `camera@pond`), asked of that Pond (set by the service).
     public var otherPond: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
 
@@ -587,6 +592,9 @@ public final class ControlServer: @unchecked Sendable {
             var reply = ControlSocket.Reply()
             if let search { reply.search = await search(request) } else { reply.error = .notSupported }
             return reply
+        case let action where action.hasPrefix("media."):
+            guard let media else { return ControlSocket.Reply(error: .notSupported) }
+            return await media(request)
         case let action where action.hasPrefix("remote."):
             guard let remote else {
                 return ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))

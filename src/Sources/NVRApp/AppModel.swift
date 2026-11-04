@@ -219,6 +219,20 @@ final class AppModel {
         Self.current = self
     }
 
+    /// What the live views decode now (each playing tile's picture, at a camera's usual 15 fps), told to the service
+    /// for the media engine's budget, which counts it as live viewing (and makes room for it). Nothing when nothing's
+    /// shown, and nothing is said again while it's the same.
+    func reportLiveViews() async {
+        let pixels = liveFeeds.values.filter { $0.state == .playing }.compactMap(\.size)
+            .reduce(0.0) { $0 + MediaBudget.decode(width: Int($1.width), height: Int($1.height), fps: 15) }
+        guard pixels != reportedLiveViews || Date().timeIntervalSince(reportedLiveViewsAt) > 20 else { return }
+        reportedLiveViews = pixels
+        reportedLiveViewsAt = Date()
+        _ = await controlClient.ask(.init(camera: "", action: "media.app", value: .number(pixels)), timeout: 3)
+    }
+    @ObservationIgnored private var reportedLiveViews = -1.0
+    @ObservationIgnored private var reportedLiveViewsAt = Date.distantPast
+
     /// The app's (for what isn't a view: a notification clicked).
     nonisolated(unsafe) static weak var current: AppModel?
 

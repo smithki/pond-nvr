@@ -101,7 +101,9 @@ public final class LiveSender: @unchecked Sendable {
         let live = LiveSession(source: source, socket: SessionTransport(session: session, ssrc: answer.ssrc), video: video,
                                masterKey: keys.videoSend.key, masterSalt: keys.videoSend.salt, hub: hub, log: log)
         if let reencode {
-            live.reencode(to: .init(width: reencode.width, height: reencode.height, bitrate: reencode.kbps, fps: reencode.fps, profile: 1))
+            // Only while the media engine has room: else the camera's own stream, as it is.
+            live.reencodeIfRoom(to: .init(width: reencode.width, height: reencode.height, bitrate: reencode.kbps, fps: reencode.fps, profile: 1),
+                                label: "live to \(session.peer.name)")
         }
         let id = session.id, ssrc = answer.ssrc
         live.onEnd = { [weak self, weak session] in

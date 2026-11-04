@@ -196,8 +196,10 @@ public final class StreamManagement: @unchecked Sendable {
             log(line.replacingOccurrences(of: "HomeKit live:", with: "HomeKit live (\(viewer)):"))
         }
         if let target {
-            session.reencode(to: target)
-            log("… HomeKit live: re-encoding from \(target.bitrate) kbit/s, then as the viewer's reports allow")
+            // Only while the media engine has room: else the camera's own stream, as it is.
+            if session.reencodeIfRoom(to: target, label: "HomeKit live (\(viewer))") {
+                log("… HomeKit live: re-encoding from \(target.bitrate) kbit/s, then as the viewer's reports allow")
+            }
         }
         if let audio {
             session.enableAudio(audio, socket: prepared.audioSocket, masterKey: prepared.audioKey,

@@ -286,6 +286,8 @@ struct ContentView: View {
                 if tick % 2 == 0 { model.refreshService() }
                 model.refreshHomeKit()
                 model.refreshPrivacy()
+                // What the live views decode, for the media engine's budget, every 6 s.
+                if tick % 3 == 0 { await model.reportLiveViews() }
                 // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
                 if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
                 tick += 1

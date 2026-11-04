@@ -60,6 +60,14 @@ public final class Prebuffer: @unchecked Sendable {
         self.log = log
     }
 
+    /// The stream's SPS, from the latest picture kept (its size: for the media engine's budget).
+    public var sps: [UInt8]? {
+        lock.withLock {
+            for item in items.reversed() { if case let .video(v) = item { return v.sps } }
+            return nil
+        }
+    }
+
     public func start() {
         let thread = Thread { [self] in run() }
         thread.name = "prebuffer \(source.url)"

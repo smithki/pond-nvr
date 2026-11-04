@@ -16,6 +16,9 @@ public final class CameraWatcher: @unchecked Sendable {
     let username: String
     let password: String
     let detector: SharedDetector
+    /// Its share of the media engine, and whether it's shed to keyframes only now.
+    let budget: MediaBudget = .shared
+    private var keyframesOnly = false
     let store: EventStore?
     /// The events folder: pictures go under its events/<camera>/<day>/.
     let eventsFolder: String
@@ -149,6 +152,18 @@ public final class CameraWatcher: @unchecked Sendable {
             throw NotH264()
         }
         var depacketizer = H264Depacketizer(spropParameterSets: source.video.format["sprop-parameter-sets"])
+        // Its share of the media engine: every picture decoded, or (while it's full, for what matters more) only
+        // keyframes, a picture every couple of seconds.
+        let cost = MediaBudget.decode(sps: depacketizer.sps, fallback: (640, 360))
+        let grant: MediaBudget.Grant? = switch budget.claim(.detection, cost: cost, label: camera, reduced: cost / 30,
+                                                           onShed: { [weak self] shed in self?.lock.withLock { self?.keyframesOnly = shed } }) {
+        case let .granted(g): g
+        case let .reduced(g): g
+        case .refused: nil
+        }
+        lock.withLock { keyframesOnly = grant?.isShed ?? false }
+        defer { grant?.release() }
+        var skipping = false
         let decoder = FrameDecoder()
         defer { decoder.close() }
         gate = MotionGate()
@@ -172,6 +187,12 @@ public final class CameraWatcher: @unchecked Sendable {
             }
             guard packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { continue }
             for unit in depacketizer.push(rtp) {
+                // Keyframes only while shed; back to every picture from the next keyframe (the ones after it need it).
+                if lock.withLock({ keyframesOnly }) { skipping = true }
+                if skipping {
+                    guard unit.isKeyframe else { continue }
+                    if !lock.withLock({ keyframesOnly }) { skipping = false }
+                }
                 // Each picture's leftovers let go with it (this thread runs for as long as the camera's watched: its
                 // own pool would keep them all, and with them the decoder's pictures).
                 autoreleasepool {

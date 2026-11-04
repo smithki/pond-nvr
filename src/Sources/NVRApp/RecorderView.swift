@@ -1,4 +1,5 @@
 import Control
+import Ingest
 import SwiftUI
 
 struct RecorderView: View {
@@ -7,6 +8,8 @@ struct RecorderView: View {
     @State private var log = ServiceLog()
     /// The tab's height: the log takes what the rest leaves, so the page fits without scrolling.
     @State private var tabHeight = 560.0
+    /// The media engine's budget, as the service has it.
+    @State private var media: MediaBudget.Report?
 
     var body: some View {
         Form {
@@ -35,6 +38,7 @@ struct RecorderView: View {
                         Label("Not running: \(why)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     }
                 }
+                if case .running = model.serviceState, let media { MediaEngineRow(report: media) }
                 HStack {
                     Spacer()
                     switch model.serviceState {
@@ -65,7 +69,7 @@ struct RecorderView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LogSection(log: log, height: max(140, tabHeight - 366))
+            LogSection(log: log, height: max(140, tabHeight - (media == nil ? 366 : 394)))
         }
         .formStyle(.grouped)
         .onGeometryChange(for: Double.self) { $0.size.height } action: { tabHeight = $0 }
@@ -73,6 +77,7 @@ struct RecorderView: View {
             while !Task.isCancelled {
                 model.refreshService()
                 log.refresh()
+                media = await model.controlClient.ask(.init(camera: "", action: "media.budget"), timeout: 3).media
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -81,5 +86,32 @@ struct RecorderView: View {
         } message: {
             Text("The recorder stops and no longer starts at login. Recordings and settings stay.")
         }
+    }
+}
+
+/// How full the media engine is (Pond's video decoding and encoding, against what the chip can do), by what's using
+/// it, and what's been shed to make room (detection on keyframes, recordings from the sub-stream).
+struct MediaEngineRow: View {
+    let report: MediaBudget.Report
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 8) {
+                ProgressView(value: min(1, report.used / max(1, report.capacity)))
+                    .frame(width: 120)
+                    .tint(report.percent > 100 ? .orange : report.shed.isEmpty ? .accentColor : .yellow)
+                Text("\(report.percent)%").monospacedDigit().foregroundStyle(.secondary)
+            }
+        } label: {
+            Text("Media engine")
+            Text(words)
+        }
+        .help("Video decoded and encoded by Pond, against what this Mac\u{2019}s media engine can do. When it\u{2019}s full, the least important gives way first: closer looks close, then detection looks at keyframes only, then new HomeKit recordings are made from the sub-stream.")
+    }
+
+    var words: String {
+        let parts = report.kinds.map { "\($0.kind.words) \($0.count)" }.joined(separator: ", ")
+        let using = parts.isEmpty ? "Nothing decoding now" : parts.prefix(1).uppercased() + parts.dropFirst()
+        return report.shed.isEmpty ? using : "\(using). To make room: \(report.shed.joined(separator: ", "))"
     }
 }

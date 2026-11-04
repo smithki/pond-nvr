@@ -141,8 +141,13 @@ public final class RecordingController: @unchecked Sendable {
     private let lock = NSLock()
     private var state: RecordingState
     private var lastSetupResponse: [UInt8] = []
-    /// The camera's last seconds, for recordings; nil without a stream to read.
+    /// The camera's last seconds, for recordings; nil without a stream to read. And its sub-stream's: a recording
+    /// is made from it instead while the media engine is full (MediaBudget).
     let prebuffer: Prebuffer?
+    let subPrebuffer: Prebuffer?
+    let budget: MediaBudget
+    /// The recording going on's share of the media engine.
+    private var grant: MediaBudget.Grant?
     /// The recording going on (the hub records one at a time).
     private var session: RecordingSession?
     /// Called with the state whenever it changes, to keep it.
@@ -185,7 +190,9 @@ public final class RecordingController: @unchecked Sendable {
     var camera: String?
 
     init(options: RecordingOptions, state: RecordingState?, source: (url: String, username: String, password: String)? = nil,
-         prebuffer given: Prebuffer? = nil, log: @escaping @Sendable (String) -> Void) {
+         subSource: (url: String, username: String, password: String)? = nil, prebuffer given: Prebuffer? = nil,
+         budget: MediaBudget = .shared, log: @escaping @Sendable (String) -> Void) {
+        self.budget = budget
         self.options = options
         var kept = state ?? RecordingState()
         // Offers changed since the hub chose: its choice goes, and it chooses again.
@@ -199,9 +206,13 @@ public final class RecordingController: @unchecked Sendable {
         // The prebuffer the camera offers, and a keyframe's worth more to start from.
         if let given {
             prebuffer = given
+            subPrebuffer = nil
         } else {
             prebuffer = source.map { Prebuffer(source: $0, seconds: Double(options.prebuffer) / 1000 + 5, log: log) }
             prebuffer?.start()
+            // (Packets only, a few seconds of them: nothing decoded until a recording needs it.)
+            subPrebuffer = subSource.flatMap { $0.url.isEmpty || $0.url == source?.url ? nil : Prebuffer(source: $0, seconds: Double(options.prebuffer) / 1000 + 5, log: log) }
+            subPrebuffer?.start()
         }
         dataStream.log = log
         dataStream.handler = { [weak self] message, connection in self?.received(message, on: connection) }
@@ -391,11 +402,30 @@ public final class RecordingController: @unchecked Sendable {
             connection.send(message.response(status: 6, body: .dictionary([("status", .int(2))])))
             return
         }
+        // Its share of the media engine: the main stream decoded and encoded for the hub; when that doesn't fit (beside
+        // other recordings and live re-encoding), the sub-stream instead. Never turned down.
+        let encode = MediaBudget.encode(width: selected.width, height: selected.height, fps: Double(selected.fps))
+        let cost = MediaBudget.decode(sps: prebuffer.sps, fallback: (3840, 2160)) + encode
+        let reduced = subPrebuffer.map { MediaBudget.decode(sps: $0.sps, fallback: (640, 360)) + encode }
+        let answer = budget.claim(.homeKitRecording, cost: cost, label: "\(camera ?? "a camera")'s HomeKit recording", reduced: reduced)
+        var source = prebuffer
+        switch answer {
+        case let .granted(g): lock.withLock { grant = g }
+        case let .reduced(g):
+            lock.withLock { grant = g }
+            if let subPrebuffer { source = subPrebuffer }
+        case .refused: break
+        }
         let session = RecordingSession(camera: camera, streamID: streamID, connection: connection, selected: selected,
-                                       audio: s.audioActive ? audioTrack(for: selected, prebuffer: prebuffer) : nil,
-                                       prebuffer: prebuffer, log: log)
+                                       audio: s.audioActive ? audioTrack(for: selected, prebuffer: source) : nil,
+                                       prebuffer: source, log: log)
         // Done (closed by the hub, or its connection): the clip it made, or the hub's error.
         session.finished = { [weak self] clip, reason in
+            // Its share given back.
+            self?.lock.withLock { () -> MediaBudget.Grant? in
+                defer { self?.grant = nil }
+                return self?.grant
+            }?.release()
             if let clip { self?.change { $0.lastClip = clip } }
             self?.report { status in
                 status.recording = false
@@ -440,7 +470,12 @@ public final class RecordingController: @unchecked Sendable {
     func stop() {
         dataStream.stop()
         prebuffer?.stop()
+        subPrebuffer?.stop()
         lock.withLock { session }?.close(reason: nil)
+        lock.withLock { () -> MediaBudget.Grant? in
+            defer { grant = nil }
+            return grant
+        }?.release()
     }
 }
 

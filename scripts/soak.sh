@@ -4,7 +4,7 @@
 # after changing anything that decodes video (detection, the closer looks, HomeKit's re-encoding).
 #
 #   scripts/soak.sh [--quick] [--cameras N] [--size WxH] [--fps N] [--minutes M] [--recording N] [--taps N]
-#                   [--max-decoder MB] [--max-wired GB] [--stop-pond]
+#                   [--capacity PX] [--max-decoder MB] [--max-wired GB] [--stop-pond]
 #
 # With Pond's own service running, its decoding and its language model count in the readings, so wired memory is
 # reported but not judged; --stop-pond stops the service for a clean reading and starts it again afterwards
@@ -17,7 +17,7 @@
 # the time limit, 64 a usage mistake.
 set -u
 
-cameras=8 size=3840x2160 fps=15 minutes=3 recording=2 taps="" max_decoder="" max_wired=4 stop_pond=0
+cameras=8 size=3840x2160 fps=15 minutes=3 recording=2 taps="" capacity="" max_decoder="" max_wired=4 stop_pond=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --quick) cameras=2 minutes=0.5 ;;
@@ -27,6 +27,7 @@ while [ $# -gt 0 ]; do
     --minutes) minutes="$2"; shift ;;
     --recording) recording="$2"; shift ;;
     --taps) taps="$2"; shift ;;
+    --capacity) capacity="$2"; shift ;;   # the media engine's budget, pixels a second (POND_MEDIA_CAPACITY)
     --max-decoder) max_decoder="$2"; shift ;;
     --max-wired) max_wired="$2"; shift ;;
     --stop-pond) stop_pond=1 ;;
@@ -87,7 +88,7 @@ echo "Stopped at a decoder service of $max_decoder MB, or wired memory $max_wire
 # The test in a process group of its own, so all of it can be stopped at once.
 set -m
 POND_SOAK=1 POND_SOAK_CAMERAS="$cameras" POND_SOAK_SIZE="$size" POND_SOAK_FPS="$fps" POND_SOAK_SECONDS="$seconds" \
-  POND_SOAK_RECORDING="$recording" POND_SOAK_WIRED="$judge_wired" ${taps:+POND_SOAK_TAPS="$taps"} \
+  POND_SOAK_RECORDING="$recording" POND_SOAK_WIRED="$judge_wired" ${taps:+POND_SOAK_TAPS="$taps"} ${capacity:+POND_MEDIA_CAPACITY="$capacity"} \
   swift test --skip-build --filter SoakTests >>"$log" 2>&1 &
 test_pid=$!
 set +m

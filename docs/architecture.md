@@ -72,6 +72,20 @@ Recordings decode completely in ffmpeg and open in AVFoundation (QuickTime's eng
 
 **A camera with too many viewers** may stall: about a minute into a connection its video falls to almost nothing for 20–30 s, or thins out (fewer frames, gaps in the sound). `ffmpeg` sees the same, so it is the camera. The worker turns each stall into a short gap: it ends the segment, reconnects, and records again. Pond shares one connection per stream for this reason (see [cameras](cameras/README.md#connections)).
 
+## The media engine's budget
+
+Everything of Pond's that decodes or encodes video shares the Mac's media engine, so each job claims its share from one budget (`MediaBudget`, in `Ingest`): pixels a second (a decode's width × height × frame rate; an encode's weighed half again). The capacity is the chip's, estimated by its name (2.5 Gpx/s for a base chip, about what the soak showed it keeps up with; twice that for a Pro, four times for a Max, eight for an Ultra), or `POND_MEDIA_CAPACITY` to try a small one. In order, most important first:
+
+| Job | When it doesn't fit |
+|---|---|
+| HomeKit Secure Video recordings | Never turned down. A new one is re-encoded from the sub-stream instead (a second prebuffer is kept on it, packets only, so it still starts from before the motion). |
+| Live re-encoding (the Home app's, another Pond's) | A new one is turned down: the camera's own stream is sent as it is, which costs nothing. |
+| Live views in the app | Counted (the app says what its tiles decode, `media.app`), never shed. |
+| Detection on the sub-streams | Shed to keyframes only (a picture every couple of seconds), and given back when there's room. |
+| Closer looks | Closed first, and opened again when there's room. |
+
+Continuous recording decodes nothing and isn't in it. What's shed and given back is logged; the hourly video-decoding line adds the budget, and Settings › Recorder shows it (`media.budget`).
+
 ## HomeKit Secure Video
 
 When the home hub wants a recording (on the motion sensor), it opens a `dataSend` stream over the HomeKit Data Stream. `RecordingSession` takes the prebuffer from the latest keyframe before the time the hub asked for, then the live frames, and re-encodes them (`VideoTranscoder`, not in real time) to the hub's chosen size, bitrate and frame rate, at a constant frame rate with a keyframe exactly at the start of each fragment: the hub treats its fragment length as a maximum. `FragmentWriter` writes them as fMP4, sent in chunks of at most 256 KB until the hub closes the stream. The camera's AAC-LC goes along unchanged when the hub chose AAC-LC at its sample rate.

@@ -15,6 +15,7 @@
 // how hard the closer looks were worked that hour (they're what leaked before: a flat size after many is the proof).
 import Darwin
 import Foundation
+import Ingest
 import NVRCore
 
 public final class VideoMemoryGuard: @unchecked Sendable {
@@ -23,6 +24,12 @@ public final class VideoMemoryGuard: @unchecked Sendable {
     public let shedAt: Int, stopAt: Int
     /// How long the closer looks pause.
     public static let shedFor: TimeInterval = 300
+
+    /// The media engine's budget in words: "media engine 64% (HomeKit recordings 2, detection 6, closer looks 1)".
+    public static func describe(_ r: MediaBudget.Report) -> String {
+        let parts = r.kinds.map { "\($0.kind.words) \($0.count)" }.joined(separator: ", ")
+        return "media engine \(r.percent)%" + (parts.isEmpty ? "" : " (\(parts))") + (r.shed.isEmpty ? "" : ", shed: \(r.shed.joined(separator: ", "))")
+    }
     /// Growth counted as a leak: all through this many looks (a minute), by this much (MB), Pond's decoders the same.
     static let leakLooks = 7, leakGrowth = 300
     static let every: TimeInterval = 10, reportEvery: TimeInterval = 3600
@@ -86,7 +93,7 @@ public final class VideoMemoryGuard: @unchecked Sendable {
             reported = now
             let (looks, taps) = CloserLook.Count.take()
             log("video decoding: \(held) MB held, \(open) decoder\(open == 1 ? "" : "s") open; this hour, \(looks) closer look"
-                + "\(looks == 1 ? "" : "s") from \(taps) main stream\(taps == 1 ? "" : "s") opened")
+                + "\(looks == 1 ? "" : "s") from \(taps) main stream\(taps == 1 ? "" : "s") opened; " + Self.describe(MediaBudget.shared.report))
         }
         if held >= stopAt {
             halt("the video decoder holds \(held) MB (more than a quarter of this Mac's memory)")

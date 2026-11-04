@@ -202,6 +202,8 @@ public final class LiveSession: @unchecked Sendable {
     static let firstFrameSeconds = 8.0
     private let sendLock = NSLock()
     public var onEnd: (@Sendable () -> Void)?
+    /// Its re-encoding's share of the media engine, while it has one.
+    private var budgetGrant: MediaBudget.Grant?
     /// Something went wrong reaching the camera, or video stopped (the viewer may still be waiting).
     public var onProblem: (@Sendable (HomeKitStatus.Problem.Kind) -> Void)?
     /// Video reached the viewer.
@@ -232,6 +234,19 @@ public final class LiveSession: @unchecked Sendable {
             reencode = target
             rate = RateControl(bitrate: target.bitrate)
         }
+    }
+
+    /// Re-encoded for the viewer from `target` if the media engine has room for it (MediaBudget's live re-encoding);
+    /// else the camera's own stream, sent as it is (which costs the engine nothing). Whether it will be re-encoded.
+    @discardableResult
+    public func reencodeIfRoom(to target: VideoTranscoder.Target, label: String, budget: MediaBudget = .shared) -> Bool {
+        // (The camera's stream's size isn't known until it opens: a middling one supposed.)
+        let cost = MediaBudget.decode(width: 2560, height: 1440, fps: 15)
+            + MediaBudget.encode(width: target.width, height: target.height, fps: Double(target.fps))
+        guard case let .granted(grant) = budget.claim(.liveReencode, cost: cost, label: label) else { return false }
+        stopFlag.withLock { budgetGrant = grant }
+        reencode(to: target)
+        return true
     }
 
     /// The Home app asks for more (a reconfigure): the rate rises to it if it is higher.
@@ -338,10 +353,11 @@ public final class LiveSession: @unchecked Sendable {
     }
 
     public func stop() {
-        let first = stopFlag.withLock {
-            defer { stopped = true }
-            return !stopped
+        let (first, grant) = stopFlag.withLock { () -> (Bool, MediaBudget.Grant?) in
+            defer { stopped = true; budgetGrant = nil }
+            return (!stopped, budgetGrant)
         }
+        grant?.release()
         if first { onEnd?() }
     }
 

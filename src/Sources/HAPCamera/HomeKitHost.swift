@@ -231,6 +231,7 @@ public final class HomeKitHost: @unchecked Sendable {
         let recording = camera.homekitRecording == true && (!camera.isVideoOnly || fromDetection)
             ? RecordingController(options: RecordingOptions(doorbell: doorbell), state: record.recording,
                                   source: (camera.main, camera.username, password),
+                                  subSource: (camera.sub, camera.username, password),
                                   log: Self.labelled(camera.name, log)) : nil
         recording?.camera = id
         recording?.statusChanged = { [weak self] status in self?.update(id) { $0.recording = status } }
@@ -276,6 +277,7 @@ public final class HomeKitHost: @unchecked Sendable {
         for stream in streams { stream.allowed = { !privacy.isPrivate(id) } }
         // Nor its main stream held for HomeKit Secure Video's prebuffer.
         recording?.prebuffer?.paused = { privacy.isPrivate(id) }
+        recording?.subPrebuffer?.paused = { privacy.isPrivate(id) }
         // Private: off in the Home app and its live views ended (the Home app's own on and off is HomeKit's,
         // and never changes Pond's privacy).
         recording?.setPrivate(privacy.isPrivate(id) || privacy.isPrivateOnCamera(id))

@@ -95,6 +95,46 @@ let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
 #if canImport(NVRMac)
 /// `pond run` (and so the login service) records and serves the cameras to HomeKit, over one connection per
 /// camera stream (`StreamHub`).
+/// What this Mac's app's live views decode (it says every few seconds), held in the media engine's budget as live
+/// viewing: never shed, but room is made for it; let go when the app's been quiet for half a minute (closed).
+final class AppLiveViews: @unchecked Sendable {
+    let budget: MediaBudget
+    private let lock = NSLock()
+    private var grant: MediaBudget.Grant?
+    private var last = Date.distantPast
+    private var timer: DispatchSourceTimer?
+
+    init(budget: MediaBudget) {
+        self.budget = budget
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.media.app"))
+        timer.schedule(deadline: .now() + 10, repeating: 10)
+        timer.setEventHandler { [weak self] in self?.expire() }
+        timer.resume()
+        self.timer = timer
+    }
+
+    func showing(_ pixels: Double) {
+        let (held, fresh) = lock.withLock { () -> (MediaBudget.Grant?, Bool) in
+            last = Date()
+            return (grant, grant == nil)
+        }
+        if pixels <= 0 { return release() }
+        if !fresh { return held?.update(cost: pixels) ?? () }
+        if case let .granted(g) = budget.claim(.appLive, cost: pixels, label: "the app\u{2019}s live views") { lock.withLock { grant = g } }
+    }
+
+    private func expire() {
+        if lock.withLock({ Date().timeIntervalSince(last) > 30 }) { release() }
+    }
+
+    private func release() {
+        lock.withLock { () -> MediaBudget.Grant? in
+            defer { grant = nil }
+            return grant
+        }?.release()
+    }
+}
+
 struct RecordingAndHomeKit: ServiceRunning {
     static let driveGone = "its recordings drive isn\u{2019}t there"
     /// Where the status for the app goes: next to the settings file.
@@ -207,6 +247,25 @@ struct RecordingAndHomeKit: ServiceRunning {
         }) { line in log.log("pond", line) }
         cameras.controls = controls
         restarter.controls = controls
+        // The media engine's budget: what it sheds and gives back said in the log; how it's used, for the app; and
+        // what the app's live views decode, counted as live viewing (until the app's been quiet half a minute).
+        let budget = MediaBudget.shared
+        budget.log = { line in log.log("pond", line) }
+        log.log("pond", "media engine: a budget of \(MediaBudget.words(budget.capacity)) (\(MediaBudget.chipName()))")
+        let appViews = AppLiveViews(budget: budget)
+        controls.media = { request in
+            switch request.action {
+            case "media.budget":
+                var reply = ControlSocket.Reply()
+                reply.media = budget.report
+                return reply
+            case "media.app":
+                if case let .number(pixels)? = request.value { appViews.showing(pixels) }
+                return ControlSocket.Reply()
+            default:
+                return ControlSocket.Reply(error: .notSupported)
+            }
+        }
         // Search, for the app and `pond search`: done here, where what it takes is kept ready.
         if let events {
             let search = SearchService(store: events, cameras: { cameras.cameras }, keptDays: { config.retention.events.days })
