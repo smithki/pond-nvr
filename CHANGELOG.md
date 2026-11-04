@@ -11,6 +11,11 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
   - **Timeline**: their cameras as lanes under a heading each (folding away): what they recorded (grey: it stays there), their private stretches, their events (a click plays the clip), and where each Pond's recordings begin. The event under the playhead opens in Events at a click.
   - This Pond's name in Settings › General; other Ponds renamed in Settings › Remote Access.
 - **Demo mode**: made-up cameras, drawn and encoded as a camera's stream, recorded, watched and controlled like real ones, in worlds of their own (`pond demo`, `make demo`): a home with a second home to reach, many cameras, troubles, a first run, a slow or unreachable second home.
+  - **Opened from Settings › General** (*Open the Demo…*): a copy of Pond of its own, beside the real one.
+  - **The last three hours made on a scenario's first start**, recordings and events (with their pictures, clips and sentences), drawn faster than real time, the latest first.
+  - **Sound**: wind, birds by day, crickets at night, passing cars and the doorbell's chime, as AAC.
+  - **The first run's Add Camera finds the demo's cameras**, and the camera check (Add Camera's, the doctor's) reads demo streams; **the trouble scenario's drive is nearly full**.
+  - Its services stop with its app, however it goes. `POND_MOCK_EVENTS` is gone (demo mode replaces it), and so is the relayed second home. ([docs/demo.md](docs/demo.md))
 - **Pairing** a device or another Pond with a code (`pond remote pair`, `join`), its keys in the Keychain; a **signaling service of your own** (`pond-signal`, `deploy/`) that passes sealed messages it can't read and answers STUN.
 - **Paths between Ponds**, peer to peer: the Mac's own addresses (only temporary IPv6 ones), its public one, a relay of your own (coturn) or only a mesh (Tailscale, Headscale); checks signed per attempt; found again when the network changes; and when there's none, why, and what would fix it (`pond remote connect`).
 - **An encrypted session** over the path, with keys for it alone: a reliable control channel, and **live video** from a camera, passed through or re-encoded for a weak link (`pond remote watch`).
@@ -18,6 +23,9 @@ Newest first. "Unreleased" is everything since the last tag; there are no tags y
 - **Settings › Remote Access**: on or off and the signaling server, with whether this Mac is reachable; the devices paired with it (who's connected, and how), pairing another with a QR code, joining another Pond by its code, trying a connection, removing one; and how connections are made (directly or only over a mesh, this Mac's own addresses, a fixed port, a relay and its secret). Changes are taken up at once: only remote access starts again, recording carries on.
 - **Clips from another Pond as fast as its home's upload allows**: the session's channel sends as much at once as the link carries (found as it goes, BBR-style, not slowed by the odd lost packet), pieces come several at a time as raw bytes, and a clip's checked against its SHA-256 and carries on where it got to if cut off. 20 MB between two Ponds on one Mac in under 2 s; 10 MB over a made-up link 50 ms away with 1% loss in about 1.5 s.
 - **The remote API** over the session: a paired Pond's cameras, its events with their sentences, pictures and clips (in pieces), search, and the cameras' controls and privacy as the app has them at home; not pairing, the settings or talking back. Tried with `pond remote cameras`, `events`, `search`, `picture` and `clip`.
+
+### The app
+- **Narrow windows**: the Timeline's bar keeps its playback controls on one row down to the smallest window, the rarer controls and then the zoom moving into a ⋯ menu; the kinds' chips fold to symbols and then to one menu. In Events the filters fold the same way on one row, the activity rail goes when there's no room for it or to make room for the details panel, and in the narrowest window the details panel covers the cards until it's closed.
 
 ### Name
 - **The app is Pond NVR** (`Pond NVR.app`): its name in the menu bar, the Dock and the Finder. Pond is still what it calls itself, and the command is still `pond`. `make app` moves a login service from the old Pond.app to the new one.

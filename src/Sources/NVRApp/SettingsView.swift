@@ -72,6 +72,27 @@ struct GeneralSettings: View {
                 Text("Shared by the app and the pond command. Change it with POND_CONFIG or --config.").foregroundStyle(.secondary)
             }
             UnderstandingSection()
+            // (In a demo, its toolbar's menu switches between them.)
+            if DemoSession.scenario == nil {
+                Section {
+                    LabeledContent("Demo") {
+                        Menu("Open the Demo\u{2026}") {
+                            ForEach(Demo.scenarios, id: \.name) { scenario in
+                                Button {
+                                    DemoSession.open(scenario)
+                                } label: {
+                                    Text(scenario.title)
+                                    Text(scenario.about)
+                                }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                } footer: {
+                    Text("Made-up cameras, recorded, watched and found in like real ones, in a copy of Pond of its own: your settings, recordings and recorder aren\u{2019}t touched.")
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section {
                 LabeledContent("Version", value: Brand.version)
             }

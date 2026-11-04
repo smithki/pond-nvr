@@ -2,6 +2,7 @@ import CoreGraphics
 import Detection
 import ImageIO
 import Foundation
+import HAPCamera
 import Ingest
 import NVRCore
 import Testing
@@ -75,6 +76,43 @@ import Testing
 
     @Test func anAddressFromAnotherScenarioIsntOpened() {
         #expect(throws: RTSPError.self) { try DemoStream(url: "demo://driveway.trouble/sub", world: world) }
+    }
+
+    @Test func aStreamCarriesSoundAsAACAlongsideItsPictures() throws {
+        let stream = try DemoStream(url: "demo://driveway.home/sub", world: world)
+        defer { stream.close() }
+        #expect(stream.audio?.encoding.uppercased() == "MPEG4-GENERIC")
+        #expect(stream.audio?.format["config"] == DemoSound.config)
+        var sound = 0, bytes = 0
+        let started = Date()
+        while sound < 8, Date().timeIntervalSince(started) < 3 {
+            guard let packet = try stream.next(timeout: 1), packet.channel == CameraSession.audioChannel,
+                  let rtp = RTPPacket(packet.data) else { continue }
+            let frames = RTPPacketizer.aacFrames(inPayload: rtp.payload)
+            sound += frames.count
+            bytes += frames.reduce(0) { $0 + $1.count }
+        }
+        #expect(sound >= 8)
+        #expect(bytes > 0)
+    }
+
+    @Test func thePastIsDrawnFasterThanRealTime() throws {
+        let to = Date(timeIntervalSince1970: 1_790_000_000), from = to.addingTimeInterval(-60)
+        let stream = try DemoStream(url: "demo://driveway.home/main", world: world, replaying: from, to: to, fps: 5)
+        defer { stream.close() }
+        #expect(stream.audio == nil)
+        var depacketizer = H264Depacketizer(spropParameterSets: stream.video.format["sprop-parameter-sets"])
+        var units = 0
+        let started = Date()
+        while true {
+            let packet: InterleavedPacket?
+            do { packet = try stream.next(timeout: 1) } catch { break }
+            guard let packet, packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { continue }
+            units += depacketizer.push(rtp).count
+        }
+        // A minute at five a second, in well under the minute.
+        #expect(units >= 295)
+        #expect(Date().timeIntervalSince(started) < 30)
     }
 
     @Test func aScenarioIsPreparedInItsOwnFolderAndKeptAfter() throws {

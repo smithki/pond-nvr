@@ -17,6 +17,15 @@ public enum Demo {
     /// The demo folder this process runs in, if it does (found from its settings file at start): its secrets and
     /// log are kept there instead of the Keychain and ~/Library/Logs.
     nonisolated(unsafe) public static var folder: String?
+    /// Its drive's free space, as the storage checks and retention are told it (a scenario with a nearly full drive),
+    /// for what's in its folder.
+    nonisolated(unsafe) public static var freeGB: Double?
+
+    /// The free space to say a folder's drive has, if this process's demo makes it up (bytes).
+    public static func madeUpFree(_ path: String) -> Int64? {
+        guard let folder, let freeGB, NSString(string: path).expandingTildeInPath.hasPrefix(folder) else { return nil }
+        return Int64(freeGB * 1_000_000_000)
+    }
 
     /// The scenario a settings file belongs to, if it's a demo's.
     public static func scenario(nextTo configPath: String) -> Scenario? {
@@ -30,6 +39,7 @@ public enum Demo {
     public static func adopt(configPath: String) -> Scenario? {
         guard let scenario = scenario(nextTo: configPath) else { return nil }
         folder = (NSString(string: configPath).expandingTildeInPath as NSString).deletingLastPathComponent
+        freeGB = scenario.freeGB
         return scenario
     }
 
@@ -52,7 +62,14 @@ public enum Demo {
 
     public static func prepare(_ scenario: Scenario, at folder: String, fresh: Bool) throws {
         let fm = FileManager.default
-        if fresh { try? fm.removeItem(atPath: folder) }
+        if fresh {
+            // Its services, if a demo app left them running, stopped first (they'd write into the new world).
+            if let data = fm.contents(atPath: (folder as NSString).appendingPathComponent("pids.json")),
+               let pids = try? JSONDecoder().decode([Int32].self, from: data) {
+                for pid in pids { kill(pid, SIGTERM) }
+            }
+            try? fm.removeItem(atPath: folder)
+        }
         let config = (folder as NSString).appendingPathComponent("config.json")
         try fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
         try JSONEncoder().encode(scenario).write(to: URL(fileURLWithPath: (folder as NSString).appendingPathComponent(marker)))
@@ -60,7 +77,9 @@ public enum Demo {
         let recordings = (folder as NSString).appendingPathComponent("Recordings")
         try StorageLocation.prepare(recordings)
         var settings = Config(storage: .init(recordings: recordings, database: (folder as NSString).appendingPathComponent("pond.sqlite")),
-                              retention: .init(continuous: .init(days: 2), events: .init(days: 7), minFreeGB: 5),
+                              // (A nearly full drive's reserve below what's free: it's short of room, not emptied.)
+                              retention: .init(continuous: .init(days: 2), events: .init(days: 7),
+                                               minFreeGB: scenario.freeGB.map { max(1, $0 - 1) } ?? 5),
                               cameras: scenario.cameras.map { $0.config(in: scenario.name) })
         settings.name = scenario.pondName
         settings.remote = scenario.signaling.map { Config.Remote(enabled: true, signaling: $0, stun: "127.0.0.1:\(Demo.signalingPort + 1)") }
@@ -76,7 +95,7 @@ public enum Demo {
     }
 
     /// The scenarios there are.
-    public static let scenarios: [Scenario] = [.home, .many, .trouble, .firstRun, .remoteSlow, .remoteRelay, .remoteUnreachable]
+    public static let scenarios: [Scenario] = [.home, .many, .trouble, .firstRun, .remoteSlow, .remoteUnreachable]
 
     public static func scenario(named name: String) -> Scenario? { scenarios.first { $0.name == name } }
 
@@ -95,6 +114,9 @@ extension Demo {
         /// The Mac's name in it (as paired devices see it).
         public var pondName: String
         public var cameras: [Camera]
+        /// Cameras on its network not set up yet: found by Add Camera (and offered in the toolbar), and added like
+        /// real ones.
+        public var found: [Camera]
         /// How many visits an hour a camera has, on average.
         public var busyness: Double
         /// Its storage nearly full (the drive's free space as the checks see it, in GB).
@@ -106,13 +128,14 @@ extension Demo {
         /// The signaling service its Ponds use (the demo's own, on this Mac), if it has other Ponds or is one.
         public var signaling: String?
 
-        public init(name: String, title: String, about: String, pondName: String, cameras: [Camera], busyness: Double = 6,
-                    freeGB: Double? = nil, ponds: [Scenario] = [], link: Link = .direct, signaling: String? = nil) {
+        public init(name: String, title: String, about: String, pondName: String, cameras: [Camera], found: [Camera] = [],
+                    busyness: Double = 6, freeGB: Double? = nil, ponds: [Scenario] = [], link: Link = .direct, signaling: String? = nil) {
             self.name = name
             self.title = title
             self.about = about
             self.pondName = pondName
             self.cameras = cameras
+            self.found = found
             self.busyness = busyness
             self.freeGB = freeGB
             self.ponds = ponds
@@ -127,8 +150,6 @@ extension Demo {
         case direct
         /// A slow, lossy link: 300 kB/s, 120 ms there and back, 2% lost.
         case slow
-        /// Only through a relay (no direct path).
-        case relay
         /// Not at all: the other Pond isn't running.
         case unreachable
     }
@@ -239,7 +260,7 @@ extension Demo.Scenario {
 
     public static let firstRun = Demo.Scenario(
         name: "first-run", title: "First Run", about: "No cameras yet: setting up, and adding the ones found.", pondName: "Demo Mac",
-        cameras: [])
+        cameras: [], found: home.cameras)
 
     static func reaching(_ name: String, _ title: String, _ about: String, link: Demo.Link) -> Demo.Scenario {
         var scenario = home
@@ -252,7 +273,6 @@ extension Demo.Scenario {
     }
 
     public static let remoteSlow = reaching("remote-slow", "Slow Second Home", "The Lake House over a slow, lossy link.", link: .slow)
-    public static let remoteRelay = reaching("remote-relay", "Relayed Second Home", "The Lake House only through a relay.", link: .relay)
     public static let remoteUnreachable = reaching("remote-unreachable", "Unreachable Second Home",
                                                    "The Lake House gone quiet.", link: .unreachable)
 }

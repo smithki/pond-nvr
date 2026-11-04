@@ -48,8 +48,12 @@ extension AppModel {
 
     /// Looks again (one look at a time), and keeps what it found.
     func findCameras() async {
-        // (Not in a demo: its cameras are made up, and the network's real ones aren't its.)
-        guard !findingCameras, DemoSession.scenario == nil else { return }
+        guard !findingCameras else { return }
+        // In a demo, its own network's (made up; the real network's cameras aren't its), and not kept.
+        if DemoSession.scenario != nil {
+            foundCameras = DemoSession.found
+            return
+        }
         findingCameras = true
         let found = await CameraFinder.find()
         foundCameras = found
@@ -61,7 +65,8 @@ extension AppModel {
     /// Looks again if the last look was a day ago or more (or never).
     func findCamerasIfDue() async {
         let last = UserDefaults.standard.object(forKey: Self.lastCameraLookKey) as? Date
-        if last.map({ Date().timeIntervalSince($0) > 24 * 3600 }) ?? true { await findCameras() }
+        // (A demo's always: it costs nothing, and the real look's time isn't its.)
+        if DemoSession.scenario != nil || last.map({ Date().timeIntervalSince($0) > 24 * 3600 }) ?? true { await findCameras() }
     }
 
     /// Add Camera, starting from a camera found on the network.

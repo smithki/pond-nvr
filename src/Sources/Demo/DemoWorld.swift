@@ -46,7 +46,22 @@ public final class DemoWorld: @unchecked Sendable {
         return world
     }
 
-    public func camera(_ id: String) -> Demo.Camera? { scenario.cameras.first { $0.id == id } }
+    /// One of its cameras (or one on its network, once added), by its demo id: the one in its streams' address.
+    public func camera(_ id: String) -> Demo.Camera? { (scenario.cameras + scenario.found).first { $0.id == id } }
+
+    /// Settings' camera ids that aren't the demo's own (a found camera added under a name of its own): its demo id,
+    /// from its stream's address in the settings.
+    private var aliases: [String: String] = [:]
+
+    func demoID(_ id: String) -> String {
+        if camera(id) != nil { return id }
+        if let known = lock.withLock({ aliases[id] }) { return known }
+        guard let folder = path.map({ ($0 as NSString).deletingLastPathComponent }),
+              let config = try? ConfigStore(path: (folder as NSString).appendingPathComponent("config.json")).load(),
+              let main = config.cameras.first(where: { $0.id == id })?.main, let parsed = Demo.parse(main) else { return id }
+        lock.withLock { aliases[id] = parsed.camera }
+        return parsed.camera
+    }
 
     private func save() {
         guard let path else { return }
@@ -121,6 +136,7 @@ public final class DemoWorld: @unchecked Sendable {
 
     /// What detection finds in a camera's picture at `t`: each figure in view, as the frame shows it.
     public func detections(_ id: String, at t: Date) -> [Detection] {
+        let id = demoID(id)
         let v = view(id, at: t)
         return figures(id, at: t).compactMap { f in
             let box = Detection.Box(x: (f.x - v.x) / v.width, y: (f.y - v.y) / v.height, width: f.width / v.width,

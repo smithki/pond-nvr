@@ -275,8 +275,7 @@ struct LiveView: View {
             return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil, lastRecorded: nil, recordingAsOf: nil,
                                    startedRecording: nil)
         }
-        let asOf: Date? = model.isRecording ? Date()
-            : MockEvents.enabled ? cameras.compactMap { snapshots[$0.id]?.time }.max() : nil
+        let asOf: Date? = model.isRecording ? Date() : nil
         return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
                                lastRecorded: snapshots[id]?.time, recordingAsOf: asOf,
                                startedRecording: [model.recordingStarted[id], model.serviceStarted].compactMap { $0 }.max())

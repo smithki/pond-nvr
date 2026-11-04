@@ -14,7 +14,7 @@ Work in progress. What works today:
 
 - **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, through a signaling service of your own; its cameras, events and timeline beside this Mac's ([docs/remote.md](docs/remote.md)).
 
-Under way: the iPhone app, groups of cameras, and the rest of demo mode. See [docs/roadmap.md](docs/roadmap.md).
+Under way: the iPhone app, and groups of cameras. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -94,6 +94,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 - [docs/detection.md](docs/detection.md): detection models: the one built in, adding another, `pond detect`.
 - [docs/search.md](docs/search.md): searching events in plain words, the sentences and the picture model behind it.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
+- [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.

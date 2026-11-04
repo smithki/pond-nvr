@@ -68,6 +68,12 @@ public struct MotionMask: Sendable, Equatable {
     public let rows: Int
     public let cells: Set<Int>
 
+    public init(columns: Int, rows: Int, cells: Set<Int>) {
+        self.columns = columns
+        self.rows = rows
+        self.cells = cells
+    }
+
     public var isMoving: Bool { !cells.isEmpty }
 
     /// Whether a box (fractions of the picture) covers any moving cell.

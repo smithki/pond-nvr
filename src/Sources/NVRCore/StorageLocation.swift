@@ -97,7 +97,7 @@ public enum StorageLocation {
               let total = (attrs[.systemSize] as? NSNumber)?.int64Value,
               let free = (attrs[.systemFreeSize] as? NSNumber)?.int64Value
         else { return nil }
-        return VolumeSpace(total: total, free: free)
+        return VolumeSpace(total: total, free: Demo.madeUpFree(path) ?? free)
     }
 }
 

@@ -60,6 +60,10 @@ public struct RTSPProber: CameraProber, Sendable {
 
     public func probe(main: String, sub: String?, username: String, password: String,
                       watchSeconds: Double) throws(RTSPError) -> ProbeReport {
+        // A stream that isn't a camera's RTSP (demo mode's made-up cameras): read through its own source.
+        if let scheme = URLComponents(string: main)?.scheme, let opener = StreamHub.openers[scheme] {
+            return try probe(opener, main: main, sub: sub, watchSeconds: watchSeconds)
+        }
         let mainClient = try connect(main, username: username, password: password)
         let (mainSDP, base) = try mainClient.describe(main)
         var report = ProbeReport(main: StreamInfo(mainSDP), sub: nil, flow: nil)
@@ -84,6 +88,34 @@ public struct RTSPProber: CameraProber, Sendable {
             mainClient.teardown(base)
         }
         mainClient.transport.close()
+        return report
+    }
+
+    private func probe(_ opener: (String) throws -> PacketSource, main: String, sub: String?,
+                       watchSeconds: Double) throws(RTSPError) -> ProbeReport {
+        func open(_ url: String) throws(RTSPError) -> PacketSource {
+            do { return try opener(url) } catch let error as RTSPError { throw error } catch { throw .malformed("\(error)") }
+        }
+        func info(_ source: PacketSource) -> StreamInfo { StreamInfo(SDP(media: [source.video] + (source.audio.map { [$0] } ?? []))) }
+        let source = try open(main)
+        defer { source.close() }
+        var report = ProbeReport(main: info(source), sub: nil, flow: nil)
+        if let sub {
+            let other = try open(sub)
+            report.sub = info(other)
+            other.close()
+        }
+        guard watchSeconds > 0 else { return report }
+        let start = Date()
+        var analyzer = FlowAnalyzer(rtpChannel: CameraSession.videoChannel, clockRate: source.video.clockRate > 0 ? source.video.clockRate : 90000)
+        while true {
+            let elapsed = Date().timeIntervalSince(start)
+            guard elapsed < watchSeconds else { break }
+            guard let packet = try source.next(timeout: watchSeconds - elapsed) else { break }
+            analyzer.add(packet, at: Date().timeIntervalSince(start))
+        }
+        report.flow = analyzer.result(seconds: Date().timeIntervalSince(start))
+        if report.main.sps == nil, case let .flowing(stats)? = report.flow { report.main.sps = stats.sps }
         return report
     }
 

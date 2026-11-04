@@ -1,6 +1,5 @@
 // Events on the timeline: what the service's detection kept (read from Pond's database), and when each camera
-// was private (from its health). POND_MOCK_EVENTS=1 makes up a plausible day of events instead, to try the
-// timeline with.
+// was private (from its health).
 import Detection
 import Foundation
 import Health
@@ -212,73 +211,4 @@ struct EventSource: Sendable {
     static func list(_ labels: [String: Int]) -> String { CameraEvent.words(labels) }
 
     static func join(_ parts: [String]) -> String { CameraEvent.join(parts) }
-}
-
-enum MockEvents {
-    static var enabled: Bool { ProcessInfo.processInfo.environment["POND_MOCK_EVENTS"] == "1" }
-
-    /// Events scattered over each camera's recorded stretches, the same every time for the same day.
-    static func make(coverage: [String: [ClosedRange<Date>]], day: Date) -> [TimelineEvent] {
-        var out: [TimelineEvent] = []
-        for camera in coverage.keys.sorted() {
-            var rng = Generator(seed: UInt64(day.timeIntervalSince1970) &+ UInt64(camera.unicodeScalars.reduce(0) { $0 &* 31 &+ UInt64($1.value) }))
-            for range in coverage[camera] ?? [] {
-                var t = range.lowerBound.addingTimeInterval(rng.uniform(60, 600))
-                while t < range.upperBound.addingTimeInterval(-30) {
-                    let kind = rng.pick([(.person, 30), (.vehicle, 18), (.animal, 10), (.package, 4), (.motion, 38)] as [(TimelineEvent.Kind, Int)])
-                    let length = kind == .motion ? rng.uniform(5, 25) : rng.uniform(10, 95)
-                    let end = min(t.addingTimeInterval(length), range.upperBound)
-                    out.append(TimelineEvent(id: "mock-\(out.count)", camera: camera, kind: kind, start: t, end: end,
-                                             summary: summary(kind, &rng)))
-                    t = end.addingTimeInterval(rng.uniform(90, 1100))
-                }
-            }
-        }
-        return out.sorted { $0.start < $1.start }
-    }
-
-    static func summary(_ kind: TimelineEvent.Kind, _ rng: inout Generator) -> String {
-        let options: [String]
-        switch kind {
-        case .person: options = ["A person walks up the path and leaves.", "A person in a dark jacket crosses the yard.",
-                                  "Two people stop at the door, then leave.", "A neighbour walks a dog past."]
-        case .vehicle: options = ["A white van pulls into the driveway.", "A car passes on the street.",
-                                  "A delivery truck stops in front of the house.", "A grey SUV backs out of the driveway."]
-        case .animal: options = ["A cat crosses the lawn.", "A dog sniffs around the porch.", "A deer walks along the fence."]
-        case .package: options = ["A courier leaves a box at the door.", "A package is picked up from the porch."]
-        case .item: options = ["A backpack left.", "A suitcase left."]
-        case .bike: options = ["A cyclist rides past.", "A bicycle is wheeled up the path."]
-        case .ring: options = ["Doorbell pressed."]
-        case .privacy: options = [""]
-        case .motion: options = ["Movement in the trees.", "Headlights sweep across the frame.", "Shadows move as clouds pass."]
-        }
-        return options[Int(rng.next() % UInt64(options.count))]
-    }
-
-    /// A small deterministic random generator (SplitMix64).
-    struct Generator {
-        var state: UInt64
-        init(seed: UInt64) { state = seed }
-
-        mutating func next() -> UInt64 {
-            state &+= 0x9E37_79B9_7F4A_7C15
-            var z = state
-            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-            return z ^ (z >> 31)
-        }
-
-        mutating func uniform(_ low: Double, _ high: Double) -> Double {
-            low + Double(next() % 1_000_000) / 1_000_000 * (high - low)
-        }
-
-        mutating func pick<T>(_ weighted: [(T, Int)]) -> T {
-            var n = Int(next() % UInt64(weighted.reduce(0) { $0 + $1.1 }))
-            for (value, weight) in weighted {
-                if n < weight { return value }
-                n -= weight
-            }
-            return weighted[0].0
-        }
-    }
 }

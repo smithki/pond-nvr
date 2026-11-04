@@ -44,8 +44,8 @@ targets += [
                                                     "Watch", "Understanding"]),
 ]
 // Demo mode: made-up cameras (scenes drawn and encoded as a camera's stream, their controls, what's found in them).
-targets.append(.target(name: "Demo", dependencies: ["NVRCore", "Ingest", "HAPCamera", "Devices", "Detection"]))
-targets.append(.testTarget(name: "DemoTests", dependencies: ["Demo", "NVRCore", "Ingest", "Detection"]))
+targets.append(.target(name: "Demo", dependencies: ["NVRCore", "Ingest", "HAPCamera", "Devices", "Detection", "Recorder", "Watch"]))
+targets.append(.testTarget(name: "DemoTests", dependencies: ["Demo", "NVRCore", "Ingest", "Detection", "HAPCamera"]))
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCore"]))
@@ -70,7 +70,7 @@ commandDependencies += ["NVRMac", "HAPCamera", "HAP", "Devices", "Health", "Dete
 // The app: settings and the recorder's state (make app bundles it as NVR.app).
 targets.append(.executableTarget(name: "NVRApp", dependencies: ["NVRCore", "NVRMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection",
-                                                               "Understanding"]))
+                                                               "Understanding", "Demo"]))
 targets.append(.testTarget(name: "NVRAppTests", dependencies: ["NVRApp", "NVRCore", "Ingest", "Control", "Watch", "Understanding"],
                            resources: [.copy("Fixtures")]))
 #endif

@@ -1,5 +1,5 @@
 // What each camera has been up to, for the live view: today's events (from detection, as the timeline shows
-// them; made up with POND_MOCK_EVENTS=1) and whether it is still being recorded.
+// them) and whether it is still being recorded.
 import Foundation
 import Observation
 import Recorder
@@ -22,17 +22,8 @@ final class CameraActivity {
     /// Reads today's recordings and events, off the main thread.
     func refresh(base: String, cameras: [String], source: EventSource?) async {
         let day = Calendar.current.startOfDay(for: Date())
-        let found = await Task.detached {
-            var coverage: [String: [ClosedRange<Date>]] = [:]
-            for c in cameras {
-                coverage[c] = RecordingIndex.coverage(RecordingIndex.spans(base: base, camera: c, from: day,
-                                                                          to: day.addingTimeInterval(86400)))
-            }
-            return coverage
-        }.value
         let now = Date()
-        let events = MockEvents.enabled ? MockEvents.make(coverage: found, day: day).filter { $0.start <= now }
-            : await Task.detached { source?.events(from: day, to: now) ?? [] }.value
+        let events = await Task.detached { source?.events(from: day, to: now) ?? [] }.value
         var out: [String: Summary] = [:]
         for c in cameras {
             let mine = events.filter { $0.camera == c }

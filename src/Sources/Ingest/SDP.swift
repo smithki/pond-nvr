@@ -25,6 +25,8 @@ public struct SDP: Sendable, Equatable {
     /// The track for sound to the camera (ONVIF's backchannel), when asked for and offered.
     public var backchannel: Media? { media.first { $0.kind == "audio" && $0.direction == "sendonly" } }
 
+    public init(media: [Media]) { self.media = media }
+
     public init(_ text: String) {
         var media: [Media] = []
         // Lines end in CRLF (or LF): split where any line ends. (Not on "\n": in Swift, CRLF is one character,

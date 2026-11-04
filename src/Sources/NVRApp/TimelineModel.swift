@@ -466,35 +466,11 @@ final class TimelineModel {
         cameraStarts = allStarts
         coverage = covered
         // (Only when they changed: a reload that found nothing new changes nothing, and draws nothing again.)
-        let next = MockEvents.enabled ? Self.mockEvents(coverage: coverage, from: from, to: to) : (kept + others).sorted { $0.start < $1.start }
+        let next = (kept + others).sorted { $0.start < $1.start }
         if next != events { events = next }
         privateSpans = allPrivacy
         privacyRead = min(to, Date())
         loaded = from ... to
-    }
-
-    /// Made-up events, day by day (each day's the same every time), numbered apart.
-    static func mockEvents(coverage: [String: [ClosedRange<Date>]], from: Date, to: Date) -> [TimelineEvent] {
-        var out: [TimelineEvent] = []
-        var dayStart = from
-        var n = 0
-        while dayStart < to {
-            let dayEnd = dayStart.addingTimeInterval(86400)
-            let clipped = coverage.mapValues { ranges in
-                ranges.compactMap { r -> ClosedRange<Date>? in
-                    let lo = max(r.lowerBound, dayStart), hi = min(r.upperBound, dayEnd)
-                    return lo < hi ? lo ... hi : nil
-                }
-            }
-            out += MockEvents.make(coverage: clipped, day: dayStart).map { event in
-                var e = event
-                e.id = "\(n)-\(e.id)"
-                return e
-            }
-            n += 1
-            dayStart = dayEnd
-        }
-        return out.sorted { $0.start < $1.start }
     }
 
     // MARK: - Events

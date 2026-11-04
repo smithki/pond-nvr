@@ -27,7 +27,7 @@ struct DriveFacts: Equatable, Sendable {
         return DriveFacts(volume: volume.path, name: v.volumeName ?? volume.lastPathComponent,
                           isInternal: v.volumeIsInternal ?? false, isStartupDisk: v.volumeIsRootFileSystem ?? false,
                           format: v.volumeLocalizedFormatDescription ?? "", total: Int64(v.volumeTotalCapacity ?? 0),
-                          free: v.volumeAvailableCapacityForImportantUsage ?? 0,
+                          free: Demo.madeUpFree(path) ?? v.volumeAvailableCapacityForImportantUsage ?? 0,
                           spotlightIndexing: spotlight(volume.path))
     }
 

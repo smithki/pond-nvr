@@ -49,6 +49,9 @@ app: build
 	@rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS"
 	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/NVRApp" "$(APP)/Contents/MacOS/PondApp"
 	@cp dist/pond "$(APP)/Contents/MacOS/pond"
+	@# The signaling service, for a demo's Ponds to meet through (on this Mac, for them alone).
+	swift build --package-path $(PKG) -c release --product pond-signal
+	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond-signal" "$(APP)/Contents/MacOS/pond-signal"
 	@cp app/Info.plist "$(APP)/Contents/Info.plist"
 	@# The icon, from Icon Composer (app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
 	@# AppIcon.icns, as Xcode would.
@@ -73,6 +76,7 @@ app: build
 	  cp models/search/siglip2.json models/search/siglip2-tokenizer.json "$(APP)/Contents/Resources/Search/"; \
 	fi
 	@codesign --force --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
+	@codesign --force --sign "$(SIGN)" --identifier pond-signal "$(APP)/Contents/MacOS/pond-signal"
 	@codesign --force --sign "$(SIGN)" "$(APP)"
 	@echo "✓ $(APP)"
 	@# A setup from before the rename (nvr) moves over once: its service, settings, log and Keychain items.
@@ -122,14 +126,10 @@ signing:
 	@scripts/setup-signing.sh
 
 # Demo mode, in a copy of the app of its own (dist/demo): building it never restarts the real login service, and the
-# demo runs its own services, apart from the real ones. pond-signal goes in beside pond, for its Ponds to meet.
+# demo runs its own services, apart from the real ones. (The real app opens one too: Settings › General.)
 SCENARIO ?= home
 demo:
 	@$(MAKE) app APP="dist/demo/Pond NVR.app"
-	swift build --package-path $(PKG) -c release --product pond-signal
-	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond-signal" "dist/demo/Pond NVR.app/Contents/MacOS/pond-signal"
-	@codesign --force --sign "$(SIGN)" --identifier pond-signal "dist/demo/Pond NVR.app/Contents/MacOS/pond-signal"
-	@codesign --force --sign "$(SIGN)" "dist/demo/Pond NVR.app"
 	"dist/demo/Pond NVR.app/Contents/MacOS/PondApp" --demo $(SCENARIO) >/dev/null 2>&1 &
 
 clean:

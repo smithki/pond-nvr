@@ -73,6 +73,14 @@ let demoWorld = Demo.adopt(configPath: configPath).map { scenario in
     let world = DemoWorld.start(scenario, folder: Demo.folder)
     DemoStream.register()
     DemoProvider.register()
+    // Run by the demo's app: gone with it, however it went (a crash, or killed, without stopping its services).
+    let parent = getppid()
+    Thread.detachNewThread {
+        while true {
+            Thread.sleep(forTimeInterval: 2)
+            if getppid() != parent { exit(0) }
+        }
+    }
     return world
 }
 let credentials: CredentialStore? = KeychainCredentialStore()
@@ -141,6 +149,8 @@ struct RecordingAndHomeKit: ServiceRunning {
             detector.standIn = { camera, time in demoWorld.detections(camera, at: time) }
             cameras.detector = detector
             log.log("pond", "detection: the demo's own (what each scene draws)")
+            // Its first start: the last few hours made, so there's something to look back on at once.
+            DemoHistory.makeIfNew(world: demoWorld, config: config, store: events, log: log)
         } else if let model = ModelStore.choose(nil) {
             let detector = SharedDetector { line in log.log("pond", line) }
             do {

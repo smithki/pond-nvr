@@ -27,12 +27,12 @@ public final class CameraWatcher: @unchecked Sendable {
     public var changed: (@Sendable (EventBuilder.Change) -> Void)?
 
     /// The kinds of thing whose sightings are kept.
-    static let kept: Set<DetectedCategory> = [.person, .vehicle, .bike, .animal, .package, .item]
+    public static let kept: Set<DetectedCategory> = [.person, .vehicle, .bike, .animal, .package, .item]
 
     /// Motion looked for this often.
     static let lookEvery: TimeInterval = 0.2
     /// The model run at most this often, while something moves.
-    static let detectEvery: TimeInterval = 0.25
+    public static let detectEvery: TimeInterval = 0.25
     /// And for this long after it stops.
     static let detectAfterMotion: TimeInterval = 2
     /// While something is followed but nothing moves, the model looks this often (to know it's still there).

@@ -4,6 +4,8 @@
 // service controls work on those (DemoLaunchd stands in for launchd), so a demo can't touch the real service, and
 // they stop when the app quits.
 import Control
+import Demo
+import Devices
 import Foundation
 import NVRCore
 import SwiftUI
@@ -24,8 +26,22 @@ enum DemoSession {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
         Demo.adopt(configPath: Demo.configPath(scenario.name))
+        // Its cameras' streams and make here too, for Add Camera's check of one found on its network (the service
+        // has its own).
+        DemoWorld.start(scenario, folder: nil)
+        DemoStream.register()
+        DemoProvider.register()
         return scenario
     }()
+
+    /// The cameras on its network not set up yet, as discovery finds them.
+    static var found: [FoundCamera] {
+        guard let scenario else { return [] }
+        return scenario.found.map { c in
+            FoundCamera(host: c.host(in: scenario.name), name: c.name, hardware: c.model, maker: c.manufacturer,
+                        mac: "demo:\(scenario.name):\(c.id)")
+        }
+    }
 
     static var configPath: String? { scenario.map { Demo.configPath($0.name) } }
 
@@ -36,6 +52,14 @@ enum DemoSession {
 
     /// Its processes stopped (the app is quitting).
     static func stop() { DemoLaunchd.current?.bootoutAll() }
+
+    /// Another copy of the app opened in a scenario (from the real one: Settings › General), beside this one.
+    static func open(_ scenario: Demo.Scenario) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", Bundle.main.bundlePath, "--args", "--demo", scenario.name]
+        try? process.run()
+    }
 
     /// The app opened again in another scenario (this one's services stopped as it quits).
     static func switchTo(_ next: Demo.Scenario) {
