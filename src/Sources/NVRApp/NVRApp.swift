@@ -243,6 +243,16 @@ struct ContentView: View {
         }
         .task {
             if launchArgument("--settings") != nil { openSettings() }
+            // --window WIDTHxHEIGHT: the main window that size (for trying narrow windows, and pictures of them).
+            if let size = launchArgument("--window")?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 {
+                try? await Task.sleep(for: .milliseconds(300))
+                if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("main") == true }) {
+                    var frame = window.frame
+                    frame.origin.y += frame.height - size[1]
+                    frame.size = CGSize(width: size[0], height: size[1])
+                    window.setFrame(frame, display: true)
+                }
+            }
             // --camera ID: that camera's settings, open (for trying them out, and pictures of them).
             if let id = launchArgument("--camera") {
                 model.settingsTab = .cameras

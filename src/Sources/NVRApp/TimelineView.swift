@@ -413,139 +413,272 @@ struct TimelineControls: View {
     @Bindable var timeline: TimelineModel
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                HStack(spacing: 2) {
-                    Button { Task { await timeline.show(day: timeline.day.addingTimeInterval(-86400)) } } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .help("Previous day")
-                    DayButton(timeline: timeline)
-                    Button { Task { await timeline.show(day: timeline.day.addingTimeInterval(86400)) } } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .disabled(timeline.isToday)
-                    .help("Next day")
-                }
-                .buttonStyle(HoverButtonStyle())
-                .focusEffectDisabled()
-                .padding(.horizontal, 6)
-                .frame(height: Self.barHeight)
-                .glassEffect(.regular, in: .capsule)
-
-                Spacer()
-
-                HStack(spacing: 4) {
-                    if !timeline.events.isEmpty {
-                        Button { Task { await timeline.jumpToEvent(forward: false) } } label: {
-                            Image(systemName: "backward.end.fill")
-                        }
-                        .keyboardShortcut("[", modifiers: [])
-                        .help("Previous event ([)")
-                    }
-                    Button { Task { await timeline.skip(-10) } } label: { Image(systemName: "gobackward.10") }
-                        .keyboardShortcut(.leftArrow, modifiers: [])
-                        .help("Back 10 seconds (←)")
-                    // Live counts as playing: pausing it stops at the latest recorded moment.
-                    Button { timeline.togglePlay() } label: {
-                        Image(systemName: timeline.playing || timeline.isLive ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .frame(width: 28)
-                    }
-                    .keyboardShortcut(.space, modifiers: [])
-                    .help(timeline.isLive ? "Pause: stops at the latest recorded moment (space)" : "Play or pause (space)")
-                    Button { Task { await timeline.skip(10) } } label: { Image(systemName: "goforward.10") }
-                        .keyboardShortcut(.rightArrow, modifiers: [])
-                        .help("Forward 10 seconds (→)")
-                    if !timeline.events.isEmpty {
-                        Button { Task { await timeline.jumpToEvent(forward: true) } } label: {
-                            Image(systemName: "forward.end.fill")
-                        }
-                        .keyboardShortcut("]", modifiers: [])
-                        .help("Next event (])")
-                    }
-                    // Live: a solid red capsule with a pulsing dot, as broadcasts mark it. Otherwise drawn like the
-                    // other buttons (grey would look disabled), its dot red and still: what it goes to.
-                    Button { timeline.goLive() } label: {
-                        HStack(spacing: 5) {
-                            LiveDot(active: timeline.isLive, color: timeline.isLive ? .white : .red)
-                            Text("LIVE").font(.callout.weight(.bold))
-                        }
-                        .foregroundStyle(timeline.isLive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-                        .padding(.horizontal, 1)
-                        .background(Capsule().fill(timeline.isLive ? Color.red : Color.clear).padding(.horizontal, -8).padding(.vertical, -4))
-                        .animation(.snappy(duration: 0.2), value: timeline.isLive)
-                    }
-                    .keyboardShortcut("l", modifiers: [])
-                    .disabled(timeline.camera == nil)
-                    .help(timeline.isLive ? "Watching live" : "Jump to live (L)")
-                    Menu {
-                        Picker("Speed", selection: $timeline.rate) {
-                            ForEach([Float(0.5), 1, 2, 4, 8, 16], id: \.self) { r in
-                                Text(Self.speed(r)).tag(r)
-                            }
-                        }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Text(Self.speed(timeline.rate)).monospacedDigit().frame(minWidth: 28)
-                    }
-                    .menuStyle(.button)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(timeline.nearPresent)
-                    .opacity(timeline.nearPresent ? 0.4 : 1)
-                    .help(timeline.nearPresent ? "Live and the last few minutes play in real time" : "Playback speed")
-                    // Boxes round what was found, over the recording.
-                    Button { timeline.showBoxes.toggle() } label: {
-                        Image(systemName: "viewfinder")
-                            .symbolVariant(timeline.showBoxes ? .fill : .none)
-                            .foregroundStyle(timeline.showBoxes ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                            .frame(width: 28)
-                    }
-                    .keyboardShortcut("b", modifiers: [])
-                    .help(timeline.showBoxes ? "Hide the boxes round what was found (B)" : "Show boxes round what was found, with how sure (B)")
-                    // Sound: for recordings and live alike, off until turned on.
-                    Button { timeline.muted.toggle() } label: {
-                        Image(systemName: timeline.muted || !timeline.hasAudio ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                            .contentTransition(.symbolEffect(.replace))
-                            .frame(width: 28)
-                    }
-                    .keyboardShortcut("m", modifiers: [])
-                    .disabled(!timeline.hasAudio)
-                    .help(!timeline.hasAudio ? (timeline.isLive ? "This camera sends no sound" : "No sound in this recording")
-                          : timeline.muted ? "Turn sound on (M)" : "Mute (M)")
-                }
-                .buttonStyle(HoverButtonStyle())
-                .font(.title3)
-                .padding(.horizontal, 8)
-                .frame(height: Self.barHeight)
-                .glassEffect(.regular.interactive(), in: .capsule)
-
-                Spacer()
-
+        // As much as fits: everything in one bar; a narrower one (the rarer controls in a menu, the zoom a menu too);
+        // narrower still (the zoom in that menu too, the time on its own); two rows (the day and the time above, the
+        // transport below).
+        ViewThatFits(in: .horizontal) {
+            GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
-                    // Laid out at the width of the widest time, so the controls beside it stay still while
-                    // scrubbing.
-                    ZStack {
-                        ForEach(Self.widestTimes, id: \.self) { Text($0) }
-                    }
-                    .hidden()
-                    .overlay(alignment: .trailing) {
-                        // Live: the present, in red (the LIVE button and badge say the rest).
-                        // While scrubbing, the time under the pointer; otherwise the playhead's.
-                        Text((timeline.scrubbing ?? timeline.playhead).map { $0.formatted(date: .omitted, time: .standard) } ?? "--:--:--")
-                        .foregroundStyle(timeline.isLive ? AnyShapeStyle(.red) : AnyShapeStyle(.tint))
-                        .fixedSize()
-                    }
-                        .font(.title3.monospacedDigit().weight(.semibold))
-                    CapsuleSegments(selection: $timeline.zoom, options: TimelineModel.Zoom.allCases) { $0.title }
-                        .help("How much of the day the timeline shows")
+                    day
+                    Spacer(minLength: 12)
+                    transport(compact: false)
+                    Spacer(minLength: 12)
+                    timeAndZoom(compact: false)
                 }
-                .padding(.horizontal, 12)
-                .frame(height: Self.barHeight)
-                .glassEffect(.regular, in: .capsule)
+            }
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 10) {
+                    day
+                    Spacer(minLength: 8)
+                    transport(compact: true)
+                    Spacer(minLength: 8)
+                    timeAndZoom(compact: true)
+                }
+            }
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    day
+                    Spacer(minLength: 6)
+                    transport(compact: true, zoomInMenu: true)
+                    Spacer(minLength: 6)
+                    if timeline.scrubbing ?? timeline.playhead != nil {
+                        timeAndZoom(compact: true, zoom: false)
+                    }
+                }
+            }
+            GlassEffectContainer(spacing: 10) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        day
+                        Spacer(minLength: 8)
+                        timeAndZoom(compact: true)
+                    }
+                    transport(compact: true)
+                }
             }
         }
+        // The keyboard's ways in, whichever buttons are showing (some are in the menu in the narrower layouts).
+        .background { shortcuts }
+    }
+
+    var day: some View {
+        HStack(spacing: 2) {
+            Button { Task { await timeline.show(day: timeline.day.addingTimeInterval(-86400)) } } label: {
+                Image(systemName: "chevron.left")
+            }
+            .help("Previous day")
+            DayButton(timeline: timeline)
+            Button { Task { await timeline.show(day: timeline.day.addingTimeInterval(86400)) } } label: {
+                Image(systemName: "chevron.right")
+            }
+            .disabled(timeline.isToday)
+            .help("Next day")
+        }
+        .buttonStyle(HoverButtonStyle())
+        .focusEffectDisabled()
+        .padding(.horizontal, 6)
+        .frame(height: Self.barHeight)
+        .glassEffect(.regular, in: .capsule)
+        .fixedSize()
+    }
+
+    func transport(compact: Bool, zoomInMenu: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            if !timeline.events.isEmpty {
+                Button { Task { await timeline.jumpToEvent(forward: false) } } label: {
+                    Image(systemName: "backward.end.fill")
+                }
+                .help("Previous event ([)")
+            }
+            if !compact {
+                Button { Task { await timeline.skip(-10) } } label: { Image(systemName: "gobackward.10") }
+                    .help("Back 10 seconds (←)")
+            }
+            // Live counts as playing: pausing it stops at the latest recorded moment.
+            Button { timeline.togglePlay() } label: {
+                Image(systemName: timeline.playing || timeline.isLive ? "pause.fill" : "play.fill")
+                    .font(.title2)
+                    .frame(width: 28)
+            }
+            .help(timeline.isLive ? "Pause: stops at the latest recorded moment (space)" : "Play or pause (space)")
+            if !compact {
+                Button { Task { await timeline.skip(10) } } label: { Image(systemName: "goforward.10") }
+                    .help("Forward 10 seconds (→)")
+            }
+            if !timeline.events.isEmpty {
+                Button { Task { await timeline.jumpToEvent(forward: true) } } label: {
+                    Image(systemName: "forward.end.fill")
+                }
+                .help("Next event (])")
+            }
+            // Live: a solid red capsule with a pulsing dot, as broadcasts mark it. Otherwise drawn like the
+            // other buttons (grey would look disabled), its dot red and still: what it goes to.
+            Button { timeline.goLive() } label: {
+                HStack(spacing: 5) {
+                    LiveDot(active: timeline.isLive, color: timeline.isLive ? .white : .red)
+                    Text("LIVE").font(.callout.weight(.bold))
+                }
+                .foregroundStyle(timeline.isLive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .padding(.horizontal, 1)
+                .background(Capsule().fill(timeline.isLive ? Color.red : Color.clear).padding(.horizontal, -8).padding(.vertical, -4))
+                .animation(.snappy(duration: 0.2), value: timeline.isLive)
+            }
+            .disabled(timeline.camera == nil)
+            .help(timeline.isLive ? "Watching live" : "Jump to live (L)")
+            if compact {
+                more(zoom: zoomInMenu)
+            } else {
+                speed
+                boxesButton
+                soundButton
+            }
+        }
+        .buttonStyle(HoverButtonStyle())
+        .font(.title3)
+        .padding(.horizontal, 8)
+        .frame(height: Self.barHeight)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .fixedSize()
+    }
+
+    var speed: some View {
+        Menu {
+            speedPicker
+        } label: {
+            Text(Self.speed(timeline.rate)).monospacedDigit().frame(minWidth: 28)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(timeline.nearPresent)
+        .opacity(timeline.nearPresent ? 0.4 : 1)
+        .help(timeline.nearPresent ? "Live and the last few minutes play in real time" : "Playback speed")
+    }
+
+    var speedPicker: some View {
+        Picker("Speed", selection: $timeline.rate) {
+            ForEach([Float(0.5), 1, 2, 4, 8, 16], id: \.self) { r in
+                Text(Self.speed(r)).tag(r)
+            }
+        }
+        .pickerStyle(.inline)
+    }
+
+    // Boxes round what was found, over the recording.
+    var boxesButton: some View {
+        Button { timeline.showBoxes.toggle() } label: {
+            Image(systemName: "viewfinder")
+                .symbolVariant(timeline.showBoxes ? .fill : .none)
+                .foregroundStyle(timeline.showBoxes ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                .frame(width: 28)
+        }
+        .help(timeline.showBoxes ? "Hide the boxes round what was found (B)" : "Show boxes round what was found, with how sure (B)")
+    }
+
+    // Sound: for recordings and live alike, off until turned on.
+    var soundButton: some View {
+        Button { timeline.muted.toggle() } label: {
+            Image(systemName: timeline.muted || !timeline.hasAudio ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 28)
+        }
+        .disabled(!timeline.hasAudio)
+        .help(!timeline.hasAudio ? (timeline.isLive ? "This camera sends no sound" : "No sound in this recording")
+              : timeline.muted ? "Turn sound on (M)" : "Mute (M)")
+    }
+
+    /// The rarer controls, in a menu, where there isn't room for them in the bar.
+    func more(zoom: Bool) -> some View {
+        Menu {
+            if zoom {
+                Menu("Zoom: \(timeline.zoom.title)") {
+                    Picker("Zoom", selection: $timeline.zoom) {
+                        ForEach(TimelineModel.Zoom.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                }
+                Divider()
+            }
+            Button("Back 10 Seconds", systemImage: "gobackward.10") { Task { await timeline.skip(-10) } }
+            Button("Forward 10 Seconds", systemImage: "goforward.10") { Task { await timeline.skip(10) } }
+            Divider()
+            Menu("Speed: \(Self.speed(timeline.rate))") { speedPicker }
+                .disabled(timeline.nearPresent)
+            Toggle("Boxes Round What Was Found", isOn: $timeline.showBoxes)
+            Toggle("Sound", isOn: Binding(get: { !timeline.muted }, set: { timeline.muted = !$0 }))
+                .disabled(!timeline.hasAudio)
+        } label: {
+            Image(systemName: "ellipsis").frame(width: 28)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(zoom ? "Zoom, skip, speed, boxes and sound" : "Skip, speed, boxes and sound")
+    }
+
+    func timeAndZoom(compact: Bool, zoom: Bool = true) -> some View {
+        HStack(spacing: compact ? 8 : 12) {
+            // Laid out at the width of the widest time, so the controls beside it stay still while
+            // scrubbing. (With no time at all, as on a day with nothing recorded, none: not a wide blank.)
+            if let time = timeline.scrubbing ?? timeline.playhead {
+                ZStack {
+                    ForEach(Self.widestTimes, id: \.self) { Text($0) }
+                }
+                .hidden()
+                .overlay(alignment: .trailing) {
+                    // Live: the present, in red (the LIVE button and badge say the rest).
+                    // While scrubbing, the time under the pointer; otherwise the playhead's.
+                    Text(time.formatted(date: .omitted, time: .standard))
+                        .foregroundStyle(timeline.isLive ? AnyShapeStyle(.red) : AnyShapeStyle(.tint))
+                        .fixedSize()
+                }
+                .font(.title3.monospacedDigit().weight(.semibold))
+            }
+            if zoom, compact {
+                Menu {
+                    Picker("Zoom", selection: $timeline.zoom) {
+                        ForEach(TimelineModel.Zoom.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(timeline.zoom.title)
+                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("How much of the day the timeline shows")
+            } else if zoom {
+                CapsuleSegments(selection: $timeline.zoom, options: TimelineModel.Zoom.allCases) { $0.title }
+                    .help("How much of the day the timeline shows")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: Self.barHeight)
+        .glassEffect(.regular, in: .capsule)
+        .fixedSize()
+    }
+
+    /// The controls' keys, apart from the buttons (which come and go with the room there is).
+    var shortcuts: some View {
+        ZStack {
+            Button("") { Task { await timeline.jumpToEvent(forward: false) } }.keyboardShortcut("[", modifiers: [])
+                .disabled(timeline.events.isEmpty)
+            Button("") { Task { await timeline.jumpToEvent(forward: true) } }.keyboardShortcut("]", modifiers: [])
+                .disabled(timeline.events.isEmpty)
+            Button("") { Task { await timeline.skip(-10) } }.keyboardShortcut(.leftArrow, modifiers: [])
+            Button("") { Task { await timeline.skip(10) } }.keyboardShortcut(.rightArrow, modifiers: [])
+            Button("") { timeline.togglePlay() }.keyboardShortcut(.space, modifiers: [])
+            Button("") { timeline.goLive() }.keyboardShortcut("l", modifiers: []).disabled(timeline.camera == nil)
+            Button("") { timeline.showBoxes.toggle() }.keyboardShortcut("b", modifiers: [])
+            Button("") { timeline.muted.toggle() }.keyboardShortcut("m", modifiers: []).disabled(!timeline.hasAudio)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     /// The height of each group of controls, so they line up as one bar.
@@ -1667,22 +1800,28 @@ struct EventFilters: View {
     static let animation = Animation.snappy(duration: 0.35)
 
     var body: some View {
-        HStack(spacing: 8) {
-            // A chip coming or going fades in (or out) where it is, a little scaled, the same both ways; its neighbours
-            // slide over to make room or close the gap. (Not morphing out of their glass: several at once, switching
-            // Ponds, flew in from above and off to the left.)
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(listed ?? kinds) { kind in
-                        chip(kind)
-                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    }
-                }
+        // As much as fits: the chips and the hint; the chips alone; their symbols and counts; one menu of them.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                chips(titled: true)
+                Spacer(minLength: 12)
+                Text("Click an event to play it · [ and ] jump between them")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
-            Spacer()
-            Text("Click an event to play it · [ and ] jump between them")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                chips(titled: true)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                chips(titled: false)
+                Spacer(minLength: 0)
+            }
+            HStack {
+                kindsMenu
+                Spacer(minLength: 0)
+            }
         }
         .padding(.horizontal, 4)
         .animation(Self.animation, value: timeline.dayEvents.count)
@@ -1695,7 +1834,49 @@ struct EventFilters: View {
         }
     }
 
-    func chip(_ kind: TimelineEvent.Kind) -> some View {
+    // A chip coming or going fades in (or out) where it is, a little scaled, the same both ways; its neighbours slide
+    // over to make room or close the gap. (Not morphing out of their glass: several at once, switching Ponds, flew in
+    // from above and off to the left.)
+    func chips(titled: Bool) -> some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: titled ? 8 : 6) {
+                ForEach(listed ?? kinds) { kind in
+                    chip(kind, titled: titled)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    /// Every kind, on or off, in one menu: where there isn't room for their chips.
+    var kindsMenu: some View {
+        let shown = (listed ?? kinds).filter { timeline.shownKinds.contains($0) }.count
+        return Menu {
+            ForEach(listed ?? kinds) { kind in
+                Toggle(isOn: Binding(get: { timeline.shownKinds.contains(kind) }, set: { on in
+                    withAnimation(Self.animation) { if on { timeline.shownKinds.insert(kind) } else { timeline.shownKinds.remove(kind) } }
+                })) {
+                    Label("\(kind.title) (\(timeline.dayCounts[kind] ?? 0))", systemImage: kind.symbol)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease")
+                Text(shown == (listed ?? kinds).count ? "All Kinds" : "\(shown) of \((listed ?? kinds).count) Kinds")
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .help("Which kinds of event show")
+    }
+
+    func chip(_ kind: TimelineEvent.Kind, titled: Bool = true) -> some View {
         let count = timeline.dayCounts[kind] ?? 0
         let on = timeline.shownKinds.contains(kind)
         return Button {
@@ -1705,13 +1886,13 @@ struct EventFilters: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: kind.symbol).foregroundStyle(on ? kind.color : .secondary)
-                Text(kind.title)
+                if titled { Text(kind.title) }
                 // A count that changes rolls to its new number, the chip's width following.
                 Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
                     .contentTransition(.numericText(value: Double(count)))
             }
             .font(.callout)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, titled ? 10 : 8)
             .padding(.vertical, 5)
             .opacity(on ? 1 : 0.55)
             // The whole chip, not just its words.
