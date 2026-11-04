@@ -123,6 +123,8 @@ public enum ControlSocket {
         public var taken: Date?
         /// "remote.ponds": the other Ponds paired with this one, and their cameras, for the app to show beside its own.
         public var ponds: [RemotePond]?
+        /// "remote.health": how each paired Pond's recording is going, for the app to say when one goes quiet.
+        public var pondHealth: [PondHealth]?
 
         public init(error: ControlFailure? = nil, controls: Config.Controls? = nil, presets: [PTZPreset]? = nil,
                     preset: PTZPreset? = nil, value: Config.Controls.Value? = nil,
@@ -253,6 +255,26 @@ public enum ControlSocket {
             self.received = received
             self.done = done
             self.problem = problem
+        }
+    }
+
+    /// How another Pond's recording is going: what it says (cameras recording, and what's wrong), or that it couldn't
+    /// be asked, and whether because it isn't connected at all (off, or offline).
+    public struct PondHealth: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+        public var recording: Int?
+        public var problems: [String]
+        public var absent: Bool
+        public var unreachable: String?
+
+        public init(id: String, name: String, recording: Int?, problems: [String], absent: Bool, unreachable: String?) {
+            self.id = id
+            self.name = name
+            self.recording = recording
+            self.problems = problems
+            self.absent = absent
+            self.unreachable = unreachable
         }
     }
 

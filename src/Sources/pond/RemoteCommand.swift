@@ -166,6 +166,18 @@ final class RemoteAccess: @unchecked Sendable {
                 }, problem: problem)
             }
             return reply
+        case "remote.health":
+            // Each paired Pond asked how its recording's going (nothing to say while this Mac isn't connected itself).
+            guard let viewing = lock.withLock({ viewing }) else { return ControlSocket.Reply(error: .failed("remote access is off")) }
+            guard let found = await viewing.health() else {
+                return ControlSocket.Reply(error: .failed("this Mac isn\u{2019}t connected to the signaling service"))
+            }
+            var reply = ControlSocket.Reply()
+            reply.pondHealth = found.map { pond, health, absent, problem in
+                ControlSocket.PondHealth(id: pond.id, name: pond.name, recording: health?.recording, problems: health?.problems ?? [],
+                                         absent: absent, unreachable: health == nil ? problem : nil)
+            }
+            return reply
         case "remote.relay-secret":
             // Kept (or removed), then remote access started again with it.
             let secret = request.code?.trimmingCharacters(in: .whitespaces) ?? ""

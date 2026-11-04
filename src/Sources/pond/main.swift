@@ -96,6 +96,7 @@ let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
 /// `pond run` (and so the login service) records and serves the cameras to HomeKit, over one connection per
 /// camera stream (`StreamHub`).
 struct RecordingAndHomeKit: ServiceRunning {
+    static let driveGone = "its recordings drive isn\u{2019}t there"
     /// Where the status for the app goes: next to the settings file.
     let statusPath: String
     /// The settings, read again on a reload.
@@ -224,6 +225,20 @@ struct RecordingAndHomeKit: ServiceRunning {
                                                         privateSpans: { health?.privateSpans(from: $0, to: $1) ?? [:] },
                                                         control: { await controls.answer($0) },
                                                         live: LiveSender { line in log.log("pond", line) })) { line in log.log("pond", line) }
+        // For the devices paired with this Pond: how its recording's going, from its cameras' recorders.
+        remote.api.health = {
+            var count = 0
+            var problems: [String] = []
+            for worker in recording.workers where !PrivacyState.shared.isPrivate(worker.camera.id) {
+                switch worker.status {
+                case .recording: count += 1
+                case let .offline(why): problems.append("\(worker.camera.name): offline (\(why))")
+                case .storageUnavailable: if !problems.contains(Self.driveGone) { problems.insert(Self.driveGone, at: 0) }
+                case .connecting, .privacyMode, .keptPrivate, .stopped: break
+                }
+            }
+            return RemoteAPI.Health(recording: count, problems: problems)
+        }
         remote.apply(config.remote, name: config.name)
         controls.remote = { await remote.handle($0) }
         controls.otherPond = { await remote.forward($0) }

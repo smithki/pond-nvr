@@ -2,6 +2,7 @@
 // answered (RemoteAPI.Server, the service's sessions' `requests`). A request is an action and a JSON body; a reply,
 // a body or why not:
 //
+//   health            → Health: how many cameras are recording, and what's wrong (for its devices to be told)
 //   cameras           → [Camera]: each camera's id, name and kind, whether it's private (or waking), its model
 //   events            EventsRequest (begun since a time, and before another if asked, or by their ids; one camera's
 //                     or all; at most `limit`, the newest) → [Event], oldest first: what was seen, its sentence, its picture and clip
@@ -45,6 +46,18 @@ public enum RemoteAPI {
         public var model: String?
         /// Its controls, as the app's dock draws them (asked for through `control`).
         public var controls: Config.Controls?
+    }
+
+    /// How a Pond's recording is going, for the devices paired with it to be told when it stops: how many cameras
+    /// are being recorded, and what's wrong ("its drive isn't there", "Porch: offline"). Private cameras are neither.
+    public struct Health: Codable, Sendable, Equatable {
+        public var recording: Int
+        public var problems: [String]
+
+        public init(recording: Int, problems: [String]) {
+            self.recording = recording
+            self.problems = problems
+        }
     }
 
     public struct EventsRequest: Codable, Sendable {
@@ -183,8 +196,14 @@ public enum RemoteAPI {
             self.live = live
         }
 
+        /// How its recording's going (set by the service).
+        public var health: (@Sendable () -> Health)?
+
         public func serve(_ session: PathSessions.Session, action: String, body: Data?) async -> (Data?, String?) {
             switch action {
+            case "health":
+                guard let health else { return (nil, "not known") }
+                return Self.encoded(health())
             case "cameras":
                 return Self.encoded(cameras().map { camera in
                     Camera(id: camera.id, name: camera.name, doorbell: camera.kind == .doorbell, isPrivate: privacy.isPrivate(camera.id),
@@ -366,6 +385,10 @@ public struct RemoteClient: Sendable {
     }
 
     public init(session: PathSessions.Session) { self.session = session }
+
+    public func health() async throws(Failure) -> RemoteAPI.Health {
+        try decoded(await call("health"))
+    }
 
     public func cameras() async throws(Failure) -> [RemoteAPI.Camera] {
         try decoded(await call("cameras"))

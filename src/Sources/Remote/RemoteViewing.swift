@@ -21,6 +21,8 @@ public final class RemoteViewing: @unchecked Sendable {
     /// Each Pond's cameras as last asked, and when.
     private var cameras: [String: (at: Date, cameras: [RemoteAPI.Camera])] = [:]
     private var timer: DispatchSourceTimer?
+    /// How the last attempt to reach each Pond went, when it failed.
+    private var failed: [String: PathSessions.Outcome] = [:]
 
     public init(host: RemoteHost) {
         self.host = host
@@ -56,9 +58,11 @@ public final class RemoteViewing: @unchecked Sendable {
         let task = lock.withLock { () -> Task<PathSessions.Session?, Never>? in
             if let open = sessions[pond], host.paths.isOpen(open) { return nil }
             if let opening = opening[pond] { return opening }
-            let task = Task { [host] () -> PathSessions.Session? in
+            let task = Task { [weak self, host] () -> PathSessions.Session? in
                 guard let peer = host.devices().first(where: { $0.id == pond }) else { return nil }
-                return await host.paths.open(to: peer).1
+                let (outcome, session) = await host.paths.open(to: peer)
+                self?.lock.withLock { self?.failed[pond] = session == nil ? outcome : nil }
+                return session
             }
             opening[pond] = task
             return task
@@ -251,6 +255,37 @@ public final class RemoteViewing: @unchecked Sendable {
         return started
     }
 
+    /// How each paired Pond's recording is going: its own word on it, or that it couldn't be asked (and whether
+    /// because it isn't connected to the signaling service at all: off, or offline). Nil while this Mac itself isn't
+    /// connected to it (then nothing can be said of the others).
+    public func health() async -> [(pond: RemotePeer, health: RemoteAPI.Health?, absent: Bool, problem: String?)]? {
+        guard host.isReachable else { return nil }
+        return await withTaskGroup(of: (RemotePeer, RemoteAPI.Health?, Bool, String?).self) { group in
+            for peer in host.devices() {
+                group.addTask { [self] in
+                    // Over the session open (if any); one that doesn't answer closed, and a new one tried (which finds out
+                    // whether the other's there at all).
+                    for attempt in 0 ..< 2 {
+                        guard let session = await session(peer.id) else {
+                            let outcome = lock.withLock { failed[peer.id] }
+                            return (peer, nil, outcome?.absent ?? false, outcome?.summary ?? "\(peer.name) can\u{2019}t be reached")
+                        }
+                        do {
+                            return (peer, try await RemoteClient(session: session).health(), false, nil)
+                        } catch {
+                            guard attempt == 0 else { return (peer, nil, false, "\(peer.name): \(error)") }
+                            drop(peer.id, session)
+                        }
+                    }
+                    return (peer, nil, false, nil)
+                }
+            }
+            var out: [(RemotePeer, RemoteAPI.Health?, Bool, String?)] = []
+            for await one in group { out.append(one) }
+            return out.sorted { $0.0.name < $1.0.name }
+        }
+    }
+
     /// A request about one of a Pond's cameras (its controls, privacy), asked of it.
     public func control(pond: String, _ request: ControlSocket.Request) async -> ControlSocket.Reply {
         guard let session = await session(pond) else { return ControlSocket.Reply(error: .failed("the other Pond can\u{2019}t be reached")) }
@@ -282,6 +317,12 @@ public final class RemoteViewing: @unchecked Sendable {
         lock.withLock { streams[pond, default: 0] += 1; idleSince[pond] = nil }
         try stream.waitForParameterSets()
         return stream
+    }
+
+    /// A session that stopped answering, closed (the next request opens a new one).
+    private func drop(_ pond: String, _ session: PathSessions.Session) {
+        lock.withLock { if sessions[pond] === session { sessions[pond] = nil } }
+        host.paths.close(session)
     }
 
     private func closed(_ pond: String) {

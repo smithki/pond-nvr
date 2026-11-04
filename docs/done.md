@@ -6,6 +6,7 @@ The roadmap's finished goals, by area, with how each was done. What's left is in
 
 | Goal | Notes |
 |---|---|
+| The service, watched | The app watches the recorder while it runs, window open or not: not installed, stopped, its drive gone, or cameras writing nothing for a few minutes; a notification says what's wrong and where it's fixed, and goes once it is. The other Ponds paired with it too, every five minutes: one not recording (it says why: a drive gone, cameras offline), or gone quiet (not connected for two checks running, while this Mac is: off, or its internet down). With the menu bar item and Open at Login, an unattended Mac that restarts is watched. |
 | A menu bar item | Pond at a glance without its window (Settings › General, on by default): recording, or what's wrong; each camera's privacy; Live, Events, the doctor and Settings. While it's shown, closing the window leaves Pond running, watching the recorder; Open at Login starts it there quietly. |
 | Recording the sub-stream instead | Per camera (`recordsSub`, camera settings › Recording): the sub-stream recorded instead of the main stream, for a camera whose full resolution isn't worth the room; live view, HomeKit and detection use the streams as before. |
 | Continuous recording | 1-minute MP4 segments per camera, the camera's own video and sound, retention by age, size and free space. |

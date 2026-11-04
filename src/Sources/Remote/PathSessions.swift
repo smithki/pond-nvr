@@ -51,6 +51,8 @@ public final class PathSessions: @unchecked Sendable {
         public var diagnosis: String?
         /// Found in mesh mode (its addresses the tunnel's).
         public var mesh = false
+        /// The other end isn't connected to the signaling service at all (off, or offline): not a path problem.
+        public var absent = false
 
         /// In a few words, without the addresses: "connected over IPv4, through the routers' public addresses, 23 ms".
         public var summary: String {
@@ -349,7 +351,9 @@ public final class PathSessions: @unchecked Sendable {
                                   exchange: session.oneTime.publicKey.rawRepresentation)
         log("remote: connecting to \(peer.name)…")
         guard await send(Message.offer, Self.encode(offer), peer) else {
-            return (Outcome(took: Date().timeIntervalSince(start), problem: "\(peer.name) isn't connected to the signaling service"), nil)
+            var outcome = Outcome(took: Date().timeIntervalSince(start), problem: "\(peer.name) isn't connected to the signaling service")
+            outcome.absent = true
+            return (outcome, nil)
         }
         Task { await self.trickle(session) }
         Task {

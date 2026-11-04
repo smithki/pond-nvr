@@ -31,7 +31,7 @@ struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.watch.problem != nil {
+        if model.watch.problem != nil || !model.watch.otherPonds.isEmpty {
             Image(systemName: "exclamationmark.triangle")
         } else if model.isRecording {
             Image(systemName: "record.circle")
@@ -52,6 +52,10 @@ struct MenuBarMenu: View {
             Button("\(problem.settings == .doctor ? "Open the Doctor" : "Recorder Settings")\u{2026}") { show(problem.settings) }
         } else {
             Text(model.isRecording ? "Recording" : "Not recording")
+        }
+        // Other Ponds gone quiet.
+        ForEach(model.watch.otherPonds.values.sorted { $0.name < $1.name }, id: \.name) { quiet in
+            Text(quiet.title)
         }
         let cameras = model.config?.cameras ?? []
         if !cameras.isEmpty {

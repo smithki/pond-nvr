@@ -4,6 +4,7 @@
 // recording writing nothing), a notification says what's wrong and the fix; when it's fixed, the notification goes.
 // A Mac that restarts unattended (a power cut, a panic) is the case: otherwise nobody knows until someone looks.
 import AppKit
+import Devices
 import Foundation
 import NVRCore
 import UserNotifications
@@ -44,6 +45,17 @@ final class ServiceWatch {
 
     /// What's wrong now, if anything.
     private(set) var problem: Problem?
+    /// Other Ponds paired with this one that have gone quiet (by id): not recording, or not connected at all.
+    private(set) var otherPonds: [String: Quiet] = [:]
+    /// When each other Pond was first found not connected (it counts once that's lasted a check more).
+    private var absentSince: [String: Date] = [:]
+
+    /// Another Pond gone quiet, as said.
+    struct Quiet: Equatable {
+        var name: String
+        var title: String
+        var detail: String
+    }
     private var told: Problem?
     private var task: Task<Void, Never>?
     static let notification = "pond.service"
@@ -56,10 +68,17 @@ final class ServiceWatch {
         task = Task { [weak self, weak model] in
             // (A moment first: at login the service may still be starting.)
             try? await Task.sleep(for: .seconds(20))
+            var round = 0
             while !Task.isCancelled, let self, let model {
                 model.refreshService()
                 let now = await Self.check(model)
                 self.update(now)
+                // The other Ponds every five minutes (each asked over a session of its own, closed after).
+                if round % 10 == 0, !model.otherPonds.isEmpty,
+                   let found = await model.controlClient.ask(.init(camera: "", action: "remote.health"), timeout: 60).pondHealth {
+                    self.update(others: found)
+                }
+                round += 1
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -95,6 +114,40 @@ final class ServiceWatch {
         return (try? fm.contentsOfDirectory(atPath: dayFolder))?
             .compactMap { (try? fm.attributesOfItem(atPath: "\(dayFolder)/\($0)"))?[.modificationDate] as? Date }
             .max()
+    }
+
+    /// The other Ponds as they answered: each told once when it goes quiet (or differently), its notification taken
+    /// away once it's recording again. Not connected counts after two checks running (a blip isn't news); can't be
+    /// reached though connected (no path) isn't "quiet", and isn't told.
+    func update(others found: [ControlSocket.PondHealth]) {
+        var now: [String: Quiet] = [:]
+        for pond in found {
+            if pond.absent {
+                let since = absentSince[pond.id] ?? Date()
+                absentSince[pond.id] = since
+                if Date().timeIntervalSince(since) > 60 {
+                    now[pond.id] = Quiet(name: pond.name, title: "\(pond.name) has gone quiet",
+                                         detail: "It hasn\u{2019}t been connected since \(since.formatted(date: .omitted, time: .shortened)): its Mac may be off, or its internet down.")
+                }
+                continue
+            }
+            absentSince[pond.id] = nil
+            guard pond.recording != nil, !pond.problems.isEmpty else { continue }
+            let title = pond.recording == 0 ? "\(pond.name) isn\u{2019}t recording" : "\(pond.name): not every camera is being recorded"
+            now[pond.id] = Quiet(name: pond.name, title: title, detail: pond.problems.joined(separator: "; ").prefix(1).uppercased()
+                                 + pond.problems.joined(separator: "; ").dropFirst() + ".")
+        }
+        let center = UNUserNotificationCenter.current()
+        for (id, quiet) in now where otherPonds[id] != quiet {
+            let content = UNMutableNotificationContent()
+            content.title = (DemoSession.scenario == nil ? "" : "Demo: ") + quiet.title
+            content.body = quiet.detail
+            content.sound = .default
+            center.add(UNNotificationRequest(identifier: "\(Self.notification).\(id)", content: content, trigger: nil))
+        }
+        let fixed = otherPonds.keys.filter { now[$0] == nil }.map { "\(Self.notification).\($0)" }
+        if !fixed.isEmpty { center.removeDeliveredNotifications(withIdentifiers: fixed) }
+        otherPonds = now
     }
 
     /// Told once when something goes wrong (or goes wrong differently); the notification taken away once it's fixed.
