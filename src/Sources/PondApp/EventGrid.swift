@@ -262,7 +262,12 @@ struct EventGrid: View {
     /// A far jump (or the panel's closing before one) under way: the cards not to be clicked until it's settled.
     @State private var settling = false
 
-    var layout: EventGridLayout { cache.layout(sections: sections, width: width - gutter, columns: columns) }
+    /// The events drawn, while those come since wait: a far jump under way (their making room, a scroll at once,
+    /// stopped its easing in, and it only faded in).
+    @State private var waiting: [EventGridLayout.Section]?
+    var drawn: [EventGridLayout.Section] { waiting ?? sections }
+
+    var layout: EventGridLayout { cache.layout(sections: drawn, width: width - gutter, columns: columns) }
 
     var body: some View {
         let layout = layout
@@ -406,10 +411,20 @@ struct EventGrid: View {
             perform(request)
         }
         .onChange(of: sections) { old, _ in
-            eventsChanged(from: old)
+            // A far jump under way: these once it's settled (a search's answer, though, is the jump's own).
+            if swapping == nil, settling || jump != nil {
+                if waiting == nil { waiting = old }
+                return
+            }
+            // (From what's drawn: any waiting go with these.)
+            let was = waiting ?? old
+            waiting = nil
+            eventsChanged(from: was)
             // (What's on screen, and in the strips, may be other cards now, though nothing scrolled.)
             tell()
         }
+        .onChange(of: settling) { letWaitingIn() }
+        .onChange(of: jump) { letWaitingIn() }
         .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
             scrollerTakesRoom = NSScroller.preferredScrollerStyle == .legacy
         }
@@ -502,7 +517,7 @@ struct EventGrid: View {
     /// closed (its move not begun), those on screen before.
     func also(_ margin: Double) -> Set<String> {
         guard let laidOutOpen, laidOutOpen != panelOpen else { return keep }
-        let before = laidOut(sections, width: width + (panelOpen ? panelWidth : -panelWidth))
+        let before = laidOut(drawn, width: width + (panelOpen ? panelWidth : -panelWidth))
         return keep.union(before.cards(in: (offset - margin) ... (offset + viewHeight + margin)).map(\.id))
     }
 
@@ -520,7 +535,7 @@ struct EventGrid: View {
     func panelChanged(open: Bool) {
         laidOutOpen = open
         guard viewHeight > 0 else { return }
-        let before = laidOut(sections, width: width + (open ? panelWidth : -panelWidth))
+        let before = laidOut(drawn, width: width + (open ? panelWidth : -panelWidth))
         guard let focus, let centred = layout.centring(focus, view: viewHeight) else {
             return move(from: before, to: anchored(from: before))
         }
@@ -675,6 +690,14 @@ struct EventGrid: View {
                 scroll(to: target)
             }
         }
+    }
+
+    /// Those come during a far jump, in once it's settled.
+    func letWaitingIn() {
+        guard !settling, jump == nil, let was = waiting else { return }
+        waiting = nil
+        eventsChanged(from: was)
+        tell()
     }
 
     /// The cards not clicked until a far jump's settled; let go after a few seconds whatever (a move given way to
