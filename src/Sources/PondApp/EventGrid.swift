@@ -216,7 +216,9 @@ struct EventGrid: View {
     /// going and eases the rest as it fades in, so it's seen to leave and arrive that way.
     static let jumpLead = 180.0
     /// Leaving and arriving both, this long (shorter as the grid's ends shorten them).
-    static let jumpTakes = 1.35
+    static let jumpTakes = 0.675
+    /// After the panel's closed, quicker still (it's been moving already).
+    static let jumpAfterPanel = 0.6
     /// Scrolled faster than this many screens a second (the scroller dragged, or a long fling), for a few moments
     /// running, the cards are plain blocks, dimmed, and the day and hour they're at is shown over them; slower than
     /// the second, the cards are shown again (their pictures read first).
@@ -527,9 +529,13 @@ struct EventGrid: View {
             // One after the other: the cards reshape where they are as the panel goes, then the grid jumps (both at
             // once was far less smooth than a jump from the rail). Not clicked meanwhile.
             holdClicks()
-            move(from: before, to: here) {
+            move(from: before, to: here)
+            // As the panel's gone (its spring's time: its move says it's done only once the spring's quite still,
+            // a beat later than it looks).
+            Task {
+                try? await Task.sleep(for: .seconds(Self.panelSpring.duration))
                 guard laidOutOpen == open, jump == nil else { return settling = false }
-                jump(to: centred)
+                jump(to: centred, pace: Self.jumpAfterPanel)
             }
         } else {
             move(from: before, to: centred)
@@ -685,7 +691,8 @@ struct EventGrid: View {
     /// Far away: the grid fades out while the pictures where it's going are read (in the background), is there at
     /// once (a little short of it), and fades in again when they're ready, scrolling the last of the way. The rail
     /// follows where the grid is.
-    func jump(to target: Double, departing: Bool = true) {
+    /// `pace`: of the usual time.
+    func jump(to target: Double, departing: Bool = true, pace: Double = 1) {
         let down = target > offset, lead = Self.jumpLead
         // Leaving as far the way it's going as the grid's end allows, and arriving from as far short as the other
         // end allows: one ease along the two, as if it were one scroll, so it's going as fast as it arrives as it
@@ -694,7 +701,7 @@ struct EventGrid: View {
         let from = layout.clamp(target + (down ? -lead : lead), view: viewHeight)
         let out = abs(away - offset), in_ = abs(target - from)
         let ease = JumpEase.split(leaving: out, arriving: in_,
-                                  over: Self.jumpTakes * (0.5 + 0.5 * (out + in_) / (2 * lead)))
+                                  over: pace * Self.jumpTakes * (0.5 + 0.5 * (out + in_) / (2 * lead)))
         if let leave = ease.leave {
             speed.steered(for: ease.leaveFor + 0.3)
             withAnimation(leave) { scroll(to: away) }
