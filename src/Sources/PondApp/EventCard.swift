@@ -71,8 +71,9 @@ struct EventCard: View, Equatable {
 struct EventPicture: View {
     let event: TimelineEvent
     @Environment(AppModel.self) private var model
-    /// Another Pond's picture, fetched since it was first drawn.
+    /// Another Pond's picture, fetched since it was first drawn; or this Mac's, read since.
     @State private var fetched = false
+    @State private var read = false
     /// The picture's own shape.
     let aspect: Double
     /// The shape it's shown in (the grid's, alike for every card: a picture of another shape fills it, cropped);
@@ -80,9 +81,12 @@ struct EventPicture: View {
     var frame: Double?
 
     var body: some View {
-        // (Read again once another Pond's has been fetched.)
-        let _ = fetched
-        let image = event.snapshot.flatMap(EventPictures.image)
+        // (Read again once another Pond's has been fetched, or this one's read.)
+        let _ = (fetched, read)
+        // Never read here, on the main thread: a card made before its picture's been read (the grid's read ahead of
+        // the scroll, but not of the scroll thumb dragged across days) shows its kind until it is. Read as each was
+        // made, screens of them at a time, they stuttered.
+        let image = event.snapshot.flatMap(EventPictures.kept)
         // The picture's own shape (from the picture, when there is one), and the frame's: the frame alone sizes the
         // card (a box of its shape), the picture filling it, cropped, so every card in the grid is alike.
         let own = image.map { $0.size.height > 0 ? Double($0.size.width / $0.size.height) : aspect } ?? aspect
@@ -114,6 +118,10 @@ struct EventPicture: View {
             }
             .overlay(alignment: .topLeading) { KindBadge(event: event).padding(8) }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .task(id: event.snapshot) {
+                guard image == nil, let url = event.snapshot, event.pond == nil else { return }
+                if await EventPictures.load(url) != nil { read = true }
+            }
             // Another Pond's, fetched as it's first shown.
             .task(id: event.id) {
                 guard event.pond != nil, image == nil else { return }

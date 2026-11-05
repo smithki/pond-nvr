@@ -2084,6 +2084,21 @@ enum EventPictures {
         return image
     }
 
+    /// Only if it's kept (not read now).
+    nonisolated static func kept(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    /// Read in the background (if it isn't kept), and kept.
+    nonisolated static func load(_ url: URL) async -> NSImage? {
+        if let kept = kept(url) { return kept }
+        return await withCheckedContinuation { done in
+            queue.async {
+                let image = cache.object(forKey: url as NSURL) ?? read(url)
+                if let image { cache.setObject(image, forKey: url as NSURL) }
+                done.resume(returning: image)
+            }
+        }
+    }
+
     /// Read ahead, in the background, those not kept; then `done`, on the main thread (once all of them are kept, or
     /// being read by an earlier read-ahead).
     nonisolated static func prefetch(_ urls: [URL], then done: (@Sendable @MainActor () -> Void)? = nil) {

@@ -212,17 +212,16 @@ struct EventGrid: View {
     /// Closing the panel, nearer than that: further than a screen, every card flying that far as it reshaped was
     /// too much; a jump instead.
     static let farPanel = 1.0
-    /// A far jump lands this far short of where it's going (on the side it came from) and scrolls the rest as it
-    /// fades in, so it's seen to arrive from that way.
+    /// A far jump eases this far away the way it's going as it fades out, and lands this far short of where it's
+    /// going and eases the rest as it fades in, so it's seen to leave and arrive that way.
     static let jumpLead = 180.0
-    /// That last of the way: setting off gently (as the cards fade in) and easing to a stop, a hint of where it
-    /// came from rather than a scroll to follow.
-    static let jumpArrives = Animation.timingCurve(0.35, 0, 0.15, 1, duration: 0.9)
+    /// Leaving and arriving both, this long (shorter as the grid's ends shorten them).
+    static let jumpTakes = 1.35
     /// Scrolled faster than this many screens a second (the scroller dragged, or a long fling), for a few moments
     /// running, the cards are plain blocks, dimmed, and the day and hour they're at is shown over them; slower than
     /// the second, the cards are shown again (their pictures read first).
-    static let scrubStarts = 5.0
-    static let scrubEnds = 2.5
+    static let scrubStarts = 3.5
+    static let scrubEnds = 2.0
 
     @State private var position = ScrollPosition(edge: .top)
     /// What the scroll view says of itself, as it says it; everything the grid works out from it goes through
@@ -258,6 +257,9 @@ struct EventGrid: View {
     @State private var scrubbing = false
     @State private var speed = Speedometer()
 
+    /// A far jump (or the panel's closing before one) under way: the cards not to be clicked until it's settled.
+    @State private var settling = false
+
     var layout: EventGridLayout { cache.layout(sections: sections, width: width - gutter, columns: columns) }
 
     var body: some View {
@@ -282,11 +284,12 @@ struct EventGrid: View {
                 }
                 ForEach(Array(made) + extra, id: \.id) { item in
                     if let event = events[item.id] {
-                        Group {
+                        ZStack {
                             if scrubbing {
                                 // Scrolling fast: a plain block where the card goes (each card made on the way,
                                 // with its picture, words and all, stuttered), the cards again once it slows.
                                 RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.quaternary.opacity(0.5))
+                                    .transition(.opacity)
                             } else {
                                 EventCard(event: event, camera: name(event.camera), selected: selected == item.id,
                                           fresh: fresh.contains(item.id),
@@ -294,6 +297,9 @@ struct EventGrid: View {
                                     // (Drawn again only when it changes: its actions, new each time, otherwise made
                                     // every card's body run again with every frame the grid scrolled.)
                                     .equatable()
+                                    // (From a block and back, a crossfade: the grow and shrink below are the
+                                    // card's coming and going, its stack's.)
+                                    .transition(.opacity)
                             }
                         }
                             .frame(width: item.frame.width, height: item.frame.height)
@@ -322,8 +328,9 @@ struct EventGrid: View {
                 }
             }
             .frame(width: layout.width, height: layout.height, alignment: .topLeading)
-            // Scrolling fast: nothing hovered, nor its help shown, as the cards fly under the pointer.
-            .allowsHitTesting(!scrubbing)
+            // Scrolling fast: nothing hovered, nor its help shown, as the cards fly under the pointer. Nor clicked
+            // while a far jump settles.
+            .allowsHitTesting(!scrubbing && !settling)
             // Faded out while a far jump goes, and in again where it lands; dimmed scrolling fast (the days' headers
             // too, under the day and hour shown).
             .opacity(veiled ? 0 : scrubbing ? 0.5 : 1)
@@ -384,6 +391,9 @@ struct EventGrid: View {
                 header(layout.headers[pinned].day, count: layout.headers[pinned].count, pinned: true)
                     .frame(height: EventGridLayout.headerHeight, alignment: .bottomLeading)
                     .offset(y: metrics.pinnedHeaderY(nextHeaderAt: next, headerHeight: EventGridLayout.headerHeight))
+                    // Faded with the cards through a far jump: drawn over the grid, it stayed, and changed to the
+                    // day landed on the moment they came back, a jolt.
+                    .opacity(veiled ? 0 : 1)
             }
         }
         .clipped()
@@ -502,8 +512,8 @@ struct EventGrid: View {
 
     /// The panel opened or closed (the width's already the new one): the focused card's row goes to the middle (or,
     /// with none, the top card stays put), the cards reshaping as they move. A focused card far from what's on screen
-    /// (scrolled away from while the panel was open) is gone to with it: the cards on screen reshape where they are as
-    /// the grid fades out, and it fades in there (a far jump, as from the rail), the panel moving all the while. Moved there with the panel,
+    /// (scrolled away from while the panel was open) is gone to after: the cards on screen reshape where they are as
+    /// the panel goes, then the grid jumps to it (a far jump, as from the rail). Moved there with the panel,
     /// every card on screen flew thousands of points, and those around it were made and read on the way.
     func panelChanged(open: Bool) {
         laidOutOpen = open
@@ -514,10 +524,13 @@ struct EventGrid: View {
         }
         let here = anchored(from: before)
         if abs(centred - here) > Self.farPanel * max(viewHeight, 1) {
-            // Both at once: the cards on screen reshaping as the panel goes, while they fade out; then, unseen,
-            // there (the move let go), faded in as the panel finishes.
-            move(from: before, to: here)
-            jump(to: centred)
+            // One after the other: the cards reshape where they are as the panel goes, then the grid jumps (both at
+            // once was far less smooth than a jump from the rail). Not clicked meanwhile.
+            holdClicks()
+            move(from: before, to: here) {
+                guard laidOutOpen == open, jump == nil else { return settling = false }
+                jump(to: centred)
+            }
         } else {
             move(from: before, to: centred)
         }
@@ -632,6 +645,7 @@ struct EventGrid: View {
         if jump != nil {
             jump = nil
             swapping = nil
+            settling = false
             veiled = false
             loading = false
         }
@@ -657,17 +671,46 @@ struct EventGrid: View {
         }
     }
 
+    /// The cards not clicked until a far jump's settled; let go after a few seconds whatever (a move given way to
+    /// another, say, never saying it's done).
+    func holdClicks() {
+        settling = true
+        speed.settleBy = CACurrentMediaTime() + 3
+        Task {
+            try? await Task.sleep(for: .seconds(3.05))
+            if CACurrentMediaTime() >= speed.settleBy { settling = false }
+        }
+    }
+
     /// Far away: the grid fades out while the pictures where it's going are read (in the background), is there at
     /// once (a little short of it), and fades in again when they're ready, scrolling the last of the way. The rail
     /// follows where the grid is.
-    func jump(to target: Double) {
-        let from = layout.clamp(target + (target > offset ? -Self.jumpLead : Self.jumpLead), view: viewHeight)
-        veil(reading: pictures(around: target)) { current, landed in
+    func jump(to target: Double, departing: Bool = true) {
+        let down = target > offset, lead = Self.jumpLead
+        // Leaving as far the way it's going as the grid's end allows, and arriving from as far short as the other
+        // end allows: one ease along the two, as if it were one scroll, so it's going as fast as it arrives as it
+        // was as it left (the jump between them unseen, the grid faded out).
+        let away = departing ? layout.clamp(offset + (down ? lead : -lead), view: viewHeight) : offset
+        let from = layout.clamp(target + (down ? -lead : lead), view: viewHeight)
+        let out = abs(away - offset), in_ = abs(target - from)
+        let ease = JumpEase.split(leaving: out, arriving: in_,
+                                  over: Self.jumpTakes * (0.5 + 0.5 * (out + in_) / (2 * lead)))
+        if let leave = ease.leave {
+            speed.steered(for: ease.leaveFor + 0.3)
+            withAnimation(leave) { scroll(to: away) }
+        }
+        holdClicks()
+        veil(reading: pictures(around: target), fadingOut: ease.leave == nil ? 0.12 : ease.leaveFor) { current, landed in
             guard current else { return }
-            land(at: from)
+            land(at: ease.arrive == nil ? target : from)
             landed([])
         } shown: {
-            withAnimation(Self.jumpArrives) { scroll(to: target) }
+            guard let arrive = ease.arrive else { return settling = false }
+            speed.steered(for: ease.arriveFor + 0.3)
+            withAnimation(arrive) { scroll(to: target) } completion: {
+                // (Unless another's begun since.)
+                if jump == nil { settling = false }
+            }
         }
     }
 
@@ -695,7 +738,7 @@ struct EventGrid: View {
     /// landed, with the pictures it lands on, to be read); faded in once it's landed and those, and `reading`, are
     /// read, or after half a second whatever (the rest coming as they're read; past a fifth, a spinner says so);
     /// `shown` as it fades in.
-    func veil(reading early: [URL] = [],
+    func veil(reading early: [URL] = [], fadingOut: Double = 0.12,
               land: @escaping @MainActor (_ current: Bool, _ landed: @escaping @MainActor ([URL]) -> Void) -> Void,
               shown: (@MainActor () -> Void)? = nil) {
         let id = UUID()
@@ -721,11 +764,17 @@ struct EventGrid: View {
             }
         }
         read(early)
-        withAnimation(.easeIn(duration: 0.12)) { veiled = true } completion: {
+        withAnimation(.easeIn(duration: fadingOut)) { veiled = true } completion: {
             land(jump == id) { urls in
                 read(urls)
-                progress.landed = true
-                showIfReady()
+                // Landed once the scroll view's been there a frame: else, the pictures already read, it faded in
+                // and the eased scroll began before the scroll view had moved at all, and it scrolled the whole
+                // way from where it was.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(40))
+                    progress.landed = true
+                    showIfReady()
+                }
                 Task {
                     try? await Task.sleep(for: .milliseconds(200))
                     if jump == id, !progress.shown { withAnimation(.easeOut(duration: 0.15)) { loading = true } }
@@ -751,7 +800,8 @@ struct EventGrid: View {
         s.speed = s.speed * 0.5 + screens * 0.5
         s.fast = s.speed > Self.scrubStarts ? s.fast + 1 : 0
         if !scrubbing {
-            guard s.fast >= 4 else { return }
+            // (More than a screen at a step, the scroll thumb dragged: at once, before a screen of cards is made.)
+            guard s.fast >= 2 || abs(y - last.offset) > viewHeight else { return }
             withAnimation(.easeOut(duration: 0.15)) { scrubbing = true }
         }
         if s.speed >= Self.scrubEnds {
@@ -825,8 +875,10 @@ struct EventGrid: View {
     /// Moved since (a newer one, the last); the pictures being read where it slowed.
     var beat = 0
     var settling: UUID?
+    /// A far jump's cards clickable again by then, whatever.
+    var settleBy = 0.0
 
-    func steered() { steeredUntil = CACurrentMediaTime() + 0.7 }
+    func steered(for seconds: Double = 0.7) { steeredUntil = max(steeredUntil, CACurrentMediaTime() + seconds) }
 }
 
 /// Scrolling fast: the day and hour the grid's at, over it.
@@ -843,6 +895,57 @@ struct ScrubLabel: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
+    }
+}
+
+/// A far jump's ease: one ease-in-out along its leaving and its arriving together, cut where the one ends (by how
+/// far each goes), each piece an animation of its own (a piece of a timing curve is one too: de Casteljau's split,
+/// each half scaled to run from 0 to 1). So the speed it leaves at is the speed it arrives at.
+enum JumpEase {
+    static let curve = (x1: 0.42, y1: 0.0, x2: 0.58, y2: 1.0)
+
+    struct Pieces {
+        var leave: Animation?
+        var leaveFor = 0.0
+        var arrive: Animation?
+        var arriveFor = 0.0
+    }
+
+    /// Either nil if it goes nowhere (under a point).
+    static func split(leaving out: Double, arriving in_: Double, over total: Double) -> Pieces {
+        let whole = Animation.timingCurve(curve.x1, curve.y1, curve.x2, curve.y2, duration: total)
+        guard out + in_ >= 1 else { return Pieces() }
+        if out < 1 { return Pieces(arrive: whole, arriveFor: total) }
+        if in_ < 1 { return Pieces(leave: whole, leaveFor: total) }
+        let (left, right, at) = cut(where: out / (out + in_))
+        return Pieces(leave: .timingCurve(left.0, left.1, left.2, left.3, duration: total * at),
+                      leaveFor: total * at,
+                      arrive: .timingCurve(right.0, right.1, right.2, right.3, duration: total * (1 - at)),
+                      arriveFor: total * (1 - at))
+    }
+
+    /// The curve cut where it's come `fraction` of the way: each half's control points (scaled to run from (0, 0)
+    /// to (1, 1)), and when (of the whole time) the cut is.
+    static func cut(where fraction: Double) -> (left: (Double, Double, Double, Double), right: (Double, Double, Double, Double), at: Double) {
+        typealias P = (x: Double, y: Double)
+        let p0: P = (0, 0), p1: P = (curve.x1, curve.y1), p2: P = (curve.x2, curve.y2), p3: P = (1, 1)
+        func lerp(_ a: P, _ b: P, _ u: Double) -> P { (a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u) }
+        func point(_ u: Double) -> P {
+            let q0 = lerp(p0, p1, u), q1 = lerp(p1, p2, u), q2 = lerp(p2, p3, u)
+            return lerp(lerp(q0, q1, u), lerp(q1, q2, u), u)
+        }
+        // The curve's parameter where it's come that far (its progress only grows with it).
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 {
+            let mid = (lo + hi) / 2
+            if point(mid).y < fraction { lo = mid } else { hi = mid }
+        }
+        let u = (lo + hi) / 2
+        let q0 = lerp(p0, p1, u), q1 = lerp(p1, p2, u), q2 = lerp(p2, p3, u)
+        let r0 = lerp(q0, q1, u), r1 = lerp(q1, q2, u), s = lerp(r0, r1, u)
+        let left = (q0.x / s.x, q0.y / s.y, r0.x / s.x, r0.y / s.y)
+        let right = ((r1.x - s.x) / (1 - s.x), (r1.y - s.y) / (1 - s.y), (q2.x - s.x) / (1 - s.x), (q2.y - s.y) / (1 - s.y))
+        return (left, right, s.x)
     }
 }
 

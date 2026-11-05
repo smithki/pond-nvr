@@ -126,3 +126,47 @@ import Testing
         #expect(m.bottomStrip == 1449 ... 1529)
     }
 }
+
+/// A far jump's ease, cut in two: each piece starts and ends where the whole does there, and the speed it leaves
+/// at is the speed it arrives at.
+@MainActor
+@Suite struct JumpEaseTests {
+    /// A timing curve's progress at time `t` (0…1), and its slope there (progress per time).
+    func sample(_ c: (Double, Double, Double, Double), at t: Double) -> (y: Double, slope: Double) {
+        func bez(_ a: Double, _ b: Double, _ u: Double) -> Double { 3 * (1 - u) * (1 - u) * u * a + 3 * (1 - u) * u * u * b + u * u * u }
+        func dbez(_ a: Double, _ b: Double, _ u: Double) -> Double { 3 * (1 - u) * (1 - u) * a + 6 * (1 - u) * u * (b - a) + 3 * u * u * (1 - b) }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<50 { let m = (lo + hi) / 2; if bez(c.0, c.2, m) < t { lo = m } else { hi = m } }
+        let u = (lo + hi) / 2
+        return (bez(c.1, c.3, u), dbez(c.1, c.3, u) / max(dbez(c.0, c.2, u), 1e-9))
+    }
+
+    @Test(arguments: [0.1, 0.3, 0.5, 0.7, 0.9])
+    func thePiecesMeetAtOneSpeed(fraction: Double) {
+        let (left, right, at) = JumpEase.cut(where: fraction)
+        #expect(at > 0 && at < 1)
+        let whole = JumpEase.curve
+        // Each piece's ends, as the whole has them there.
+        #expect(abs(sample(left, at: 1).y - 1) < 1e-6)
+        #expect(abs(sample(right, at: 0).y) < 1e-6)
+        // Speeds in the whole's terms: a piece covers `fraction` (or the rest) of the way in `at` (or the rest) of
+        // the time.
+        let leaving = sample(left, at: 0.999_999).slope * fraction / at
+        let arriving = sample(right, at: 0.000_001).slope * (1 - fraction) / (1 - at)
+        let there = sample((whole.x1, whole.y1, whole.x2, whole.y2), at: at).slope
+        #expect(abs(leaving - there) < 0.01)
+        #expect(abs(arriving - there) < 0.01)
+    }
+
+    @Test func withNoWayOutOrInTheOtherIsTheWholeEase() {
+        let noOut = JumpEase.split(leaving: 0, arriving: 180, over: 1)
+        #expect(noOut.leave == nil && noOut.arrive != nil && noOut.arriveFor == 1)
+        let noIn = JumpEase.split(leaving: 180, arriving: 0, over: 1)
+        #expect(noIn.arrive == nil && noIn.leave != nil && noIn.leaveFor == 1)
+        let neither = JumpEase.split(leaving: 0, arriving: 0, over: 1)
+        #expect(neither.leave == nil && neither.arrive == nil)
+        // A shortened way out is a shorter share of the time.
+        let short = JumpEase.split(leaving: 60, arriving: 180, over: 1)
+        #expect(short.leaveFor < short.arriveFor && abs(short.leaveFor + short.arriveFor - 1) < 1e-9)
+    }
+}
