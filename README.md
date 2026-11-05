@@ -19,7 +19,7 @@ Under way: the iPhone app, and groups of cameras. See [docs/roadmap.md](docs/roa
 ## Requirements
 
 - A Mac with Apple silicon and macOS 27, with Xcode to build (Swift 6, Swift Testing).
-- Cameras that serve H.264 over RTSP. Reolink cameras are supported best: Pond reads their model and doorbell presses through their API, and knows their stream addresses. Others work through ONVIF and their RTSP addresses; see [docs/cameras](docs/cameras/README.md).
+- Cameras that serve H.264 or H.265 over RTSP. Reolink cameras are supported best: Pond reads their model and doorbell presses through their API, and knows their stream addresses. Others work through ONVIF and their RTSP addresses; see [docs/cameras](docs/cameras/README.md).
 - For continuous recording, an external drive or a NAS share: about 32 GB per camera per day at 2560×1440.
 - For HomeKit Secure Video, a home hub (Apple TV or HomePod) and an iCloud+ plan.
 

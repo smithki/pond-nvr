@@ -121,7 +121,9 @@ public enum CameraCheck {
         var video = s.videoCodec ?? "no video"
         if let sps = s.sps {
             video += " \(sps.profileName) \(sps.levelName), \(sps.width)×\(sps.height)"
-        } else if s.videoCodec == "H.264" {
+        } else if let h265 = s.h265 {
+            video += " \(h265)"
+        } else if s.videoCodec == "H.264" || s.videoCodec == "H.265" {
             video += " (resolution not announced)"
         }
         parts.append(video)

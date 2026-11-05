@@ -2,6 +2,7 @@
 // one is cut into FU-A fragments. SPS and PPS go before each keyframe, so a viewer can start there. The last
 // packet of a frame carries the marker bit.
 import Foundation
+import Ingest
 
 public struct RTPPacketizer: Sendable {
     public let payloadType: UInt8
@@ -101,5 +102,81 @@ public struct RTPPacketizer: Sendable {
         func be(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
         return [0x80, 200, 0, 6] + be(ssrc) + be(seconds) + be(fraction) + be(rtpTimestamp)
             + be(UInt32(truncatingIfNeeded: packets)) + be(UInt32(truncatingIfNeeded: octets))
+    }
+}
+
+/// Video into RTP in either codec: H.264 (RFC 6184) or H.265 (RFC 7798), as the stream is.
+public enum VideoPacketizer: Sendable {
+    case h264(RTPPacketizer)
+    case h265(H265Packetizer)
+
+    public init(_ codec: VideoCodec, payloadType: UInt8, ssrc: UInt32, maxPayload: Int, sequence: UInt16 = .random(in: 0 ... .max)) {
+        switch codec {
+        case .h264: self = .h264(RTPPacketizer(payloadType: payloadType, ssrc: ssrc, maxPayload: maxPayload, sequence: sequence))
+        case .h265: self = .h265(H265Packetizer(payloadType: payloadType, ssrc: ssrc, maxPayload: maxPayload, sequence: sequence))
+        }
+    }
+
+    public var codec: VideoCodec {
+        if case .h265 = self { return .h265 }
+        return .h264
+    }
+
+    public var ssrc: UInt32 {
+        switch self {
+        case let .h264(p): p.ssrc
+        case let .h265(p): p.ssrc
+        }
+    }
+
+    public var payloadType: UInt8 {
+        switch self {
+        case let .h264(p): p.payloadType
+        case let .h265(p): p.payloadType
+        }
+    }
+
+    public var maxPayload: Int {
+        switch self {
+        case let .h264(p): p.maxPayload
+        case let .h265(p): p.maxPayload
+        }
+    }
+
+    public var sequence: UInt16 {
+        switch self {
+        case let .h264(p): p.sequence
+        case let .h265(p): p.sequence
+        }
+    }
+
+    /// An RTCP sender report for the stream sent so far.
+    public func senderReport(rtpTimestamp: UInt32, at date: Date = Date()) -> [UInt8] {
+        switch self {
+        case let .h264(p): return p.senderReport(rtpTimestamp: rtpTimestamp, at: date)
+        case let .h265(p):
+            let ntp = date.timeIntervalSince1970 + 2_208_988_800
+            let seconds = UInt32(ntp)
+            let fraction = UInt32((ntp - Double(seconds)) * 4_294_967_296)
+            func be(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+            return [0x80, 200, 0, 6] + be(p.ssrc) + be(seconds) + be(fraction) + be(rtpTimestamp)
+                + be(UInt32(truncatingIfNeeded: p.packets)) + be(UInt32(truncatingIfNeeded: p.octets))
+        }
+    }
+
+    /// The same packetizer for another codec, its numbering carried on.
+    public func switched(to codec: VideoCodec) -> VideoPacketizer {
+        codec == self.codec ? self : VideoPacketizer(codec, payloadType: payloadType, ssrc: ssrc, maxPayload: maxPayload, sequence: sequence)
+    }
+
+    public mutating func packetize(_ nalus: [[UInt8]], timestamp: UInt32) -> [[UInt8]] {
+        switch self {
+        case var .h264(p):
+            defer { self = .h264(p) }
+            return p.packetize(nalus, timestamp: timestamp)
+        case var .h265(p):
+            defer { self = .h265(p) }
+            return p.packetize(nalus, timestamp: timestamp)
+        }
     }
 }

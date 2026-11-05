@@ -2,6 +2,7 @@
 // clock, since the login digest carries the time and a camera refuses one too far from its own), which
 // services it has, its media profiles and their stream addresses.
 import Foundation
+import Ingest
 
 public final class ONVIFClient: @unchecked Sendable {
     public let host: String
@@ -174,12 +175,15 @@ public final class ONVIFClient: @unchecked Sendable {
         return parts.string
     }
 
-    /// The main stream (the largest H.264 profile) and the sub-stream (the smallest other one; the main again
-    /// if there is only one).
+    /// The main stream (the largest profile Pond reads: H.264 or H.265) and the sub-stream (the smallest other one;
+    /// the main again if there is only one). Between two the same size, H.264 (the Home app takes it as it is).
     public static func choose(_ profiles: [Profile]) -> (main: Profile, sub: Profile)? {
-        let h264 = profiles.filter { $0.encoding.uppercased() == "H264" && $0.width > 0 }
-        guard let main = h264.max(by: { $0.width * $0.height < $1.width * $1.height }) else { return nil }
-        let sub = h264.filter { $0.token != main.token }.min(by: { $0.width * $0.height < $1.width * $1.height }) ?? main
+        let readable = profiles.filter { VideoCodec(encoding: $0.encoding) != nil && $0.width > 0 }
+        func pixels(_ p: Profile) -> Int { p.width * p.height }
+        func h264(_ p: Profile) -> Int { VideoCodec(encoding: p.encoding) == .h264 ? 1 : 0 }
+        guard let main = readable.max(by: { (pixels($0), h264($0)) < (pixels($1), h264($1)) }) else { return nil }
+        let others = readable.filter { $0.token != main.token }
+        let sub = others.min(by: { (pixels($0), -h264($0)) < (pixels($1), -h264($1)) }) ?? main
         return (main, sub)
     }
 
@@ -193,7 +197,7 @@ public final class ONVIFClient: @unchecked Sendable {
     /// The same, from profiles already asked for.
     public func streams(media: URL, media2: URL?, profiles: [Profile]) async throws(Failure) -> (main: String, sub: String) {
         guard let (main, sub) = Self.choose(profiles) else {
-            throw Failure(description: profiles.isEmpty ? "the camera has no media profiles" : "no profile is H.264")
+            throw Failure(description: profiles.isEmpty ? "the camera has no media profiles" : "no profile is H.264 or H.265")
         }
         let mainAddress = try await streamAddress(media: media, media2: media2, profile: main.token)
         let subAddress = sub.token == main.token ? mainAddress

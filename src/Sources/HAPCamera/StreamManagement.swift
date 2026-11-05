@@ -4,6 +4,7 @@
 // Field layouts follow HAP-NodeJS's RTPStreamManagement; numbers are little-endian.
 import Devices
 import Foundation
+import Ingest
 import HAP
 import NVRCore
 
@@ -86,7 +87,7 @@ public final class StreamManagement: @unchecked Sendable {
     static let mainStreamBitrate = 1500
 
     /// The live stream's latest keyframe, for snapshots while it runs (no second connection to the camera).
-    var latestKeyframe: (nalus: [[UInt8]], sps: [UInt8], pps: [UInt8])? {
+    var latestKeyframe: (nalus: [[UInt8]], sets: ParameterSets)? {
         lock.withLock { live?.isStopped == false ? live?.latestKeyframe : nil }
     }
 
@@ -195,6 +196,10 @@ public final class StreamManagement: @unchecked Sendable {
                                   masterKey: prepared.videoKey, masterSalt: prepared.videoSalt) { line in
             log(line.replacingOccurrences(of: "HomeKit live:", with: "HomeKit live (\(viewer)):"))
         }
+        // (The Home app takes only H.264: an H.265 camera is re-encoded to this, from what the viewer asked for.)
+        session.mustSendH264 = true
+        session.h264Target = RateControl.target(bitrate: max(Self.target(video, current: nil).bitrate, RateControl.start),
+                                                profile: Self.target(video, current: nil).profile)
         if let target {
             // Only while the media engine has room: else the camera's own stream, as it is.
             if session.reencodeIfRoom(to: target, label: "HomeKit live (\(viewer))") {

@@ -188,20 +188,24 @@ public final class LiveSession: @unchecked Sendable {
     let hub: StreamHub
     let log: @Sendable (String) -> Void
     private var sender: SRTPSender
-    private var packetizer: RTPPacketizer
+    private var packetizer: VideoPacketizer
     private let stopFlag = NSLock()
     private var stopped = false
     private var lastHeard = Date()
     private var lastTimestamp: UInt32 = 0
-    private var keyframe: (nalus: [[UInt8]], sps: [UInt8], pps: [UInt8])?
+    private var keyframe: (nalus: [[UInt8]], sets: ParameterSets)?
     /// The latest keyframe sent, for snapshots.
-    var latestKeyframe: (nalus: [[UInt8]], sps: [UInt8], pps: [UInt8])? { sendLock.withLock { keyframe } }
+    var latestKeyframe: (nalus: [[UInt8]], sets: ParameterSets)? { sendLock.withLock { keyframe } }
     /// Seconds without video from the camera before reconnecting to it: once it is streaming, and for the
     /// first frame (a Reolink starts sending 1–4 s after PLAY).
     static let stallSeconds = 3.0
     static let firstFrameSeconds = 8.0
     private let sendLock = NSLock()
     public var onEnd: (@Sendable () -> Void)?
+    /// The viewer takes H.264 only (the Home app): a camera that sends H.265 is re-encoded for it to `h264Target`,
+    /// whatever else was chosen. Another Pond takes H.265 as it is.
+    public var mustSendH264 = false
+    public var h264Target: VideoTranscoder.Target?
     /// Its re-encoding's share of the media engine, while it has one.
     private var budgetGrant: MediaBudget.Grant?
     /// Something went wrong reaching the camera, or video stopped (the viewer may still be waiting).
@@ -219,7 +223,7 @@ public final class LiveSession: @unchecked Sendable {
         sender = SRTPSender(masterKey: masterKey, masterSalt: masterSalt)
         reports = SRTCPReceiver(masterKey: masterKey, masterSalt: masterSalt)
         // Room for the RTP header and SRTP's tag inside the packet size asked for.
-        packetizer = RTPPacketizer(payloadType: video.payloadType, ssrc: video.ssrc, maxPayload: max(200, video.mtu - 12 - 10))
+        packetizer = VideoPacketizer(.h264, payloadType: video.payloadType, ssrc: video.ssrc, maxPayload: max(200, video.mtu - 12 - 10))
     }
 
     var isStopped: Bool { stopFlag.withLock { stopped } }
@@ -407,7 +411,18 @@ public final class LiveSession: @unchecked Sendable {
             // Carry on from here if reconnected: a frame (at 10 fps) after the last one sent.
             offset = sendLock.withLock { lastTimestamp } &- base &+ 9000
         }
-        var depacketizer = H264Depacketizer(spropParameterSets: session.video.format["sprop-parameter-sets"])
+        var depacketizer = VideoDepacketizer(video: session.video)
+        // An H.265 camera for a viewer that takes only H.264: re-encoded, room in the media engine or not (there's no
+        // passing it through). Else sent in its own codec.
+        if depacketizer.codec == .h265, mustSendH264, stopFlag.withLock({ reencode == nil }), let target = h264Target {
+            let cost = MediaBudget.decode(width: 2560, height: 1440, fps: 15) + MediaBudget.encode(width: target.width, height: target.height, fps: Double(target.fps))
+            if case let .granted(grant) = MediaBudget.shared.claim(.liveReencode, cost: cost, label: "HomeKit live (H.265 camera)") {
+                stopFlag.withLock { budgetGrant = grant }
+            }
+            reencode(to: target)
+            log("… HomeKit live: the camera sends H.265: re-encoded to H.264 for the Home app")
+        }
+        if stopFlag.withLock({ reencode == nil }) { sendLock.withLock { packetizer = packetizer.switched(to: depacketizer.codec) } }
         let aac = session.audio.map { AACDepacketizer(format: $0.format) }
         let transcoder: AudioTranscoder? = sendLock.withLock { audioOut?.settings }.flatMap { settings in
             session.audio?.format["config"].flatMap {
@@ -476,8 +491,8 @@ public final class LiveSession: @unchecked Sendable {
                     // keyframe on; the transcoder sends what it makes.
                     if unit.damaged { needKeyframe = true; continue }
                     if needKeyframe { guard unit.isKeyframe else { continue }; needKeyframe = false }
-                    guard let sps = depacketizer.sps, let pps = depacketizer.pps else { continue }
-                    if unit.isKeyframe { sendLock.withLock { keyframe = (unit.nalus, sps, pps) } }
+                    guard let sets = depacketizer.parameterSets else { continue }
+                    if unit.isKeyframe { sendLock.withLock { keyframe = (unit.nalus, sets) } }
                     let cameraTime = retimer.place(unwrap.unwrap(unit.timestamp))
                     if !started {
                         started = true
@@ -485,22 +500,22 @@ public final class LiveSession: @unchecked Sendable {
                         log("✓ HomeKit live: re-encoding the main stream\(target.map { " for \($0.width)×\($0.height) at up to \($0.bitrate) kbit/s, \($0.fps) fps" } ?? "")")
                         onPlaying?()
                     }
-                    reencoder.push(unit.nalus, sps: sps, pps: pps, time: cameraTime, encode: !packet.replayed)
+                    reencoder.push(unit.nalus, sets: sets, time: cameraTime, encode: !packet.replayed)
                     continue
                 }
                 let placed = retimer.place(unwrap.unwrap(unit.timestamp))
                 // From the first whole keyframe; a damaged frame waits for the next keyframe.
                 if !started {
-                    guard unit.isKeyframe, !unit.damaged, depacketizer.sps != nil else { continue }
+                    guard unit.isKeyframe, !unit.damaged, depacketizer.parameterSets != nil else { continue }
                     started = true
                     first = placed
                     log("✓ HomeKit live: streaming the \(source.url.hasSuffix("main") ? "main" : "sub-")stream")
                     onPlaying?()
                 }
                 var nalus = unit.nalus
-                if unit.isKeyframe, let sps = depacketizer.sps, let pps = depacketizer.pps {
-                    nalus = [sps, pps] + nalus
-                    sendLock.withLock { keyframe = (unit.nalus, sps, pps) }
+                if unit.isKeyframe, let sets = depacketizer.parameterSets {
+                    nalus = sets.all + nalus
+                    sendLock.withLock { keyframe = (unit.nalus, sets) }
                 }
                 let timestamp: UInt32
                 if packet.replayed {

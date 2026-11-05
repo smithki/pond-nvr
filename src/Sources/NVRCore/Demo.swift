@@ -179,9 +179,13 @@ extension Demo {
         public var model: String
         public var startsPrivate: Bool
         public var trouble: Trouble?
+        /// It sends H.265 (HEVC) rather than H.264.
+        public var h265: Bool?
 
         public init(_ id: String, _ name: String, scene: Scene, doorbell: Bool = false, ptz: Bool = false,
-                    manufacturer: String = "Demo", model: String = "Camera", startsPrivate: Bool = false, trouble: Trouble? = nil) {
+                    manufacturer: String = "Demo", model: String = "Camera", startsPrivate: Bool = false, trouble: Trouble? = nil,
+                    h265: Bool = false) {
+            self.h265 = h265 ? true : nil
             self.id = id
             self.name = name
             self.scene = scene
@@ -226,7 +230,7 @@ extension Demo.Scenario {
         cameras: [
             .init("dock", "Dock", scene: .dock, manufacturer: "Reolink", model: "RLC-811A"),
             .init("porch", "Porch", scene: .porch, doorbell: true, manufacturer: "Reolink", model: "Video Doorbell WiFi"),
-            .init("lane", "Lane", scene: .street, manufacturer: "Amcrest", model: "IP8M-2496E"),
+            .init("lane", "Lane", scene: .street, manufacturer: "Amcrest", model: "IP8M-2496E", h265: true),
             .init("shed", "Shed", scene: .shed, ptz: true, manufacturer: "Reolink", model: "E1 Outdoor"),
         ], busyness: 3, signaling: signaling)
 
@@ -238,14 +242,14 @@ extension Demo.Scenario {
             .init("backyard", "Backyard", scene: .backyard, ptz: true, manufacturer: "Reolink", model: "RLC-823A"),
             .init("garage", "Garage", scene: .garage, manufacturer: "Hikvision", model: "DS-2CD2387G2"),
             .init("living-room", "Living Room", scene: .livingRoom, manufacturer: "Reolink", model: "E1 Zoom", startsPrivate: true),
-            .init("side-gate", "Side Gate", scene: .sideGate, manufacturer: "Amcrest", model: "IP5M-T1179E"),
+            .init("side-gate", "Side Gate", scene: .sideGate, manufacturer: "Amcrest", model: "IP5M-T1179E", h265: true),
         ], ponds: [lakeHouse], signaling: signaling)
 
     public static let many = Demo.Scenario(
         name: "many", title: "Many Cameras", about: "Sixteen cameras, for the layout and the Mac's video work.", pondName: "Demo Mac",
         cameras: (0 ..< 16).map { i in
             let scene = Demo.Scene.allCases[i % Demo.Scene.allCases.count]
-            return .init("camera-\(i + 1)", "Camera \(i + 1)", scene: scene, doorbell: scene == .frontDoor, ptz: i == 2)
+            return .init("camera-\(i + 1)", "Camera \(i + 1)", scene: scene, doorbell: scene == .frontDoor, ptz: i == 2, h265: i % 4 == 3)
         }, busyness: 4)
 
     public static let trouble = Demo.Scenario(

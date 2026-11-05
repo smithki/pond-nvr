@@ -133,7 +133,7 @@ final class RecordingSession: @unchecked Sendable {
                 return v.time - videoStart!
             }
             guard let time, let transcoder = lock.withLock({ self.transcoder }) else { return }
-            transcoder.push(v.nalus, sps: v.sps, pps: v.pps, time: time, encode: true)
+            transcoder.push(v.nalus, sets: v.sets, time: time, encode: true)
         case let .audio(a):
             guard let audio else { return }
             lock.withLock {

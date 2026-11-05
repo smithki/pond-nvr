@@ -8,7 +8,6 @@ Status: **in progress**, **next**, **later**. A goal moves to done.md when it's 
 
 | Goal | Status | Notes |
 |---|---|---|
-| H.265 cameras | in progress | A camera that sends H.265 (HEVC) recorded as it is (`hvc1` MP4, about half the room of H.264 for the same picture), played in the app's live view and the Timeline, watched by detection and closer looks, and its snapshots taken; re-encoded to H.264 where only H.264 will do (HomeKit's live view and Secure Video, another Pond's viewer on a link that asks for it). ONVIF's streams chosen with H.265 allowed. A demo camera that sends H.265, to try it all without one. |
 | A signed, notarized release | later | Today Pond is built from source; a release needs a Developer ID, notarization and an app bundle identifier of its own. It also settles how search's picture model reaches users (about 390 MB: in the app, or downloaded on first use). |
 
 

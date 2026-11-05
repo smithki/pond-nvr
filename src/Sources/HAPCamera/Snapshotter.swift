@@ -15,7 +15,7 @@ public final class Snapshotter: @unchecked Sendable {
     let password: String
     private var cached: (image: CGImage, at: Date)?
     /// A keyframe already at hand (a live stream's), used instead of connecting to the camera again.
-    public var keyframe: (@Sendable () -> (nalus: [[UInt8]], sps: [UInt8], pps: [UInt8])?)?
+    public var keyframe: (@Sendable () -> (nalus: [[UInt8]], sets: ParameterSets)?)?
     private let lock = NSLock()
     /// How long a snapshot is reused.
     static let reuse: TimeInterval = 10
@@ -38,7 +38,7 @@ public final class Snapshotter: @unchecked Sendable {
         let (url, username, password) = (url, username, password)
         let image: CGImage?
         if let k = keyframe?() {
-            image = Self.decode(k.nalus, sps: k.sps, pps: k.pps)
+            image = Self.decode(k.nalus, sets: k.sets)
         } else {
             let grabbed = await Task.detached { Self.grab(url: url, username: username, password: password) }.value
             lock.withLock { problem = grabbed.problem }
@@ -56,7 +56,7 @@ public final class Snapshotter: @unchecked Sendable {
             return (nil, .init(error))
         }
         defer { session.close() }
-        var depacketizer = H264Depacketizer(spropParameterSets: session.video.format["sprop-parameter-sets"])
+        var depacketizer = VideoDepacketizer(video: session.video)
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
             // Nothing yet is normal: video first arrives 1–4 s after PLAY.
@@ -65,24 +65,16 @@ public final class Snapshotter: @unchecked Sendable {
             guard let packet = next ?? nil else { continue }
             guard packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { continue }
             for unit in depacketizer.push(rtp) where unit.isKeyframe && !unit.damaged {
-                guard let sps = depacketizer.sps, let pps = depacketizer.pps else { continue }
-                let image = decode(unit.nalus, sps: sps, pps: pps)
+                guard let sets = depacketizer.parameterSets else { continue }
+                let image = decode(unit.nalus, sets: sets)
                 return (image, image == nil ? .other : nil)
             }
         }
         return (nil, .noVideo)
     }
 
-    static func decode(_ nalus: [[UInt8]], sps: [UInt8], pps: [UInt8]) -> CGImage? {
-        var format: CMVideoFormatDescription?
-        sps.withUnsafeBufferPointer { s in
-            pps.withUnsafeBufferPointer { p in
-                _ = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: nil, parameterSetCount: 2, parameterSetPointers: [s.baseAddress!, p.baseAddress!],
-                    parameterSetSizes: [s.count, p.count], nalUnitHeaderLength: 4, formatDescriptionOut: &format)
-            }
-        }
-        guard let format else { return nil }
+    static func decode(_ nalus: [[UInt8]], sets: ParameterSets) -> CGImage? {
+        guard let format = sets.formatDescription() else { return nil }
         var bytes: [UInt8] = []
         for nal in nalus {
             let n = UInt32(nal.count)

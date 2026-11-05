@@ -30,7 +30,7 @@ public final class StreamRecorder {
     let audioMedia: SDP.Media?
     let fragmentSeconds: Double
     let segmentLength: Int64?
-    private var h264: H264Depacketizer
+    private var depacketizer: VideoDepacketizer
     private let aac: AACDepacketizer?
     private var videoClock: RTPClock
     private var audioClock: RTPClock?
@@ -59,7 +59,7 @@ public final class StreamRecorder {
     public var writtenSeconds: Double { finishedSeconds + (writer?.writtenSeconds ?? 0) }
     public var videoFrames: Int { finishedVideo + (writer?.videoFrames ?? 0) }
     public var audioFrames: Int { finishedAudio + (writer?.audioFrames ?? 0) }
-    public var lostPackets: Int { h264.lostPackets }
+    public var lostPackets: Int { depacketizer.lostPackets }
     public var videoTrack: VideoTrack? { writer?.video }
 
     public init(video: SDP.Media, audio: SDP.Media?, fragmentSeconds: Double = 2, segmentSeconds: Double? = nil) {
@@ -67,7 +67,7 @@ public final class StreamRecorder {
         audioMedia = audio
         self.fragmentSeconds = fragmentSeconds
         segmentLength = segmentSeconds.map { Int64($0 * Double(VideoTrack.timescale)) }
-        h264 = H264Depacketizer(spropParameterSets: video.format["sprop-parameter-sets"])
+        depacketizer = VideoDepacketizer(video: video)
         videoClock = RTPClock(rate: video.clockRate > 0 ? video.clockRate : 90000)
         if let audio {
             aac = AACDepacketizer(format: audio.format)
@@ -86,7 +86,7 @@ public final class StreamRecorder {
             audioClock?.noteRTCP(packet.data)
         case CameraSession.videoChannel:
             guard let rtp = RTPPacket(packet.data) else { return [] }
-            return h264.push(rtp).flatMap { addVideo($0, now: now) }
+            return depacketizer.push(rtp).flatMap { addVideo($0, now: now) }
         case CameraSession.audioChannel:
             guard let aac, let rtp = RTPPacket(packet.data) else { return [] }
             for frame in aac.push(rtp) { addAudio(frame, now: now) }
@@ -105,13 +105,27 @@ public final class StreamRecorder {
 
     /// Starts a segment at `time` on the recording's timeline. Nil until the parameter sets are known.
     private func openSegment(at time: Int64) -> Output? {
-        guard let sps = h264.sps, let pps = h264.pps, let info = H264SPS(nal: sps) else { return nil }
-        let w = FragmentWriter(video: VideoTrack(sps: sps, pps: pps, width: info.width, height: info.height),
-                               audio: audioTrack(), fragmentSeconds: fragmentSeconds)
+        guard let track = Self.track(depacketizer.parameterSets) else { return nil }
+        let w = FragmentWriter(video: track, audio: audioTrack(), fragmentSeconds: fragmentSeconds)
         writer = w
         segmentStart = time
         segmentWall = startWall + Double(time) / Double(VideoTrack.timescale)
         return .start(initSegment: w.initSegment, wallTime: segmentWall)
+    }
+
+    /// The MP4 track for a stream's parameter sets: H.264's `avc1`, H.265's `hvc1`.
+    public static func track(_ sets: ParameterSets?) -> VideoTrack? {
+        guard let sets, let size = sets.size else { return nil }
+        switch sets.codec {
+        case .h264:
+            return VideoTrack(sps: sets.sps, pps: sets.pps, width: size.width, height: size.height)
+        case .h265:
+            guard let vps = sets.vps, let info = H265SPS(nal: sets.sps) else { return nil }
+            return VideoTrack(sps: sets.sps, pps: sets.pps, width: size.width, height: size.height,
+                              hevc: .init(vps: vps, profileTierLevel: info.profileTierLevel, chromaFormat: info.chromaFormat,
+                                          bitDepthLuma: info.bitDepthLuma, bitDepthChroma: info.bitDepthChroma,
+                                          temporalLayers: info.maxSubLayers, temporalIDNested: info.temporalIDNesting))
+        }
     }
 
     private func closeSegment(until time: Int64?) -> [Output] {
@@ -127,11 +141,11 @@ public final class StreamRecorder {
         return out
     }
 
-    private func addVideo(_ unit: H264AccessUnit, now: Double) -> [Output] {
+    private func addVideo(_ unit: VideoAccessUnit, now: Double) -> [Output] {
         if unit.damaged { damagedFrames += 1 }
         var out: [Output] = []
         if !started {
-            guard unit.isKeyframe, h264.sps != nil, h264.pps != nil else { return [] }
+            guard unit.isKeyframe, depacketizer.parameterSets != nil else { return [] }
             started = true
             videoStart = videoRetimer.place(videoUnwrap.unwrap(unit.timestamp))
             startWall = videoClock.wallTime(unit.timestamp) ?? now

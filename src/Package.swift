@@ -45,7 +45,7 @@ targets += [
 ]
 // Demo mode: made-up cameras (scenes drawn and encoded as a camera's stream, their controls, what's found in them).
 targets.append(.target(name: "Demo", dependencies: ["NVRCore", "Ingest", "HAPCamera", "Devices", "Detection", "Recorder", "Watch"]))
-targets.append(.testTarget(name: "DemoTests", dependencies: ["Demo", "NVRCore", "Ingest", "Detection", "HAPCamera"]))
+targets.append(.testTarget(name: "DemoTests", dependencies: ["Demo", "NVRCore", "Ingest", "Detection", "HAPCamera", "Recorder"]))
 // Camera health for the doctor, kept in Pond's database (SQLite, which macOS has).
 targets.append(.target(name: "Health", dependencies: ["NVRCore"], linkerSettings: [.linkedLibrary("sqlite3")]))
 targets.append(.testTarget(name: "HealthTests", dependencies: ["Health", "NVRCore"]))

@@ -37,9 +37,10 @@ public final class MediaBudget: @unchecked Sendable {
     public static func decode(width: Int, height: Int, fps: Double) -> Double { Double(width * height) * fps }
     public static func encode(width: Int, height: Int, fps: Double) -> Double { Double(width * height) * fps * 1.5 }
 
-    /// A stream's decode, by its SPS's picture size (else `fallback`'s), at a camera's usual 15 fps unless told.
+    /// A stream's decode, by its SPS's picture size (H.264's or H.265's; else `fallback`'s), at a camera's usual 15
+    /// fps unless told.
     public static func decode(sps: [UInt8]?, fallback: (width: Int, height: Int), fps: Double = 15) -> Double {
-        let size = sps.flatMap(H264SPS.init(nal:)).map { ($0.width, $0.height) } ?? fallback
+        let size = sps.flatMap { s in H264SPS(nal: s).map { ($0.width, $0.height) } ?? H265SPS(nal: s).map { ($0.width, $0.height) } } ?? fallback
         return decode(width: size.0, height: size.1, fps: fps)
     }
 

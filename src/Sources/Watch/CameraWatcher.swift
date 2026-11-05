@@ -140,18 +140,18 @@ public final class CameraWatcher: @unchecked Sendable {
         }
     }
 
-    struct NotH264: Error {}
+    struct NotReadable: Error {}
 
     /// Until the stream ends, the camera goes private, or the watcher is stopped.
     private func watch() throws {
         let source = try StreamHub.shared.open(url: url, username: username, password: password)
         defer { source.close() }
-        guard source.video.encoding.uppercased() == "H264" else {
-            say("not watched for detection: its sub-stream is \(source.video.encoding), not H.264")
+        guard VideoCodec(encoding: source.video.encoding) != nil else {
+            say("not watched for detection: its sub-stream is \(source.video.encoding), not H.264 or H.265")
             lock.withLock { stopped = true }
-            throw NotH264()
+            throw NotReadable()
         }
-        var depacketizer = H264Depacketizer(spropParameterSets: source.video.format["sprop-parameter-sets"])
+        var depacketizer = VideoDepacketizer(video: source.video)
         // Its share of the media engine: every picture decoded, or (while it's full, for what matters more) only
         // keyframes, a picture every couple of seconds.
         let cost = MediaBudget.decode(sps: depacketizer.sps, fallback: (640, 360))
@@ -198,7 +198,7 @@ public final class CameraWatcher: @unchecked Sendable {
                 autoreleasepool {
                     // Every picture decoded (each needs the ones before), only some looked at.
                     guard let picture = decoder.decode(unit.nalus, keyframe: unit.isKeyframe, damaged: unit.damaged,
-                                                       sps: depacketizer.sps, pps: depacketizer.pps) else { return }
+                                                       sets: depacketizer.parameterSets) else { return }
                     answerRings(picture)
                     if !told {
                         say("watching for detection (\(CVPixelBufferGetWidth(picture))×\(CVPixelBufferGetHeight(picture)))")

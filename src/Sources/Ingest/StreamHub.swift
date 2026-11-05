@@ -78,6 +78,8 @@ private final class Upstream: @unchecked Sendable {
     private var cache: [InterleavedPacket] = []
     private var cachedKeyframe: UInt32?
     private var caches = false
+    /// The stream's codec, for finding its keyframes (nil: one Pond can't read, not cached).
+    private var codec: VideoCodec?
     static let cacheLimit = 2500
 
     init(url: String, hub: StreamHub) {
@@ -125,7 +127,8 @@ private final class Upstream: @unchecked Sendable {
         condition.withLock {
             session = opened
             connecting = false
-            caches = opened.video.encoding.uppercased() == "H264"
+            codec = VideoCodec(encoding: opened.video.encoding)
+            caches = codec != nil
             readers[ObjectIdentifier(s)] = s
             condition.broadcast()
         }
@@ -182,7 +185,7 @@ private final class Upstream: @unchecked Sendable {
     /// Keeps the video since the latest keyframe (called under the lock).
     private func remember(_ packet: InterleavedPacket) {
         guard caches, packet.channel == CameraSession.videoChannel, let rtp = RTPPacket(packet.data) else { return }
-        if rtp.startsH264Keyframe, cachedKeyframe != rtp.timestamp {
+        if let codec, rtp.startsKeyframe(codec), cachedKeyframe != rtp.timestamp {
             cache = [packet]
             cachedKeyframe = rtp.timestamp
         } else if !cache.isEmpty {

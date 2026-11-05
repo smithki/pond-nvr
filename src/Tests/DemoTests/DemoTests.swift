@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Detection
 import ImageIO
@@ -7,6 +8,7 @@ import Ingest
 import NVRCore
 import Testing
 @testable import Demo
+import Recorder
 
 @Suite(.serialized) struct DemoTests {
     let world = DemoWorld(scenario: .home, folder: nil)
@@ -72,6 +74,51 @@ import Testing
         #expect(reports >= 1)
         // Ten pictures a second, more or less.
         #expect(Date().timeIntervalSince(started) > 0.8)
+    }
+
+    @Test func anH265CameraSendsH265() throws {
+        let stream = try DemoStream(url: "demo://side-gate.home/sub", world: world)
+        defer { stream.close() }
+        #expect(stream.video.encoding == "H265")
+        #expect(stream.video.format["sprop-vps"] != nil && stream.video.format["sprop-pps"] != nil)
+        var depacketizer = VideoDepacketizer(video: stream.video)
+        #expect(depacketizer.codec == .h265 && depacketizer.parameterSets != nil)
+        var units: [VideoAccessUnit] = []
+        let started = Date()
+        while units.count < 5, Date().timeIntervalSince(started) < 5 {
+            guard let packet = try stream.next(timeout: 1), packet.channel == 0, let rtp = RTPPacket(packet.data) else { continue }
+            units += depacketizer.push(rtp)
+        }
+        #expect(units.count >= 5)
+        #expect(units.first?.isKeyframe == true)
+        #expect(depacketizer.parameterSets?.size?.width == 640)
+    }
+
+    @Test func anH265CameraIsRecordedAsHvc1ThatAVFoundationPlays() async throws {
+        let stream = try DemoStream(url: "demo://side-gate.home/sub", world: world)
+        defer { stream.close() }
+        let recorder = StreamRecorder(video: stream.video, audio: nil)
+        var bytes: [UInt8] = []
+        let started = Date()
+        while Date().timeIntervalSince(started) < 4.5 {
+            guard let packet = try stream.next(timeout: 1) else { continue }
+            for output in recorder.handle(packet, now: Date().timeIntervalSince1970) {
+                switch output {
+                case let .start(initSegment, _): bytes += initSegment
+                case let .fragment(f): bytes += f
+                case .end: break
+                }
+            }
+        }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("h265-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data(bytes).write(to: file)
+        let asset = AVURLAsset(url: file)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let format = try #require(try await track.load(.formatDescriptions).first)
+        #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_HEVC)
+        #expect(try await track.load(.naturalSize) == CGSize(width: 640, height: 360))
+        #expect(try await asset.load(.duration).seconds > 2)
     }
 
     @Test func anAddressFromAnotherScenarioIsntOpened() {

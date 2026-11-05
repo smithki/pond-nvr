@@ -171,9 +171,10 @@ private struct Reader: Sendable {
                       receiver: AVSampleBufferVideoRenderer.Receiver, player: inout AudioPlayer,
                       onFirstFrame: () -> Void) throws(RTSPError) {
         defer { session.close() }
-        var depacketizer = H264Depacketizer(spropParameterSets: session.video.format["sprop-parameter-sets"])
+        // (H.264 or H.265, as the stream says: the renderer decodes either.)
+        var depacketizer = VideoDepacketizer(video: session.video)
         var format: CMVideoFormatDescription?
-        var formatSPS: [UInt8]?
+        var formatSets: ParameterSets?
         var needKeyframe = true
         var lastFrame = Date()
         var playing = false
@@ -213,9 +214,9 @@ private struct Reader: Sendable {
                     guard unit.isKeyframe else { continue }
                     needKeyframe = false
                 }
-                if let sps = depacketizer.sps, let pps = depacketizer.pps, sps != formatSPS {
-                    format = Self.format(sps: sps, pps: pps)
-                    formatSPS = sps
+                if let sets = depacketizer.parameterSets, sets != formatSets {
+                    format = sets.formatDescription()
+                    formatSets = sets
                     if let format {
                         let d = CMVideoFormatDescriptionGetDimensions(format)
                         report(.size(CGSize(width: Int(d.width), height: Int(d.height))))
@@ -241,21 +242,6 @@ private struct Reader: Sendable {
                 }
             }
         }
-    }
-
-    static func format(sps: [UInt8], pps: [UInt8]) -> CMVideoFormatDescription? {
-        var format: CMVideoFormatDescription?
-        sps.withUnsafeBufferPointer { s in
-            pps.withUnsafeBufferPointer { p in
-                guard let sb = s.baseAddress, let pb = p.baseAddress else { return }
-                let pointers = [sb, pb]
-                let sizes = [s.count, p.count]
-                _ = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: nil, parameterSetCount: 2, parameterSetPointers: pointers,
-                    parameterSetSizes: sizes, nalUnitHeaderLength: 4, formatDescriptionOut: &format)
-            }
-        }
-        return format
     }
 
     /// One frame as length-prefixed NAL units, to be shown at `time` (and at once, as soon as it is decoded).

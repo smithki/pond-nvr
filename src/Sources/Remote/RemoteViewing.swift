@@ -356,7 +356,8 @@ final class RemoteStream: PacketSource, @unchecked Sendable {
     private let lock = NSLock()
     private var queue: [[UInt8]] = []
     private let arrived = DispatchSemaphore(value: 0)
-    private var sps: [UInt8]?, pps: [UInt8]?
+    /// Its parameter sets as they come, for the description.
+    private var depacketizer: VideoDepacketizer
     private var closed = false
 
     init(viewer: LiveViewer, session: PathSessions.Session, answer: LiveAnswer, ended: @escaping () -> Void) {
@@ -364,47 +365,31 @@ final class RemoteStream: PacketSource, @unchecked Sendable {
         self.session = session
         self.answer = answer
         self.ended = ended
-        video = SDP("m=video 0 RTP/AVP \(answer.payloadType)\r\na=rtpmap:\(answer.payloadType) H264/90000\r\na=fmtp:\(answer.payloadType) packetization-mode=1\r\n").video!
+        video = SDP("m=video 0 RTP/AVP \(answer.payloadType)\r\na=rtpmap:\(answer.payloadType) \(answer.sent.encoding)/90000\r\na=fmtp:\(answer.payloadType) packetization-mode=1\r\n").video!
+        depacketizer = VideoDepacketizer(codec: answer.sent)
         viewer.packet = { [weak self] rtp in self?.push(rtp) }
     }
 
     private func push(_ rtp: [UInt8]) {
         lock.withLock {
             // Its parameter sets as they first come, for the description.
-            if sps == nil || pps == nil, let packet = RTPPacket(rtp), let first = packet.payload.first {
-                switch first & 0x1F {
-                case 7: sps = Array(packet.payload)
-                case 8: pps = Array(packet.payload)
-                case 24: (sps, pps) = Self.aggregated(Array(packet.payload), sps, pps)
-                default: break
-                }
-            }
+            if depacketizer.parameterSets == nil, let packet = RTPPacket(rtp) { _ = depacketizer.push(packet) }
             if queue.count < 2000 { queue.append(rtp) }
         }
         arrived.signal()
-    }
-
-    /// The SPS and PPS in a STAP-A packet.
-    static func aggregated(_ payload: [UInt8], _ sps: [UInt8]?, _ pps: [UInt8]?) -> ([UInt8]?, [UInt8]?) {
-        var (sps, pps) = (sps, pps)
-        var i = 1
-        while i + 2 <= payload.count {
-            let n = Int(payload[i]) << 8 | Int(payload[i + 1])
-            i += 2
-            guard i + n <= payload.count, n > 0 else { break }
-            let unit = Array(payload[i ..< i + n])
-            if unit[0] & 0x1F == 7 { sps = unit } else if unit[0] & 0x1F == 8 { pps = unit }
-            i += n
-        }
-        return (sps, pps)
     }
 
     /// Until the stream's parameter sets have come (the description carries them), up to 10 s.
     func waitForParameterSets() throws {
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
-            if let (sps, pps) = lock.withLock({ sps.flatMap { s in pps.map { (s, $0) } } }) {
-                video.format["sprop-parameter-sets"] = Data(sps).base64EncodedString() + "," + Data(pps).base64EncodedString()
+            if let sets = lock.withLock({ depacketizer.parameterSets }) {
+                let b64 = sets.all.map { Data($0).base64EncodedString() }
+                if sets.codec == .h265 {
+                    (video.format["sprop-vps"], video.format["sprop-sps"], video.format["sprop-pps"]) = (b64[0], b64[1], b64[2])
+                } else {
+                    video.format["sprop-parameter-sets"] = b64.joined(separator: ",")
+                }
                 return
             }
             Thread.sleep(forTimeInterval: 0.05)

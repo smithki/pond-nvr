@@ -44,6 +44,10 @@ public struct LiveRequest: Codable, Sendable {
 public struct LiveAnswer: Codable, Sendable {
     public var ssrc: UInt32
     public var payloadType: UInt8
+    /// What comes: the camera's own codec, or H.264 when re-encoded (left out by a Pond from before H.265: H.264).
+    public var codec: VideoCodec?
+
+    public var sent: VideoCodec { codec ?? .h264 }
 }
 
 /// A session's path as a live stream's transport: packets out onto it; the viewer's (its reports) waited for.
@@ -94,7 +98,11 @@ public final class LiveSender: @unchecked Sendable {
     public func start(_ session: PathSessions.Session, source: (url: String, username: String, password: String),
                       reencode: LiveRequest.Reencode? = nil) -> LiveAnswer? {
         guard let keys = session.keys else { return nil }
-        let answer = LiveAnswer(ssrc: UInt32.random(in: 1 ... .max), payloadType: 99)
+        // Its codec, from the stream (open already, for the recorder, so this costs nothing); H.264 if re-encoded.
+        let probe = reencode == nil ? try? hub.open(url: source.url, username: source.username, password: source.password) : nil
+        let codec = probe.flatMap { VideoCodec(encoding: $0.video.encoding) } ?? .h264
+        probe?.close()
+        let answer = LiveAnswer(ssrc: UInt32.random(in: 1 ... .max), payloadType: 99, codec: codec)
         // Packets small enough for any path (and a relay's wrapping): RTP and SRTP's tag inside 1,200 bytes.
         let video = LiveSession.Video(payloadType: answer.payloadType, ssrc: answer.ssrc, mtu: 1200, rtcpInterval: 0.5,
                                       width: 0, height: 0, maxBitrate: 0)
@@ -143,7 +151,7 @@ public final class LiveViewer: @unchecked Sendable {
     var ssrc: UInt32 { answer.ssrc }
     private var srtp: SRTPReceiver
     private var reports: SRTPSender
-    private var depacketizer = H264Depacketizer()
+    private var depacketizer: VideoDepacketizer
     private var counts = Counts()
     private var highest: UInt16?
     private var receivedSinceReport = 0, expectedSinceReport = 0
@@ -161,6 +169,7 @@ public final class LiveViewer: @unchecked Sendable {
         guard let keys = session.keys else { return nil }
         self.session = session
         self.answer = answer
+        depacketizer = VideoDepacketizer(codec: answer.sent)
         // The side being reached's video key, both ways (its stream, and these reports about it).
         srtp = SRTPReceiver(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
         reports = SRTPSender(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
@@ -211,8 +220,8 @@ public final class LiveViewer: @unchecked Sendable {
                 if counts.firstPicture == nil { counts.firstPicture = Date() }
             }
             // (The depacketizer keeps the parameter sets apart: put back ahead of each keyframe, so it stands alone.)
-            let sets = [depacketizer.sps, depacketizer.pps].compactMap { $0 }
-            return units.map { ($0.isKeyframe && sets.count == 2 ? sets + $0.nalus : $0.nalus, $0.isKeyframe, $0.timestamp) }
+            let sets = depacketizer.parameterSets?.all ?? []
+            return units.map { ($0.isKeyframe && !sets.isEmpty ? sets + $0.nalus : $0.nalus, $0.isKeyframe, $0.timestamp) }
         }
         if let decrypted { packet?(decrypted) }
         for unit in done { picture?(unit.nalus, unit.keyframe, unit.timestamp) }
@@ -301,15 +310,30 @@ final class VideoKeeper: @unchecked Sendable {
     private var start: Int64?
     private let lock = NSLock()
 
+    private var hevc = false
+
     init(file: URL) { self.file = file }
+
+    /// The track for a keyframe's leading parameter sets, whichever codec they are.
+    static func track(_ nalus: [[UInt8]]) -> VideoTrack? {
+        if let first = nalus[0].first, H265.type(first) == H265.vps, nalus.count >= 4, let sps = H265SPS(nal: nalus[1]) {
+            return VideoTrack(sps: nalus[1], pps: nalus[2], width: sps.width, height: sps.height,
+                              hevc: .init(vps: nalus[0], profileTierLevel: sps.profileTierLevel, chromaFormat: sps.chromaFormat,
+                                          bitDepthLuma: sps.bitDepthLuma, bitDepthChroma: sps.bitDepthChroma,
+                                          temporalLayers: sps.maxSubLayers, temporalIDNested: sps.temporalIDNesting))
+        }
+        guard nalus[0].first.map({ $0 & 0x1F == 7 }) == true, let size = H264SPS(nal: nalus[0]) else { return nil }
+        return VideoTrack(sps: nalus[0], pps: nalus[1], width: size.width, height: size.height)
+    }
 
     func add(_ nalus: [[UInt8]], keyframe: Bool, timestamp: UInt32) {
         lock.withLock {
             let time = unwrap.unwrap(timestamp)
             if writer == nil {
-                guard keyframe, nalus.count >= 3, nalus[0].first.map({ $0 & 0x1F == 7 }) == true,
-                      let size = H264SPS(nal: nalus[0]) else { return }
-                let w = FragmentWriter(video: VideoTrack(sps: nalus[0], pps: nalus[1], width: size.width, height: size.height), audio: nil)
+                // From the first keyframe with its parameter sets ahead of it: H.264's SPS, PPS; or H.265's VPS, SPS, PPS.
+                guard keyframe, nalus.count >= 3, let track = Self.track(nalus) else { return }
+                hevc = track.hevc != nil
+                let w = FragmentWriter(video: track, audio: nil)
                 try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: file.path, contents: nil)
                 handle = try? FileHandle(forWritingTo: file)
@@ -317,7 +341,10 @@ final class VideoKeeper: @unchecked Sendable {
                 writer = w
                 start = time
             }
-            let pictures = nalus.filter { ![7, 8].contains($0.first.map { $0 & 0x1F } ?? 0) }
+            let pictures = nalus.filter { nal in
+                guard let first = nal.first else { return false }
+                return hevc ? !(H265.vps ... H265.pps).contains(H265.type(first)) : ![7, 8].contains(first & 0x1F)
+            }
             if let fragment = writer?.addVideo(time: time - (start ?? time), nalus: pictures, isKeyframe: keyframe) {
                 try? handle?.write(contentsOf: fragment)
             }

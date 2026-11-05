@@ -4,6 +4,7 @@
 // picture is decoded, as each needs the ones before it; after a damaged one, nothing until the next keyframe.
 import CoreMedia
 import Foundation
+import Ingest
 import NVRCore
 import VideoToolbox
 
@@ -13,7 +14,7 @@ final class FrameDecoder {
     let largest: (width: Int, height: Int)?
     private var session: VTDecompressionSession?
     private var format: CMVideoFormatDescription?
-    private var parameters: (sps: [UInt8], pps: [UInt8])?
+    private var parameters: ParameterSets?
     private var waitingForKeyframe = true
 
     init(pixelFormat: OSType = kCVPixelFormatType_32BGRA, largest: (width: Int, height: Int)? = nil) {
@@ -39,23 +40,28 @@ final class FrameDecoder {
         waitingForKeyframe = true
     }
 
-    /// The picture in these NAL units (one access unit), or nil (not decodable yet, or damaged).
+    /// An H.264 picture (one access unit), or nil (not decodable yet, or damaged).
     func decode(_ nalus: [[UInt8]], keyframe: Bool, damaged: Bool, sps: [UInt8]?, pps: [UInt8]?) -> CVPixelBuffer? {
+        decode(nalus, keyframe: keyframe, damaged: damaged, sets: sps.flatMap { s in pps.map { ParameterSets(codec: .h264, sps: s, pps: $0) } })
+    }
+
+    /// The picture in these NAL units (one access unit, H.264 or H.265 as `sets` say), or nil (not decodable yet, or
+    /// damaged).
+    func decode(_ nalus: [[UInt8]], keyframe: Bool, damaged: Bool, sets: ParameterSets?) -> CVPixelBuffer? {
         if damaged {
             waitingForKeyframe = true
             return nil
         }
-        if keyframe, let sps, let pps, parameters.map({ $0.sps != sps || $0.pps != pps }) ?? true {
+        if keyframe, let sets, parameters != sets {
             close()
-            guard open(sps: sps, pps: pps) else { return nil }
+            guard open(sets) else { return nil }
         }
         if keyframe { waitingForKeyframe = false }
-        guard !waitingForKeyframe, let session, let format else { return nil }
+        guard !waitingForKeyframe, let session, let format, let codec = parameters?.codec else { return nil }
         let units = nalus.filter { nal in
             // The parameter sets went into the format.
             guard let first = nal.first else { return false }
-            let type = first & 0x1F
-            return type != 7 && type != 8
+            return codec == .h264 ? ![7, 8].contains(first & 0x1F) : !(H265.vps ... H265.pps).contains(H265.type(first))
         }
         guard let sample = Self.sample(units, format: format) else { return nil }
         final class Result: @unchecked Sendable { var buffer: CVPixelBuffer? }
@@ -71,16 +77,8 @@ final class FrameDecoder {
         return result.buffer
     }
 
-    private func open(sps: [UInt8], pps: [UInt8]) -> Bool {
-        var format: CMVideoFormatDescription?
-        sps.withUnsafeBufferPointer { s in
-            pps.withUnsafeBufferPointer { p in
-                _ = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: nil, parameterSetCount: 2, parameterSetPointers: [s.baseAddress!, p.baseAddress!],
-                    parameterSetSizes: [s.count, p.count], nalUnitHeaderLength: 4, formatDescriptionOut: &format)
-            }
-        }
-        guard let format else { return false }
+    private func open(_ sets: ParameterSets) -> Bool {
+        guard let format = sets.formatDescription() else { return false }
         var attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
                                          kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]]
         if let largest {
@@ -97,7 +95,7 @@ final class FrameDecoder {
         DecoderCount.opened()
         self.session = session
         self.format = format
-        parameters = (sps, pps)
+        parameters = sets
         return true
     }
 

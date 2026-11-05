@@ -21,6 +21,9 @@ struct NVRApp: App {
         }
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
+        // Opened at every launch, even if it was closed when Pond last quit (from the menu bar item); only at login does
+        // it stay closed (AppDelegate).
+        .defaultLaunchBehavior(.presented)
         .commands {
             // The standard Quit is disabled while a sheet is open; this one closes the sheet and quits.
             CommandGroup(replacing: .appTermination) {

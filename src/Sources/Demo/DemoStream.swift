@@ -20,7 +20,9 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
     let keyframeEvery: TimeInterval
     private let encoder: VTCompressionSession
     private var pool: CVPixelBufferPool?
-    private var packetizer: RTPPacketizer
+    private var packetizer: VideoPacketizer
+    /// What it sends: H.264, or H.265 for a camera set so.
+    let codec: VideoCodec
     private var pending: [InterleavedPacket] = []
     private var due = Date()
     private var lastKeyframe = Date.distantPast
@@ -71,32 +73,42 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
             audio = SDP("m=audio 0 RTP/AVP 97\r\na=rtpmap:97 MPEG4-GENERIC/16000/1\r\na=fmtp:97 streamtype=5;profile-level-id=15;mode=AAC-hbr;config=\(DemoSound.config);sizelength=13;indexlength=3;indexdeltalength=3\r\na=control:trackID=1\r\n").audio
             (audioStart, audioDue) = (first, first)
         }
+        codec = camera.h265 == true ? .h265 : .h264
         var session: VTCompressionSession?
         let specification = [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: true] as CFDictionary
-        guard VTCompressionSessionCreate(allocator: nil, width: Int32(size.width), height: Int32(size.height), codecType: kCMVideoCodecType_H264,
+        guard VTCompressionSessionCreate(allocator: nil, width: Int32(size.width), height: Int32(size.height),
+                                         codecType: codec == .h265 ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
                                          encoderSpecification: specification, imageBufferAttributes: nil, compressedDataAllocator: nil,
                                          outputCallback: nil, refcon: nil, compressionSessionOut: &session) == noErr, let session else {
-            throw .malformed("no H.264 encoder for \(size.width)×\(size.height)")
+            throw .malformed("no \(codec.name) encoder for \(size.width)×\(size.height)")
         }
         encoder = session
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: (replay == nil) as CFBoolean)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Main_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
+                             value: codec == .h265 ? kVTProfileLevel_HEVC_Main_AutoLevel : kVTProfileLevel_H264_Main_AutoLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: (keyframeEvery * 1.5) as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: (main ? 2_500_000 : 400_000) as CFNumber)
+        // (H.265 the same picture in about half the bits.)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate,
+                             value: ((main ? 2_500_000 : 400_000) / (codec == .h265 ? 2 : 1)) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        packetizer = RTPPacketizer(payloadType: 96, ssrc: .random(in: 1 ... .max), maxPayload: 1400)
+        packetizer = VideoPacketizer(codec, payloadType: 96, ssrc: .random(in: 1 ... .max), maxPayload: 1400)
         // The first picture encoded now, for the parameter sets the description carries.
         let attributes = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: size.width,
                           kCVPixelBufferHeightKey as String: size.height, kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary
         CVPixelBufferPoolCreate(nil, nil, attributes, &pool)
-        video = SDP("m=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1\r\na=control:trackID=0\r\n").video!
-        guard let encoded = encode(at: first, keyframe: true), let sps = encoded.sps, let pps = encoded.pps else {
+        video = SDP("m=video 0 RTP/AVP 96\r\na=rtpmap:96 \(codec.encoding)/90000\r\na=fmtp:96 packetization-mode=1\r\na=control:trackID=0\r\n").video!
+        guard let encoded = encode(at: first, keyframe: true), encoded.sets.count == (codec == .h265 ? 3 : 2) else {
             VTCompressionSessionInvalidate(session)
             throw .malformed("the demo camera's first picture couldn't be encoded")
         }
         var described = video
-        described.format["sprop-parameter-sets"] = Data(sps).base64EncodedString() + "," + Data(pps).base64EncodedString()
+        let b64 = encoded.sets.map { Data($0).base64EncodedString() }
+        if codec == .h265 {
+            (described.format["sprop-vps"], described.format["sprop-sps"], described.format["sprop-pps"]) = (b64[0], b64[1], b64[2])
+        } else {
+            described.format["sprop-parameter-sets"] = b64.joined(separator: ",")
+        }
         video = described
         queue(encoded.nalus, at: encoded.time)
         due = first.addingTimeInterval(1 / fps)
@@ -197,8 +209,8 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
 
     private struct Encoded {
         var nalus: [[UInt8]]
-        var sps: [UInt8]?
-        var pps: [UInt8]?
+        /// A keyframe's parameter sets (H.264's SPS and PPS; H.265's VPS, SPS and PPS), as they're sent before it.
+        var sets: [[UInt8]]
         var time: Date
     }
 
@@ -223,19 +235,20 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
         var nalus = Self.nalus(of: sample)
         var sets: [[UInt8]] = []
         if isKey, let format = CMSampleBufferGetFormatDescription(sample) {
-            for index in 0 ..< 2 {
+            for index in 0 ..< (codec == .h265 ? 3 : 2) {
                 var pointer: UnsafePointer<UInt8>?
                 var size = 0
-                if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index, parameterSetPointerOut: &pointer,
-                                                                      parameterSetSizeOut: &size, parameterSetCountOut: nil,
-                                                                      nalUnitHeaderLengthOut: nil) == noErr, let pointer {
-                    sets.append([UInt8](UnsafeBufferPointer(start: pointer, count: size)))
-                }
+                let status = codec == .h265
+                    ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(format, parameterSetIndex: index, parameterSetPointerOut: &pointer,
+                                                                         parameterSetSizeOut: &size, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
+                    : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index, parameterSetPointerOut: &pointer,
+                                                                         parameterSetSizeOut: &size, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil)
+                if status == noErr, let pointer { sets.append([UInt8](UnsafeBufferPointer(start: pointer, count: size))) }
             }
             nalus = sets + nalus
             lastKeyframe = t
         }
-        return Encoded(nalus: nalus, sps: sets.first, pps: sets.count > 1 ? sets[1] : nil, time: t)
+        return Encoded(nalus: nalus, sets: sets, time: t)
     }
 
     /// A sample's NAL units (4-byte lengths in, units out).

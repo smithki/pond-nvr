@@ -1,6 +1,6 @@
 # Cameras
 
-Pond records what a camera sends over RTSP, without re-encoding it, so a camera needs to send **H.264** (H.265 is not supported yet). Each camera has two streams: the **main stream** (full resolution) is recorded and used for large live tiles and HomeKit Secure Video; the **sub-stream** (smaller) is used for small tiles, snapshots, and the Home app's live view unless re-encoding is chosen.
+Pond records what a camera sends over RTSP, without re-encoding it: **H.264** or **H.265** (HEVC, which takes about half the room for the same picture). Each camera has two streams: the **main stream** (full resolution) is recorded and used for large live tiles and HomeKit Secure Video; the **sub-stream** (smaller) is used for small tiles, snapshots, and the Home app's live view unless re-encoding is chosen.
 
 ## By brand
 
@@ -33,7 +33,7 @@ It looks each time Pond opens, once a day while it stays open, and each time Add
 ## What every camera needs
 
 - **RTSP on**, with a username and password.
-- **H.264** on both streams.
+- **H.264 or H.265** on each stream. H.265 is recorded as it is; the Home app takes only H.264, so its live view and HomeKit Secure Video are re-encoded from an H.265 camera (on the Mac's video hardware). A camera that offers both is happiest on H.264 for the sub-stream.
 - **A keyframe every 2 seconds** or so (often called the I-frame or keyframe interval; set it to twice the frame rate). Live views start at a keyframe, recordings are cut at them, and HomeKit Secure Video wants one at the start of every fragment.
 
 `pond camera add` and `pond camera test` (or Add Camera and Check Connection in the app) log in, read both streams and watch the video for a few seconds, then say what they found and what to change:

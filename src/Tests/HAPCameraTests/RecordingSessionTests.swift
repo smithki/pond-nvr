@@ -1,6 +1,7 @@
 import Foundation
 @testable import HAP
 import Network
+import Ingest
 import Testing
 @testable import HAPCamera
 
@@ -103,7 +104,8 @@ import Testing
         func feed(_ i: Int) {
             let keyframe = units[i].nalus.first.map { $0[0] & 0x1F == 5 } ?? false
             let moved: Int64 = clockFrom.map { i >= $0 ? -13 * 3600 * 90000 : 0 } ?? 0
-            prebuffer.keep(.video(.init(nalus: units[i].nalus, keyframe: keyframe, sps: sps, pps: pps,
+            let sets = ParameterSets(codec: .h264, sps: sps, pps: pps)
+            prebuffer.keep(.video(.init(nalus: units[i].nalus, keyframe: keyframe, sets: sets,
                                         time: units[i].time + moved, wall: 1000 + Double(i) / 10)))
         }
         for i in 0 ..< 30 { feed(i) }   // 3 s kept before the hub asks

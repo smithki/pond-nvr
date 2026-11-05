@@ -26,7 +26,7 @@ final class StreamTap: @unchecked Sendable {
     /// Its slot taken by a camera following someone: it closes, and opens again when there's room.
     private var yielded = false
     let slots: TapSlots
-    /// Not H.264 (or it failed to open): not tried again.
+    /// Neither H.264 nor H.265 (or it failed to open): not tried again.
     private var unusable = false
 
     let budget: MediaBudget
@@ -58,7 +58,7 @@ final class StreamTap: @unchecked Sendable {
             let current = latest.flatMap { Date().timeIntervalSince($0.at) < Self.fresh ? $0.picture : nil }
             return (start, !running, current)
         }
-        // Not to run (stopped, or not H.264): its slot back.
+        // Not to run (stopped, or neither H.264 nor H.265): its slot back.
         if idle { slots.release(self) }
         if start {
             let thread = Thread { [self] in run() }
@@ -84,11 +84,11 @@ final class StreamTap: @unchecked Sendable {
         guard let source = try? StreamHub.shared.open(url: url, username: username, password: password, replay: true) else { return }
         CloserLook.Count.opened()
         defer { source.close() }
-        guard source.video.encoding.uppercased() == "H264" else {
+        guard VideoCodec(encoding: source.video.encoding) != nil else {
             lock.withLock { unusable = true }
             return
         }
-        var depacketizer = H264Depacketizer(spropParameterSets: source.video.format["sprop-parameter-sets"])
+        var depacketizer = VideoDepacketizer(video: source.video)
         // Its share of the media engine: none, or taken back for something that matters more, and it closes.
         let cost = MediaBudget.decode(sps: depacketizer.sps, fallback: (3840, 2160))
         guard case let .granted(grant) = budget.claim(.closerLook, cost: cost, label: url, onShed: { [weak self] shed in
@@ -107,7 +107,7 @@ final class StreamTap: @unchecked Sendable {
                 // (Each picture's leftovers let go with it, not kept by this thread's pool until the tap closes.)
                 autoreleasepool {
                     if let picture = decoder.decode(unit.nalus, keyframe: unit.isKeyframe, damaged: unit.damaged,
-                                                    sps: depacketizer.sps, pps: depacketizer.pps) {
+                                                    sets: depacketizer.parameterSets) {
                         lock.withLock { latest = (picture, Date()) }
                     }
                 }

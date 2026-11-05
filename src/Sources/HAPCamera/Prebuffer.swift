@@ -10,10 +10,13 @@ public final class Prebuffer: @unchecked Sendable {
     public struct Video: Sendable {
         public var nalus: [[UInt8]]
         public var keyframe: Bool
-        public var sps: [UInt8]
-        public var pps: [UInt8]
+        /// The stream's parameter sets (H.264's or H.265's) as they were for this frame.
+        public var sets: ParameterSets
         public var time: Int64
         public var wall: Double
+
+        public var sps: [UInt8] { sets.sps }
+        public var pps: [UInt8] { sets.pps }
     }
 
     /// An AAC frame: on the audio clock unwrapped (the sample rate), and its wall time.
@@ -122,7 +125,7 @@ public final class Prebuffer: @unchecked Sendable {
         guard let session = try? StreamHub.shared.open(url: source.url, username: source.username, password: source.password)
         else { return false }
         defer { session.close() }
-        var depacketizer = H264Depacketizer(spropParameterSets: session.video.format["sprop-parameter-sets"])
+        var depacketizer = VideoDepacketizer(video: session.video)
         let aac = session.audio.map { AACDepacketizer(format: $0.format) }
         lock.withLock { audioConfig = session.audio?.format["config"] }
         var videoClock = RTPClock(rate: session.video.clockRate > 0 ? session.video.clockRate : 90000)
@@ -143,9 +146,9 @@ public final class Prebuffer: @unchecked Sendable {
             case CameraSession.videoChannel:
                 guard let rtp = RTPPacket(packet.data) else { continue }
                 for unit in depacketizer.push(rtp) where !unit.damaged {
-                    guard let sps = depacketizer.sps, let pps = depacketizer.pps else { continue }
+                    guard let sets = depacketizer.parameterSets else { continue }
                     any = true
-                    keep(.video(Video(nalus: unit.nalus, keyframe: unit.isKeyframe, sps: sps, pps: pps,
+                    keep(.video(Video(nalus: unit.nalus, keyframe: unit.isKeyframe, sets: sets,
                                       time: videoRetimer.place(videoUnwrap.unwrap(unit.timestamp)),
                                       wall: videoClock.wallTime(unit.timestamp) ?? now)))
                 }

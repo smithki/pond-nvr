@@ -5,6 +5,8 @@ import Foundation
 public struct StreamInfo: Sendable, Equatable, Codable {
     public var videoCodec: String?
     public var sps: H264SPS?
+    /// An H.265 stream's profile, level and size, in words ("Main 5.1, 2560×1440"), from its sprop-sps.
+    public var h265: String?
     public var audio: AACConfig?
     public var audioCodec: String?
 
@@ -12,10 +14,14 @@ public struct StreamInfo: Sendable, Equatable, Codable {
         if let v = sdp.video {
             videoCodec = switch v.encoding.uppercased() {
             case "H264": "H.264"
-            case "H265": "H.265"
+            case "H265", "HEVC": "H.265"
             default: v.encoding
             }
             sps = v.format["sprop-parameter-sets"].flatMap(H264SPS.init(spropParameterSets:))
+            if VideoCodec(encoding: v.encoding) == .h265,
+               let info = H264Depacketizer.decodeSprop(v.format["sprop-sps"] ?? "").first.flatMap(H265SPS.init(nal:)) {
+                h265 = "\(info.profileName) \(info.levelName), \(info.width)×\(info.height)"
+            }
         }
         if let a = sdp.audio {
             audioCodec = a.encoding

@@ -7,6 +7,7 @@
 import CoreMedia
 import CoreVideo
 import Foundation
+import Ingest
 import NVRCore
 import VideoToolbox
 
@@ -54,7 +55,7 @@ public final class VideoTranscoder: @unchecked Sendable {
     private var target: Target
     private let output: @Sendable (Frame) -> Void
     private var decoder: VTDecompressionSession?
-    private var decoderSPS: [UInt8]?
+    private var decoderSets: ParameterSets?
     private var format: CMVideoFormatDescription?
     private var encoder: VTCompressionSession?
     private var encoderSize: (width: Int, height: Int)?
@@ -115,9 +116,14 @@ public final class VideoTranscoder: @unchecked Sendable {
     /// A camera frame (an access unit), decoded; encoded too unless `encode` is false (a replayed frame from
     /// before the viewer joined, decoded only so the frames after it can be).
     public func push(_ nalus: [[UInt8]], sps: [UInt8], pps: [UInt8], time: Int64, encode: Bool) {
+        push(nalus, sets: ParameterSets(codec: .h264, sps: sps, pps: pps), time: time, encode: encode)
+    }
+
+    /// The same, for a camera's frame in either codec (H.264 or H.265, as `sets` say): what's made is H.264.
+    public func push(_ nalus: [[UInt8]], sets: ParameterSets, time: Int64, encode: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        if decoder == nil || sps != decoderSPS { makeDecoder(sps: sps, pps: pps) }
+        if decoder == nil || sets != decoderSets { makeDecoder(sets) }
         guard let decoder, let format, let sample = Self.sample(nalus, format: format, time: time) else { return }
         if encode { toEncode.insert(time) }
         // Decoded on this thread before the call returns. Live cameras send frames in order (no B-frames);
@@ -192,21 +198,13 @@ public final class VideoTranscoder: @unchecked Sendable {
 
     // MARK: - Decoding
 
-    private func makeDecoder(sps: [UInt8], pps: [UInt8]) {
+    private func makeDecoder(_ sets: ParameterSets) {
         if let decoder {
             VTDecompressionSessionInvalidate(decoder)
             DecoderCount.closed()
         }
         decoder = nil
-        var made: CMVideoFormatDescription?
-        sps.withUnsafeBufferPointer { s in
-            pps.withUnsafeBufferPointer { p in
-                _ = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: nil, parameterSetCount: 2, parameterSetPointers: [s.baseAddress!, p.baseAddress!],
-                    parameterSetSizes: [s.count, p.count], nalUnitHeaderLength: 4, formatDescriptionOut: &made)
-            }
-        }
-        guard let made else { return }
+        guard let made = sets.formatDescription() else { return }
         // Decoded at the size it's encoded at (scaled by the decoder as it decodes: a 4K camera's pictures are
         // never made at 4K only to be made smaller). A later change of size is scaled after (see `scale`).
         let camera = CMVideoFormatDescriptionGetDimensions(made)
@@ -221,7 +219,7 @@ public final class VideoTranscoder: @unchecked Sendable {
         DecoderCount.opened()
         decoder = session
         format = made
-        decoderSPS = sps
+        decoderSets = sets
         forceKeyframe = true
     }
 

@@ -8,13 +8,39 @@ public struct VideoTrack: Sendable, Equatable {
     public var pps: [UInt8]
     public var width: Int
     public var height: Int
+    /// H.265's: its VPS, and what its `hvcC` says of the SPS. Nil: H.264.
+    public var hevc: HEVC?
     public static let timescale: UInt32 = 90000
 
-    public init(sps: [UInt8], pps: [UInt8], width: Int, height: Int) {
+    public init(sps: [UInt8], pps: [UInt8], width: Int, height: Int, hevc: HEVC? = nil) {
         self.sps = sps
         self.pps = pps
         self.width = width
         self.height = height
+        self.hevc = hevc
+    }
+
+    /// An H.265 track's VPS, and from its SPS: general_profile_tier_level's twelve bytes, chroma format, bit depths and
+    /// temporal layers, as `hvcC` carries them.
+    public struct HEVC: Sendable, Equatable {
+        public var vps: [UInt8]
+        public var profileTierLevel: [UInt8]
+        public var chromaFormat: Int
+        public var bitDepthLuma: Int
+        public var bitDepthChroma: Int
+        public var temporalLayers: Int
+        public var temporalIDNested: Bool
+
+        public init(vps: [UInt8], profileTierLevel: [UInt8], chromaFormat: Int, bitDepthLuma: Int, bitDepthChroma: Int,
+                    temporalLayers: Int, temporalIDNested: Bool) {
+            self.vps = vps
+            self.profileTierLevel = profileTierLevel
+            self.chromaFormat = chromaFormat
+            self.bitDepthLuma = bitDepthLuma
+            self.bitDepthChroma = bitDepthChroma
+            self.temporalLayers = temporalLayers
+            self.temporalIDNested = temporalIDNested
+        }
     }
 }
 
@@ -68,7 +94,7 @@ public enum MP4 {
     // MARK: - Init segment
 
     public static func initSegment(video: VideoTrack, audio: AudioTrack?) -> [UInt8] {
-        let ftyp = box("ftyp", Array("isom".utf8), u32(0x200), Array("isomiso6iso2avc1mp41".utf8))
+        let ftyp = box("ftyp", Array("isom".utf8), u32(0x200), Array("isomiso6iso2\(video.hevc == nil ? "avc1" : "hvc1")mp41".utf8))
         let nextTrack = audio == nil ? audioTrackID : audioTrackID + 1
         let mvhd = fullBox("mvhd", u32(0), u32(0), u32(1000), u32(0), u32(0x0001_0000), u16(0x0100), zeros(10),
                            matrix, zeros(24), u32(nextTrack))
@@ -100,17 +126,39 @@ public enum MP4 {
     }
 
     static func videoTrak(_ v: VideoTrack) -> [UInt8] {
-        var avcC: [UInt8] = [1, v.sps[1], v.sps[2], v.sps[3], 0xFF, 0xE1] + u16(UInt16(v.sps.count)) + v.sps
-            + [1] + u16(UInt16(v.pps.count)) + v.pps
-        if [100, 110, 122, 144].contains(v.sps[1]) {
-            avcC += [UInt8(0xFC | 1), 0xF8, 0xF8, 0]   // 4:2:0, 8-bit, no SPS extensions
+        let config: [UInt8]
+        if let hevc = v.hevc {
+            config = box("hvcC", hvcC(v, hevc))
+        } else {
+            var avcC: [UInt8] = [1, v.sps[1], v.sps[2], v.sps[3], 0xFF, 0xE1] + u16(UInt16(v.sps.count)) + v.sps
+                + [1] + u16(UInt16(v.pps.count)) + v.pps
+            if [100, 110, 122, 144].contains(v.sps[1]) {
+                avcC += [UInt8(0xFC | 1), 0xF8, 0xF8, 0]   // 4:2:0, 8-bit, no SPS extensions
+            }
+            config = box("avcC", avcC)
         }
-        let avc1 = box("avc1", zeros(6), u16(1), zeros(16), u16(UInt16(v.width)), u16(UInt16(v.height)),
-                       u32(0x0048_0000), u32(0x0048_0000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xFFFF),
-                       box("avcC", avcC))
+        // (hvc1: the parameter sets only in the sample entry, as the pictures have them taken out; what QuickTime plays.)
+        let entry = box(v.hevc == nil ? "avc1" : "hvc1", zeros(6), u16(1), zeros(16), u16(UInt16(v.width)), u16(UInt16(v.height)),
+                        u32(0x0048_0000), u32(0x0048_0000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xFFFF), config)
         return box("trak", tkhd(videoTrackID, volume: 0, width: v.width, height: v.height),
                    mdia(timescale: VideoTrack.timescale, handler: "vide", name: "Video", header: fullBox("vmhd", flags: 1, zeros(8)),
-                        sampleEntry: avc1))
+                        sampleEntry: entry))
+    }
+
+    /// The HEVCDecoderConfigurationRecord (ISO/IEC 14496-15 8.3.3): the profile, tier and level, the picture's format,
+    /// 4-byte NAL lengths, and the VPS, SPS and PPS an array each.
+    static func hvcC(_ v: VideoTrack, _ h: VideoTrack.HEVC) -> [UInt8] {
+        var out: [UInt8] = [1] + h.profileTierLevel
+        out += [0xF0, 0x00]                                       // min_spatial_segmentation_idc: none
+        out += [0xFC]                                             // parallelismType: unknown
+        out += [0xFC | UInt8(h.chromaFormat & 3)]
+        out += [0xF8 | UInt8((h.bitDepthLuma - 8) & 7), 0xF8 | UInt8((h.bitDepthChroma - 8) & 7)]
+        out += u16(0)                                             // avgFrameRate: unknown
+        out += [UInt8((h.temporalLayers & 7) << 3) | (h.temporalIDNested ? 0x04 : 0) | 3]
+        let arrays: [(UInt8, [UInt8])] = [(32, h.vps), (33, v.sps), (34, v.pps)]
+        out += [UInt8(arrays.count)]
+        for (type, nal) in arrays { out += [0x80 | type] + u16(1) + u16(UInt16(nal.count)) + nal }
+        return out
     }
 
     static func audioTrak(_ a: AudioTrack) -> [UInt8] {
