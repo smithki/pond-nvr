@@ -1,6 +1,6 @@
 // Applies the retention rules to what is on disk: lists the recorded files, asks Retention.plan what to
 // delete, deletes it, and removes folders left empty. Files still being written (.partial) are never
-// listed. Event clips (from phase 5) live under <events>/events/<camera>/<YYYY-MM-DD>/ and are listed the
+// listed. Event clips live under <events>/events/<camera>/<YYYY-MM-DD>/ and are listed the
 // same way.
 import Foundation
 import PondCore

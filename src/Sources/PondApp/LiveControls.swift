@@ -253,43 +253,6 @@ extension CGVector {
     func scaled(_ factor: Double) -> CGVector { CGVector(dx: dx * factor, dy: dy * factor) }
 }
 
-/// A row of glass chips that scrolls sideways, with a button to add one at the end.
-struct ChipStrip<Item: Identifiable, Menu: View>: View {
-    let items: [Item]
-    let title: (Item) -> String
-    let tap: (Item) -> Void
-    @ViewBuilder let menu: (Item) -> Menu
-    var add: (() -> Void)?
-    var addHelp = "Add"
-    var empty = "None yet"
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                if items.isEmpty {
-                    Text(empty).font(.callout).foregroundStyle(.secondary).padding(.horizontal, 4)
-                }
-                ForEach(items) { item in
-                    Button { tap(item) } label: {
-                        Text(title(item)).font(.callout.weight(.medium)).lineLimit(1).padding(.horizontal, 4)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-                    .contextMenu { menu(item) }
-                }
-                if let add {
-                    Button(action: add) { Image(systemName: "plus").font(.callout.weight(.semibold)) }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .help(addHelp)
-                }
-            }
-            .padding(.vertical, 4)
-        }
-        .scrollIndicators(.never)
-    }
-}
-
 /// A choice among a few, by icon, on glass: the chosen one lit. Glass buttons of the system's (glass painted
 /// onto a plain button takes the pointer apart from the button, which then never hears the click).
 struct IconChoice<Value: Hashable>: View {
@@ -1732,42 +1695,6 @@ struct AdjustEdge: View {
         naming?.cancel()
         label = false
         toggle()
-    }
-}
-
-/// A group's items, laid out the same way for every camera: its switches, choices and actions in a row (with
-/// `leading` first), then its sliders in columns.
-struct ItemsPanel<Leading: View, Trailing: View>: View {
-    let camera: Config.Camera
-    let items: [Config.Controls.Item]
-    @ViewBuilder var leading: Leading
-    /// After its switches, choices and actions (before the sliders).
-    @ViewBuilder var trailing: Trailing
-
-    var body: some View {
-        let sliders = items.filter { if case .slider = $0.kind { true } else { false } }
-        let others = items.filter { if case .slider = $0.kind { false } else { true } }
-        HStack(alignment: .center, spacing: 32) {
-            HStack(alignment: .top, spacing: 18) {
-                leading
-                ForEach(others) { item in ItemView(camera: camera, item: item) }
-                trailing
-            }
-            if !sliders.isEmpty {
-                // Two columns when there are more than two.
-                let columns = sliders.count > 2 ? 2 : 1
-                Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 12) {
-                    ForEach(Array(stride(from: 0, to: sliders.count, by: columns)), id: \.self) { start in
-                        GridRow {
-                            ForEach(sliders[start ..< min(start + columns, sliders.count)]) { item in
-                                SliderItem(camera: camera, item: item)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .fixedSize()
     }
 }
 

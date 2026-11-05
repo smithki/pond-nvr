@@ -1,8 +1,7 @@
-import Foundation
-
 // Unsigned big integers, just enough for SRP: bytes in and out, add, subtract, multiply, remainder and
 // modular exponentiation. Limbs are 64-bit, least significant first; schoolbook multiplication and Knuth's
 // long division (TAOCP vol. 2, 4.3.1, algorithm D). A 3072-bit exponentiation takes a few milliseconds.
+import Foundation
 
 public struct BigUInt: Equatable, Sendable, CustomStringConvertible {
     /// Least significant first, no zero limbs at the top (zero is []).

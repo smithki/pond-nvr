@@ -9,7 +9,7 @@
 // tries again until it is there.
 //
 // Sound comes over the same connection. Unmuted, an AVSampleBufferAudioRenderer joins the synchronizer and
-// gets the camera's AAC frames, decoded by the system, a little behind the picture (`audioDelay`) so they
+// gets the camera's AAC frames, decoded by the system, a little behind the picture (`AudioOutput.delay`) so they
 // play without gaps; muted, the renderer leaves and the frames are dropped unread.
 import AVFoundation
 import Control

@@ -4,8 +4,8 @@
 // a shared secret: each side makes its own short-lived username and password from it (coturn's REST credentials),
 // and signs its requests with TURN's long-term key, MD5(username:realm:password), as its RFC has it.
 //
-// What goes through: Send and Data indications (each packet wrapped with the peer's address); ChannelData, the
-// four-byte framing that suits video, can come with it (M4). Permissions are asked for each peer's address before
+// What goes through: Send and Data indications (each packet wrapped with the peer's address). (ChannelData, TURN's
+// four-byte framing, would save a little on video; not used.) Permissions are asked for each peer's address before
 // anything's sent it, and kept; the allocation is refreshed at half its lifetime, and let go on close. It runs on
 // its PathFinder's queue: nothing in it is locked.
 import Foundation

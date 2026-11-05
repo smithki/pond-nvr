@@ -1,12 +1,13 @@
 // Live video over a remote session. The Pond being reached sends a camera's stream as it sends one to the Home app:
-// LiveSession (the camera's H.264 as it arrives, or re-encoded and steered by the viewer's reports; RTP, SRTP), its
+// LiveSession (the camera's own video as it arrives, H.264 or H.265, or re-encoded and steered by the viewer's reports; RTP, SRTP), its
 // packets on the session's path instead of a UDP socket of their own, keyed from the session (SessionKeys: the side
 // being reached's video key, both ways, as HomeKit's streams use one key). The viewer decrypts what arrives, puts the
 // pictures back together, and sends a receiver report twice a second: they keep the stream going (without any for
 // 30 s, it's stopped) and say how much was lost (re-encoding then sends less).
 //
-// Asked for over the control channel: `live.start` (a LiveRequest; answered with a LiveAnswer), `live.stop`. One
-// stream a session at a time, for now. The camera's own stream is passed through as it arrives; a viewer on a weak
+// Asked for over the control channel: `live.start` (a LiveRequest; answered with a LiveAnswer), `live.stop` (one
+// stream, by its SSRC, or all). A session carries as many streams as its viewer asks for (one per camera it shows),
+// told apart by their SSRCs. The camera's own stream is passed through as it arrives; a viewer on a weak
 // link can ask for it re-encoded to a size and bitrate of its own (Pond's video hardware), which its reports then
 // steer (RateControl), as for the Home app on cellular.
 import Foundation

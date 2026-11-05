@@ -1,3 +1,5 @@
+// Settings › Recorder: the background recorder (the login service running `pond run`), started, restarted or
+// removed; how full the Mac's media engine is; and the recorder's log.
 import Control
 import Ingest
 import SwiftUI

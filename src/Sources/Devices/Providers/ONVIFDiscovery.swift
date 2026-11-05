@@ -155,14 +155,9 @@ public enum ONVIFDiscovery {
         """
     }
 
-    /// What a probe asks for: video transmitters (cameras and encoders); or, for tests, the general ONVIF
-    /// device (POND_PROBE_TYPES=device) or anything (anyDevice).
+    /// What a probe asks for: video transmitters (cameras and encoders), or anything (anyDevice).
     static func types(_ anyDevice: Bool) -> String {
-        if anyDevice { return "" }
-        if ProcessInfo.processInfo.environment["POND_PROBE_TYPES"] == "device" {
-            return "<d:Types xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">tds:Device</d:Types>"
-        }
-        return "<d:Types>dn:NetworkVideoTransmitter</d:Types>"
+        anyDevice ? "" : "<d:Types>dn:NetworkVideoTransmitter</d:Types>"
     }
 
     /// The cameras in a ProbeMatches answer.

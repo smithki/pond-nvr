@@ -228,9 +228,6 @@ public final class LiveSession: @unchecked Sendable {
 
     var isStopped: Bool { stopFlag.withLock { stopped } }
 
-    /// The stream being sent now.
-    public var sourceURL: String { stopFlag.withLock { source.url } }
-
     /// Re-encode the stream for the viewer, from `target`; set before `start`. The viewer's reports then
     /// steer the rate (RateControl).
     public func reencode(to target: VideoTranscoder.Target) {
@@ -282,7 +279,6 @@ public final class LiveSession: @unchecked Sendable {
         retarget(changed)
     }
 
-    public var isReencoding: Bool { stopFlag.withLock { reencode != nil } }
     /// What the viewer last asked for, while re-encoding.
     public var reencodeTarget: VideoTranscoder.Target? { stopFlag.withLock { reencode } }
 

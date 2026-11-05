@@ -1,6 +1,7 @@
 // Reolink's own protocol, Baichuan (TCP 9000), which its apps use: for what its HTTP API doesn't do, privacy
-// mode first. A spike: connect, log in, and ask; following reolink_aio (MIT, by starkillerOG), the library Home
-// Assistant's Reolink integration uses (see NOTICE).
+// mode first. The client: connect, log in, and send commands (BaichuanSession keeps one lasting connection per
+// camera over it); following reolink_aio (MIT, by starkillerOG), the library Home Assistant's Reolink integration
+// uses (see NOTICE).
 //
 // A message: a header (little-endian), then its XML (an extension, then the body), encrypted:
 //   magic f0 de bc 0a | command (4) | body length (4) | channel (1) + message number (3) |

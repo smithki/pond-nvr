@@ -1,3 +1,5 @@
+// What `pond run` runs: the recorder alone here (the `pond` program puts in HomeKit, detection and the rest:
+// RecordingAndHomeKit), and tests a stand-in.
 import PondCore
 import Recorder
 

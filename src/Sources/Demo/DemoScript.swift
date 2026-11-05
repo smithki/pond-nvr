@@ -111,8 +111,6 @@ struct Figure: Sendable {
     var moving: Bool
     var leftward: Bool
     var hue: Double
-    /// A box left on the ground (no visitor).
-    var isBox: Bool { visitor == nil }
     /// Seconds into its visit (for walking legs, turning wheels).
     var phase: Double
     /// A courier still carrying the box.

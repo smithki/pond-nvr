@@ -1,3 +1,5 @@
+// Settings › Storage: where recordings and the index go, how long the drive holds them at the cameras' real
+// rates, and a checklist for the drive (not the startup disk, Spotlight off, a format that keeps a journal).
 import AppKit
 import PondCore
 import SwiftUI

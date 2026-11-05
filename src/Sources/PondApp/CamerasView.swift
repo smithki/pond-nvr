@@ -1,3 +1,6 @@
+// Settings › Cameras: every camera, in the order they're shown everywhere (dragged to reorder), each with its
+// state; a camera's own settings (its address and login, streams, HomeKit, recording, detection and zones, and
+// how Pond talks to it); and Add Camera, which finds cameras on the network, logs in, checks them and saves.
 import Control
 import Devices
 import PondCore

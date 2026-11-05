@@ -8,8 +8,8 @@
 // (new credentials and candidates, sent as `path.restart`, answered with `path.restarted`), the old path carrying
 // on until a new one is chosen; the side being reached asks it to (`path.nudge`).
 //
-// In M3 a session is the path alone: `connect` measures the round trip with a few pings over it and ends it. M4
-// keeps sessions open (`open`), for the encrypted session that carries video.
+// `open` keeps a session open, for the encrypted channel that carries requests and video; `connect` only finds a
+// path, measures its round trip with a few pings and ends it (`pond remote connect`).
 import CryptoKit
 import Foundation
 import Network
@@ -126,7 +126,7 @@ public final class PathSessions: @unchecked Sendable {
         /// Requests asked, waiting for their replies (by id).
         private var replies: [UInt64: OneShot<ChannelMessage?>] = [:]
         private var nextRequest: UInt64 = 1
-        /// Pings' answers (M3's round trip), by their number.
+        /// Pings' answers (`connect`'s round trip), by their number.
         private var pongs: [UInt8: Date] = [:]
         /// Video for this side (SRTP and SRTCP: a first byte from 128 to 191), once something's set to take it.
         public var media: (@Sendable ([UInt8]) -> Void)? {
