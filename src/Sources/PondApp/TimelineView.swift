@@ -1106,21 +1106,22 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let group = click && inLanes ? self.group(at: value.location, width: width, visible: visible) : nil
                 let clicked = click && inLanes && group == nil ? event(at: value.location, width: width, visible: visible) : nil
                 Task {
-                    // Several together: closer, to where they come apart (centred on them, the playhead there).
+                    // Several together: closer, to where they come apart, the playhead at the first one's start (as a
+                    // click on one puts it), the rest after it.
                     if let group, let first = group.events.first {
                         hovered = nil
                         let zoom = zoomApart(group.events, width: width)
                         // Already as close as it goes (events at the same moment: a press during someone's visit):
-                        // the most telling of them, played.
+                        // what leads them (as their chip and card are led), played.
                         if zoom == timeline.zoom {
-                            let lead = group.events.min { ($0.kind.prominence, $0.start) < ($1.kind.prominence, $1.start) }!
-                            await timeline.play(lead)
+                            await timeline.play(lead(of: group, width: width, visible: visible))
                             return
                         }
-                        let last = group.events.map(\.end).max() ?? first.end
-                        timeline.zoom = zoom
+                        // The playhead there first, then closer: moved after, it was measured against the closer view,
+                        // counted as a jump out of it, and the view cross-faded rather than gliding in.
                         await timeline.select(camera: first.camera)
-                        await timeline.seek(to: first.start.addingTimeInterval(last.timeIntervalSince(first.start) / 2))
+                        await timeline.seek(to: first.start.addingTimeInterval(-TimelineModel.preRoll))
+                        timeline.zoom = zoom
                         return
                     }
                     if let clicked {
@@ -1558,15 +1559,16 @@ struct TimelineLanes: View, @MainActor Animatable {
         return (hit.ids.compactMap { byID[$0] }.sorted { $0.start < $1.start }, hit.rect)
     }
 
-    /// The zoom at which these events come apart (each a few points from the next), and still all fit; the closest
-    /// zoom if none does.
+    /// The zoom at which these events come apart (each a few points from the next), and still all fit after the
+    /// first's start in the middle of the view (where the playhead's put); the closest zoom if none does.
     func zoomApart(_ events: [TimelineEvent], width: Double) -> TimelineModel.Zoom {
         let starts = events.map(\.start).sorted()
         let gaps = zip(starts, starts.dropFirst()).map { $1.timeIntervalSince($0) }.filter { $0 > 0 }
         let closest = gaps.min() ?? 60
         let span = (events.map(\.end).max() ?? starts.last!).timeIntervalSince(starts.first!)
         let closer = TimelineModel.Zoom.allCases.filter { $0.rawValue < timeline.zoom.rawValue }.sorted { $0.rawValue > $1.rawValue }
-        return closer.first { closest / $0.rawValue * width >= 8 && $0.rawValue >= span * 1.2 } ?? closer.last ?? timeline.zoom
+        let after = span + TimelineModel.preRoll
+        return closer.first { closest / $0.rawValue * width >= 8 && $0.rawValue / 2 >= after * 1.1 } ?? closer.last ?? timeline.zoom
     }
 
     /// Private stretches reaching out to the recording beside them, where it stopped a little before the change
