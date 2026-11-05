@@ -7,7 +7,7 @@ import Detection
 import Foundation
 import ImageIO
 import Ingest
-import NVRCore
+import PondCore
 import UniformTypeIdentifiers
 
 public final class CameraWatcher: @unchecked Sendable {

@@ -1,7 +1,7 @@
 // What a camera says it is (maker, model, serial number, firmware, doorbell or not), from whichever
 // provider recognises it first. Nil if none does: the camera still works, it just goes without these details.
 import Foundation
-import NVRCore
+import PondCore
 
 public enum DeviceReader {
     public static func read(host: String, username: String, password: String,

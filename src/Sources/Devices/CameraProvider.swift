@@ -7,7 +7,7 @@
 // Each provider is in Providers/ (Reolink.swift, ONVIF.swift); a new one (another make's API, a proprietary
 // protocol for one feature) is a file there and an entry in `CameraProviders.all`.
 import Foundation
-import NVRCore
+import PondCore
 
 public protocol CameraProvider: Sendable {
     /// Stored in `Config.Device.provider`: "reolink", "onvif".

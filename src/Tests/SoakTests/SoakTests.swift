@@ -18,7 +18,7 @@ import CoreVideo
 import Foundation
 import Testing
 @testable import HAPCamera
-import NVRCore
+import PondCore
 @testable import Watch
 
 @Suite(.serialized) struct SoakTests {

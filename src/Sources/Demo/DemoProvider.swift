@@ -3,7 +3,7 @@
 // change how it's drawn, a restart drops its streams for a while), and a doorbell's presses from the script.
 import Devices
 import Foundation
-import NVRCore
+import PondCore
 
 public struct DemoProvider: CameraProvider {
     public let id = Demo.scheme

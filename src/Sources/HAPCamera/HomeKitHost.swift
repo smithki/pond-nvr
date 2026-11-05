@@ -6,7 +6,7 @@ import Foundation
 import Synchronization
 import Devices
 import HAP
-import NVRCore
+import PondCore
 
 /// What a camera keeps in the Keychain for HomeKit.
 public struct HomeKitRecord: Codable, Sendable {

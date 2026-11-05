@@ -3,7 +3,7 @@
 // listed. Event clips (from phase 5) live under <events>/events/<camera>/<YYYY-MM-DD>/ and are listed the
 // same way.
 import Foundation
-import NVRCore
+import PondCore
 
 public struct SweepReport: Equatable, Sendable {
     public var deletedFiles = 0

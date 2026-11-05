@@ -5,7 +5,7 @@
 import Devices
 import Foundation
 import HAP
-import NVRCore
+import PondCore
 
 /// TLV items nested as camera settings use them: lists are kept apart by an empty item of type 0.
 enum CameraTLV {

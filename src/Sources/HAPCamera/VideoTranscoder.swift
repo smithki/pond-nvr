@@ -8,7 +8,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 import VideoToolbox
 
 public final class VideoTranscoder: @unchecked Sendable {

@@ -2,14 +2,14 @@
 // reachable, so it has to be running, with remote access on). `pair` shows a code and its QR code, for a device or
 // another Pond to pair with this one; `join` pairs this one with another, by the code it showed. `watch`, `cameras`,
 // `events`, `search`, `picture` and `clip` ask a paired Pond, over a session made for each (its remote API).
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import Demo
 import Devices
 import Foundation
 import HAPCamera
 import Ingest
-import NVRCore
-import NVRMac
+import PondCore
+import PondMac
 import Remote
 
 /// Remote access in the service, as its settings say: started, changed and stopped as they change (the service's

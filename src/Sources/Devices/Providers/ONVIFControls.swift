@@ -1,7 +1,7 @@
 // ONVIF's controls: PTZ (continuous moves and presets, on the main stream's profile) and night mode (the
 // imaging service's IR-cut filter). Talking back is in ONVIFTalk.swift.
 import Foundation
-import NVRCore
+import PondCore
 
 extension ONVIF {
     static let ptz = "http://www.onvif.org/ver20/ptz/wsdl"

@@ -5,7 +5,7 @@
 import Devices
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 import Understanding
 
 public final class RemoteViewing: @unchecked Sendable {

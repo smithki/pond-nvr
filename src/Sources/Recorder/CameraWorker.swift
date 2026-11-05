@@ -5,7 +5,7 @@
 // own privacy mode was on, it's waking (PrivacyState): tried again every 2 s, quietly, until its video flows.
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 
 public final class CameraWorker: @unchecked Sendable {
     public enum Status: Equatable, Sendable {

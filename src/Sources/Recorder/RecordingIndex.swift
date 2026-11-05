@@ -2,7 +2,7 @@
 // order, each with an end. A segment file is named by its first frame only, so its end is taken as the next
 // segment's start when that follows closely, or as one nominal segment length otherwise (a gap follows).
 import Foundation
-import NVRCore
+import PondCore
 
 public struct RecordedSpan: Equatable, Sendable {
     public var path: String

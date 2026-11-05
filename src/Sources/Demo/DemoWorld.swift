@@ -3,7 +3,7 @@
 // kept in the scenario's folder so they're as they were left when the demo opens again.
 import Detection
 import Foundation
-import NVRCore
+import PondCore
 
 public final class DemoWorld: @unchecked Sendable {
     /// This process's demo, once it's started (`DemoWorld.start`).

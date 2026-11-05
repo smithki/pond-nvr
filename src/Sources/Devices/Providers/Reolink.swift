@@ -3,7 +3,7 @@
 // answers on plain HTTP, tried second. Used for what the camera is (GetDevInfo) and, on doorbells, for
 // presses of the button (GetEvents).
 import Foundation
-import NVRCore
+import PondCore
 
 public final class ReolinkAPI: @unchecked Sendable {
     public enum Failure: Error, Equatable {

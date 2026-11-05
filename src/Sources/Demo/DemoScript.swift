@@ -4,7 +4,7 @@
 // scene draws and what detection is told it found: the drawing and the boxes agree by construction.
 import Detection
 import Foundation
-import NVRCore
+import PondCore
 
 /// What can come by.
 enum Visitor: String, CaseIterable, Sendable {

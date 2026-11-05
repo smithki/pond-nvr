@@ -2,7 +2,7 @@
 // when the camera has an audio output and its RTSP describes a track to send on.
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 
 final class ONVIFTalk: TalkControl {
     let access: CameraAccess

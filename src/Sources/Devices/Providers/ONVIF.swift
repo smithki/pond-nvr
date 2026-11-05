@@ -2,7 +2,7 @@
 // WS-Security username token: what a camera is, and its streams (ONVIFClient).
 import CryptoKit
 import Foundation
-import NVRCore
+import PondCore
 
 /// Any ONVIF camera: what it is, and its stream addresses; no doorbell button yet (ONVIF events would bring it).
 public struct ONVIFProvider: CameraProvider {

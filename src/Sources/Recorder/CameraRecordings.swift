@@ -1,7 +1,7 @@
 // A camera's recorded files: its continuous recording and its event clips, each in a folder of its own
 // under the storage folders. Removing a camera can delete them at once rather than leave them to retention.
 import Foundation
-import NVRCore
+import PondCore
 
 public enum CameraRecordings {
     /// The camera's folders: continuous recording, then event clips (when kept elsewhere, both).

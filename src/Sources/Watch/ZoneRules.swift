@@ -5,7 +5,7 @@
 // the whole picture counts.
 import Detection
 import Foundation
-import NVRCore
+import PondCore
 
 public struct ZoneRules: Sendable {
     public let zones: [Config.Zone]

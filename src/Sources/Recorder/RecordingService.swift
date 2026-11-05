@@ -2,7 +2,7 @@
 // signal (Ctrl-C, or launchd stopping the service) or an optional time limit. Cameras can be added, taken
 // away or changed while it runs (`add`, `remove`), and retention changed (`setConfig`), the others going on.
 import Foundation
-import NVRCore
+import PondCore
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)

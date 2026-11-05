@@ -2,7 +2,7 @@
 // where the login Keychain with the camera passwords is available. It starts at login, and launchd starts
 // it again if it exits.
 import Foundation
-import NVRCore
+import PondCore
 
 /// What `pond service` needs from launchd; tests replace it.
 public protocol Launchd: Sendable {

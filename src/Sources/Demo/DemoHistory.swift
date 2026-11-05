@@ -9,7 +9,7 @@ import Detection
 import Foundation
 import ImageIO
 import Ingest
-import NVRCore
+import PondCore
 import Recorder
 import UniformTypeIdentifiers
 import Watch

@@ -5,7 +5,7 @@
 // never needs to read a thing).
 import CryptoKit
 import Foundation
-import NVRCore
+import PondCore
 
 public struct RemoteIdentity: Sendable {
     public let signing: Curve25519.Signing.PrivateKey

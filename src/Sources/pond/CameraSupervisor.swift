@@ -5,13 +5,13 @@
 // or `pond service reload`), it reads the settings and the passwords again and starts, stops or starts again
 // only the parts whose settings changed, the other cameras going on. A change of storage can't be made so: the
 // service is restarted for it.
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import Devices
 import Foundation
 import HAPCamera
 import Ingest
-import NVRCore
-import NVRMac
+import PondCore
+import PondMac
 import Recorder
 import Watch
 

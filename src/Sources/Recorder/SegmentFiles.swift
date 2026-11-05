@@ -8,7 +8,7 @@
 // an unplugged drive or unmounted share means segments are dropped (and said so), not written to the boot
 // disk.
 import Foundation
-import NVRCore
+import PondCore
 
 public final class SegmentFiles {
     public enum State: Equatable, Sendable {

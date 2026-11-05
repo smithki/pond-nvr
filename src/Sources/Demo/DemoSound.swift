@@ -4,7 +4,7 @@
 // nearly silent. Encoded by AudioToolbox, fed as asked (each frame's samples handed over, then "no more for now").
 import AudioToolbox
 import Foundation
-import NVRCore
+import PondCore
 
 final class DemoSound {
     static let rate = 16000.0

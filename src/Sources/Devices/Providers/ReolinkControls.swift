@@ -2,7 +2,7 @@
 // presets) and day/night (the ISP's dayNight). What a camera can do is in GetAbility, asked once. Talking back
 // isn't in this API (Reolink's apps use its proprietary protocol for it), so that is left to ONVIF.
 import Foundation
-import NVRCore
+import PondCore
 
 /// What GetAbility says, as versions: 0 for a feature the camera hasn't.
 public struct ReolinkAbility: Sendable, Equatable {

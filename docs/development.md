@@ -50,16 +50,16 @@ The package is in `src/`; `swift build --package-path src` and Xcode (open `src/
 - One module per responsibility; the table is in [architecture.md](architecture.md).
 - Code that needs only Foundation stays free of Apple frameworks, so it is tested on Linux too. Modules that need Apple frameworks are added to `Package.swift` inside `#if os(macOS)`.
 - Each module has a test target, `src/Tests/<Module>Tests/`.
-- The app's views are in `NVRApp`; everything they change goes through `AppModel` (tested in `src/Tests/NVRAppTests/`).
-- `pond` commands live in `NVRCLI` (`CLI.swift`, `CameraCommands.swift`); `Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `src/Tests/NVRCLITests/Fakes.swift`.
+- The app's views are in `PondApp`; everything they change goes through `AppModel` (tested in `src/Tests/PondAppTests/`).
+- `pond` commands live in `PondCLI` (`CLI.swift`, `CameraCommands.swift`); `Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `src/Tests/PondCLITests/Fakes.swift`.
 - Code ported from HAP-NodeJS or HomeKitADK names its source file in a comment.
 
 ## Adding a setting
 
-1. The field in `Config` (`src/Sources/NVRCore/Config.swift`). A new optional field needs a default when it is missing, so older files still load.
+1. The field in `Config` (`src/Sources/PondCore/Config.swift`). A new optional field needs a default when it is missing, so older files still load.
 2. Its check in `Config.problems()`, as a sentence.
-3. A test in `src/Tests/NVRCoreTests/ConfigTests.swift`.
-4. A command to change it in `NVRCLI`, its line in `CLI.help`, and a test in `src/Tests/NVRCLITests/`.
+3. A test in `src/Tests/PondCoreTests/ConfigTests.swift`.
+4. A command to change it in `PondCLI`, its line in `CLI.help`, and a test in `src/Tests/PondCLITests/`.
 5. A row in [configuration.md](configuration.md) and a line in [CHANGELOG.md](../CHANGELOG.md).
 
 ## The app's conventions

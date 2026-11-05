@@ -5,7 +5,7 @@
 // With --camera ID, that camera's zones are applied as the service applies them: only people, vehicles, animals,
 // packages and items are listed, each with where it stands and whether it counts (its zones) or is ignored; and
 // as the service looks (motion first, and a closer look at what moves), `--closer` adds the closer looks.
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -13,7 +13,7 @@ import CoreML
 import Detection
 import Foundation
 import ImageIO
-import NVRCore
+import PondCore
 import UniformTypeIdentifiers
 import Watch
 

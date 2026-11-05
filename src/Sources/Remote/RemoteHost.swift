@@ -2,7 +2,7 @@
 // devices kept), and pairing with another Pond by its code. What arrives in its mailbox is opened here: requests to
 // pair from anyone with a good code, everything else only from those paired (paths to connect over: PathSessions).
 import Foundation
-import NVRCore
+import PondCore
 
 public final class RemoteHost: @unchecked Sendable {
     public let keys: RemoteKeys

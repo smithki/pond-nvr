@@ -16,7 +16,7 @@
 import Darwin
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 
 public final class VideoMemoryGuard: @unchecked Sendable {
     /// The decoder services' footprint (MB) at which the closer looks pause, and at which Pond stops: an eighth and a

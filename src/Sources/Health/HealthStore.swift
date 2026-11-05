@@ -2,7 +2,7 @@
 // incidents and five-minute samples per camera, a week of them. The service writes (it's HealthLog's sink); the
 // app reads, for the doctor. SQLite in WAL mode, so the app reads while the service writes.
 import Foundation
-import NVRCore
+import PondCore
 import SQLite3
 
 public final class HealthStore: HealthSink, @unchecked Sendable {

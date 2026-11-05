@@ -2,7 +2,7 @@
 // (brightness, contrast, saturation, sharpness, within the ranges the camera gives), the speaker's volume (its
 // audio output's level), the PTZ home position, preset tours, and relay outputs (a door strike, a gate).
 import Foundation
-import NVRCore
+import PondCore
 
 enum ONVIFItems {
     static let deviceIO = "http://www.onvif.org/ver10/deviceIO/wsdl"

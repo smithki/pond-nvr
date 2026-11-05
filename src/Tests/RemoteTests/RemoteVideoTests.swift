@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 import HAPCamera
 import Ingest
-import NVRCore
+import PondCore
 import Signal
 import Testing
 @testable import Remote

@@ -1,18 +1,18 @@
-// The `pond` command: the real terminal, Keychain and network, wired to the commands in NVRCLI.
+// The `pond` command: the real terminal, Keychain and network, wired to the commands in PondCLI.
 import Control
 import Foundation
 import Ingest
-import NVRCLI
-import NVRCore
+import PondCLI
+import PondCore
 import Recorder
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import Demo
 import Devices
 import HAP
 import Detection
 import Health
 import HAPCamera
-import NVRMac
+import PondMac
 import Remote
 import Watch
 #endif
@@ -66,7 +66,7 @@ if let i = args.firstIndex(of: "--config") {
     args.removeSubrange(i ... i + 1)
 }
 
-#if canImport(NVRMac)
+#if canImport(PondMac)
 // A demo's settings: its world (made-up cameras drawn and encoded here, their controls, what's found in them), and
 // its secrets and log in its own folder.
 let demoWorld = Demo.adopt(configPath: configPath).map { scenario in
@@ -92,7 +92,7 @@ let launchd: Launchd? = nil
 
 // The full path of this program, for the login service to run.
 let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
-#if canImport(NVRMac)
+#if canImport(PondMac)
 /// `pond run` (and so the login service) records and serves the cameras to HomeKit, over one connection per
 /// camera stream (`StreamHub`).
 /// What this Mac's app's live views decode (it says every few seconds), held in the media engine's budget as live
@@ -355,21 +355,6 @@ func printSetup(_ r: (camera: Config.Camera, record: HomeKitRecord)) {
     }
 }
 
-/// `pond migrate`: a setup from before the rename (nvr) carried over to Pond's names (see `Migration`).
-if args == ["migrate"] {
-    let migration = Migration(launchd: RealLaunchd(), keychain: { KeychainCredentialStore(service: $0) }) {
-        try ServiceControl(launchd: RealLaunchd()).install(program: executable, configPath: nil)
-        return executable
-    }
-    do throws(Migration.Failure) {
-        try migration.run { print($0) }
-        exit(0)
-    } catch {
-        FileHandle.standardError.write(Data("✗ \(error.description)\n".utf8))
-        exit(1)
-    }
-}
-
 /// `pond homekit`: the cameras as HomeKit accessories, in the foreground (for trying pairing; not while the
 /// login service runs, which serves them itself); `pond homekit code` prints the setup codes for the service's
 /// accessories; `pond homekit reset ID` forgets a camera's HomeKit identity and pairings, so it can be added
@@ -509,7 +494,7 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// HomeKit), or makes it so. Through the service, which applies it at once (and has the camera itself follow,
 /// where its provider can); without the service running, kept for when it starts.
 /// `pond detect …`: a detection model run over recordings (see DetectCommand).
-#if canImport(NVRMac)
+#if canImport(PondMac)
 if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 /// `pond describe [EVENT-ID | PICTURE …] [--last N]`: the sentence the Mac's own model writes for an event.
 if args.first == "describe" { exit(DescribeCommand.run(Array(args.dropFirst()), configPath: configPath)) }
@@ -646,7 +631,7 @@ if args == ["service", "reload"] {
     }
     if reply.restartNeeded == true {
         print("· \(reply.reloaded ?? "A change needs a restart"); restarting the service")
-        #if canImport(NVRMac)
+        #if canImport(PondMac)
         if let launchd { _ = try? launchd.kickstart(label: LaunchAgent.label) }
         #endif
         exit(0)
@@ -1226,12 +1211,12 @@ if args.first == "homekit" {
 }
 #endif
 
-#if canImport(NVRMac)
+#if canImport(PondMac)
 let service: ServiceRunning = RecordingAndHomeKit(statusPath: HomeKitStatus.path(nextTo: configPath), configPath: configPath)
 #else
 let service: ServiceRunning = RealService()
 #endif
-#if canImport(NVRMac)
+#if canImport(PondMac)
 /// A camera's stream addresses, asked of it: its make's known ones (Reolink's API recognising it), else ONVIF's.
 let findStreams: CLI.StreamFinding = { host, username, password in
     let semaphore = DispatchSemaphore(value: 0)

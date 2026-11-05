@@ -3,7 +3,7 @@
 // Understander has made of them). The service keeps what it takes ready (the words' model, the Mac's model warmed),
 // so a search isn't slowed by readying them, as an app's first one would be each time it opened.
 import Foundation
-import NVRCore
+import PondCore
 import Understanding
 
 public final class SearchService: @unchecked Sendable {

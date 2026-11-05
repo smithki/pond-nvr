@@ -4,7 +4,7 @@
 import Darwin
 import Foundation
 import Ingest
-import NVRCore
+import PondCore
 
 /// Where a live stream's packets go, and its viewer's reports come from: a UDP socket to a HomeKit controller, or
 /// a remote session's path (Remote).

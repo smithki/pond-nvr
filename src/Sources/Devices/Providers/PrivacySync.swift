@@ -7,7 +7,7 @@
 // Its mode on, the camera is dark: no video, and no HTTP API, so its settings wait (PrivacyState's pending); off,
 // it's waking (PrivacyState's waking) until its video flows again.
 import Foundation
-import NVRCore
+import PondCore
 
 public final class CameraPrivacySync: @unchecked Sendable {
     let privacy: PrivacyState

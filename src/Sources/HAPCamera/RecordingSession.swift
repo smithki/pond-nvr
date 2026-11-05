@@ -7,7 +7,7 @@
 import Foundation
 import HAP
 import Media
-import NVRCore
+import PondCore
 
 final class RecordingSession: @unchecked Sendable {
     let camera: String?

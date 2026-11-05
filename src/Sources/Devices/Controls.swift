@@ -6,7 +6,7 @@
 // one turns out not to work at all for this camera. Adding a way (another make's API, a proprietary protocol
 // for talking) is a provider that answers for the features it does.
 import Foundation
-import NVRCore
+import PondCore
 
 /// How to reach a camera: what every provider needs to log in.
 public struct CameraAccess: Hashable, Sendable {

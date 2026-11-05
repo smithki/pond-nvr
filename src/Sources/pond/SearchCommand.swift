@@ -2,10 +2,10 @@
 // last night", "a man in a red jacket", "packages this week"), best first, as the Events view finds them: how the
 // question was read (by the Mac's own model; --plain, by the plain rules), then the events, each with its sentence.
 // Asked of the service, which does the searching (it has to be running).
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import Devices
 import Foundation
-import NVRCore
+import PondCore
 import Understanding
 import Watch
 

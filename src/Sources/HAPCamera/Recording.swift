@@ -7,7 +7,7 @@ import Foundation
 import HAP
 import Ingest
 import Media
-import NVRCore
+import PondCore
 
 /// What the camera offers to record.
 public struct RecordingOptions: Sendable {

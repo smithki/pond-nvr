@@ -2,11 +2,11 @@
 // (or any picture), and how long it took: for trying what search will know of events. With no arguments, the last
 // three events; --last N, the last N. An event's picture is given with a close-up of what began it, and what the
 // detector found, as the service gives them.
-#if canImport(NVRMac)
+#if canImport(PondMac)
 import CoreGraphics
 import Foundation
 import ImageIO
-import NVRCore
+import PondCore
 import Understanding
 import Watch
 
