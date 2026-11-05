@@ -59,8 +59,10 @@ app: build
 	@# The icon's own mark, for the menu bar (cropped to it and drawn as a template image by the app, so it follows
 	@# the icon when that changes).
 	@cp app/AppIcon.icon/Assets/mark.svg "$(APP)/Contents/Resources/Mark.svg"
-	@xcrun actool app/AppIcon.icon --compile "$(APP)/Contents/Resources" --platform macosx --minimum-deployment-target 27.0 \
-	  --app-icon AppIcon --output-partial-info-plist "$(APP)/Contents/Resources/.icon-info.plist" \
+	@# (Every path whole: actool's helper can resolve a relative one against a folder of its own, and fail.)
+	@out="$$(cd "$(APP)/Contents/Resources" && pwd)" && \
+	  xcrun actool "$(CURDIR)/app/AppIcon.icon" --compile "$$out" --platform macosx --minimum-deployment-target 27.0 \
+	  --app-icon AppIcon --output-partial-info-plist "$$out/.icon-info.plist" \
 	  --output-format human-readable-text >/dev/null
 	@rm -f "$(APP)/Contents/Resources/.icon-info.plist"
 	@# The detection models built in (models/: a Core ML package and its manifest each), compiled now so they load

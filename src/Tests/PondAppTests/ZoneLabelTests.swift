@@ -106,14 +106,51 @@ import Watch
 
 @MainActor
 @Suite struct LongBarTests {
-    /// A car parked for hours with someone passing it a moment: the car's bar stays the car's colour (it took the
-    /// person's while they were in view), the person a chip of their own over it.
-    @Test func aLongBarKeepsItsOwnColourUnderWhatsShort() {
+    /// A car parked for hours with someone passing it a moment: one chip, both in it, led by the car (it took the
+    /// person's colour while they were in view, and lost it as they went out of it).
+    @Test func aLongMarkLeadsItsChip() {
         let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
             (.vehicle, CGRect(x: 0, y: 0, width: 600, height: 20), 1), (.person, CGRect(x: 40, y: 0, width: 3, height: 20), 1)]
         let clusters = TimelineLanes.clusters(marks, ids: ["car", "person"])
-        #expect(clusters.map(\.ids) == [["car"], ["person"]])
-        #expect(clusters[0].lead == .vehicle && clusters[1].lead == .person)
+        #expect(clusters.count == 1 && clusters[0].ids == ["car", "person"])
+        #expect(clusters[0].kinds.map(\.kind) == [.vehicle, .person])
+        // The car alone (the person out of view): the same colour.
+        #expect(TimelineLanes.clusters([marks[0]]).first?.lead == .vehicle)
+    }
+
+    /// Zoomed in, what passed a parked car is wide enough to tell apart: its own chips over the car's bar (a bird
+    /// and two other cars were lost in it), the car's bar first.
+    @Test func wideEnoughTheyreChipsOverTheBar() {
+        let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
+            (.vehicle, CGRect(x: 0, y: 0, width: 900, height: 20), 1),
+            (.vehicle, CGRect(x: 20, y: 0, width: 18, height: 20), 1),
+            (.animal, CGRect(x: 80, y: 0, width: 20, height: 20), 1)]
+        let clusters = TimelineLanes.clusters(marks, ids: ["parked", "passing", "bird"])
+        #expect(clusters.map(\.ids) == [["parked"], ["passing"], ["bird"]])
+        #expect(clusters.map(\.lead) == [.vehicle, .vehicle, .animal])
+    }
+
+    /// The morning's doorbell at 15 minutes: a parked car, a car passing it (long enough to be a bar of its own),
+    /// and a bird for a second; each its own, though the bird's a sliver; zoomed out, the bird's part of the car.
+    @Test func zoomedInEachIsItsOwn() {
+        let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
+            (.vehicle, CGRect(x: 0, y: 0, width: 1400, height: 20), 1),
+            (.vehicle, CGRect(x: 45, y: 0, width: 28, height: 20), 1),
+            (.animal, CGRect(x: 115, y: 0, width: 3, height: 20), 1)]
+        let ids = ["parked", "passing", "bird"]
+        #expect(TimelineLanes.clusters(marks, ids: ids, apart: true).map(\.ids) == [["parked"], ["passing"], ["bird"]])
+        // Over the parked car's bar, the others are set apart from it.
+        #expect(TimelineLanes.clusters(marks, ids: ids, apart: true).map(\.over) == [false, true, true])
+        #expect(TimelineLanes.clusters(marks, ids: ids).map(\.ids) == [["parked", "bird"], ["passing"]])
+    }
+
+    /// A small group zoomed in (someone, and a car by them for a moment): one chip, led by the longer, with the band.
+    @Test func aSmallGroupStaysOne() {
+        let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
+            (.person, CGRect(x: 100, y: 0, width: 65, height: 20), 1), (.vehicle, CGRect(x: 120, y: 0, width: 4, height: 20), 1)]
+        let clusters = TimelineLanes.clusters(marks, ids: ["person", "car"], apart: true)
+        #expect(clusters.count == 1 && clusters[0].ids == ["person", "car"])
+        #expect(clusters[0].kinds.map(\.kind) == [.person, .vehicle] && !clusters[0].over)
     }
 }
 

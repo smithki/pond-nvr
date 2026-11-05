@@ -214,7 +214,15 @@ struct TimelineView: View {
         .onChange(of: hovered) { _, now in
             dismissal?.cancel()
             if let now {
-                withAnimation(shown == nil ? .easeOut(duration: 0.12) : Self.slide) { shown = now }
+                // The same one, only pointed at elsewhere along it (a long one, following the pointer): at once, not
+                // sliding after it.
+                if let was = shown, was.event.id == now.event.id, was.group.map(\.id) == now.group.map(\.id) {
+                    var instant = Transaction(animation: nil)
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { shown = now }
+                } else {
+                    withAnimation(shown == nil ? .easeOut(duration: 0.12) : Self.slide) { shown = now }
+                }
             } else {
                 dismissal = Task {
                     try? await Task.sleep(for: Self.linger)
@@ -889,14 +897,15 @@ struct TimelineLanes: View, @MainActor Animatable {
                                         let origin = geo.frame(in: .named(TimelineView.space)).origin
                                         if let group = group(at: point, width: geo.size.width, visible: visible) {
                                             // Several too close to tell apart: all of them, in one card.
-                                            let lead = group.events.min { ($0.kind.prominence, $0.start) < ($1.kind.prominence, $1.start) }!
-                                            hovered = EventHover(event: lead, anchor: CGPoint(x: origin.x + group.rect.midX,
+                                            let lead = lead(of: group, width: geo.size.width, visible: visible)
+                                            hovered = EventHover(event: lead, anchor: CGPoint(x: origin.x + Self.anchorX(group.rect, pointer: point.x, width: geo.size.width),
                                                                                              y: origin.y + group.rect.minY),
                                                                  group: group.events)
                                         } else if let event = event(at: point, width: geo.size.width, visible: visible) {
                                             let mark = markRect(event, width: geo.size.width, visible: visible)
                                             hovered = EventHover(event: event,
-                                                                 anchor: CGPoint(x: origin.x + mark.midX, y: origin.y + mark.minY))
+                                                                 anchor: CGPoint(x: origin.x + Self.anchorX(mark, pointer: point.x, width: geo.size.width),
+                                                                                 y: origin.y + mark.minY))
                                         } else if let stretch = privateStretch(at: point, width: geo.size.width, visible: visible) {
                                             // Too narrow for its word: what it is, on hover.
                                             let lane = laneRect(cameras.firstIndex { $0.id == stretch.camera } ?? 0, width: geo.size.width)
@@ -1135,18 +1144,22 @@ struct TimelineLanes: View, @MainActor Animatable {
     }
 
     /// The shown event nearest a point in the lanes, within a few points, so the gaps between marks don't
-    /// count as leaving them.
+    /// count as leaving them; of those under it, the shortest (drawn over the others: a bird over a parked car's
+    /// bar is the bird).
     func event(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> TimelineEvent? {
         guard let lane = laneIndex(at: point.y) else { return nil }
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
-        let slack = 14 / width * length
+        let slack = 14.0
         let t = time(at: point.x, width: width, visible: visible)
+        // In points, from each one's mark (a short one's is wider than its time, three points at least).
         func distance(_ e: TimelineEvent) -> Double {
-            t < e.start ? e.start.timeIntervalSince(t) : t > e.end ? t.timeIntervalSince(e.end) : 0
+            let r = markRect(e, width: width, visible: visible)
+            return point.x < r.minX ? r.minX - point.x : point.x > r.maxX ? point.x - r.maxX : 0
         }
-        let near = timeline.index[cameras[lane].id]?.overlapping(t.addingTimeInterval(-slack) ... t.addingTimeInterval(slack)) ?? []
+        let reach = slack / width * length
+        let near = timeline.index[cameras[lane].id]?.overlapping(t.addingTimeInterval(-reach) ... t.addingTimeInterval(reach)) ?? []
         return near.filter { timeline.shownKinds.contains($0.kind) && distance($0) <= slack }
-            .min { distance($0) < distance($1) }
+            .min { (distance($0), $0.seconds) < (distance($1), $1.seconds) }
     }
 
     /// The private stretch under a point (within a few points of a narrow one), as a hover card's "event".
@@ -1423,38 +1436,112 @@ struct TimelineLanes: View, @MainActor Animatable {
         var weight: Double
         /// Its events, in time order.
         var ids: [String] = []
+        /// Short ones' chip drawn over a long one's bar (set apart from it).
+        var over = false
 
         var lead: TimelineEvent.Kind { kinds.first?.kind ?? .motion }
     }
 
-    /// Wider than this, a mark's a bar of its own: not joined with what touches it.
-    static let ownBar = 24.0
+    /// A mark wider than this is a long one: a bar of its own, in its own colour (see `clusters`).
+    static let longMark = 24.0
+    /// Short marks over a long one are a chip of their own over it when they're at least this wide together, or
+    /// when zoomed in this far (an hour or less in view); else they're taken into it (zoomed out, slivers too small
+    /// to tell, or to point at).
+    static let legibleChip = 16.0
+    static let apartWithin: TimeInterval = 3600
+    /// What's over a bar shorter than this stays part of it, at any zoom: a small group, a person and the car they
+    /// stood by, is one chip with the band along its foot (split, it was a crumb of a chip in a crumb of a bar).
+    static let splitsFrom = 120.0
 
-    /// What's drawn for a lane: its marks (each with how much it shows) joined where they touch; a long one (wider
-    /// than `ownBar`) apart, first, in its own colour, and what's short drawn over it. (Joined, a car parked for
-    /// two hours took the colour of someone who passed it for a moment, and lost it as they went out of view.)
-    static func clusters(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)], ids: [String] = []) -> [Cluster] {
-        let long = marks.indices.filter { marks[$0].rect.width > ownBar }.sorted { marks[$0].rect.minX < marks[$1].rect.minX }
-        let bars = long.map { i in
-            Cluster(rect: marks[i].rect, kinds: [(marks[i].kind, 1)], weight: marks[i].weight,
-                    ids: ids.indices.contains(i) ? [ids[i]] : [])
+    /// What's drawn for a lane: its marks (each with how much it shows) joined where they touch. A long mark (a car
+    /// parked for two hours) is a bar of its own, led by its own kind (led by the most telling, it took the colour
+    /// of someone who passed it for a moment, and lost it as they went out of view), first; short ones over it
+    /// are a chip of their own over it where there's room to tell them apart (zoomed in), else part of it. Short
+    /// ones elsewhere are chips as ever, led by their most telling kind.
+    /// `apart`: zoomed in (see `apartWithin`).
+    static func clusters(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)], ids: [String] = [],
+                         apart: Bool = false) -> [Cluster] {
+        typealias Run = (rect: CGRect, members: [Int])
+        func runs(_ indices: [Int]) -> [Run] {
+            var out: [Run] = []
+            for i in indices.sorted(by: { marks[$0].rect.minX < marks[$1].rect.minX }) {
+                if let last = out.last, marks[i].rect.minX <= last.rect.maxX + 1 {
+                    out[out.count - 1].rect = last.rect.union(marks[i].rect)
+                    out[out.count - 1].members.append(i)
+                } else {
+                    out.append((marks[i].rect, [i]))
+                }
+            }
+            return out
         }
-        var out: [(rect: CGRect, counts: [TimelineEvent.Kind: Int], weight: Double, ids: [String])] = []
-        for i in marks.indices.filter({ marks[$0].rect.width <= ownBar }).sorted(by: { marks[$0].rect.minX < marks[$1].rect.minX }) {
-            let mark = marks[i], id = ids.indices.contains(i) ? [ids[i]] : []
-            if let last = out.last, mark.rect.minX <= last.rect.maxX + 1 {
-                out[out.count - 1].rect = last.rect.union(mark.rect)
-                out[out.count - 1].counts[mark.kind, default: 0] += 1
-                out[out.count - 1].weight = max(last.weight, mark.weight)
-                out[out.count - 1].ids += id
+        // Each long one a bar of its own (one long within another, a car passing a parked one, is its own too),
+        // the longest first, under the others.
+        // (A long one over a bar too short to split is part of it.)
+        var bars: [Run] = []
+        for i in marks.indices.filter({ marks[$0].rect.width > longMark }).sorted(by: { marks[$0].rect.width > marks[$1].rect.width }) {
+            let rect = marks[i].rect
+            if let b = bars.indices.first(where: { bars[$0].rect.width < splitsFrom && bars[$0].rect.minX <= rect.maxX + 1 && rect.minX <= bars[$0].rect.maxX + 1 }) {
+                bars[b].rect = bars[b].rect.union(rect)
+                bars[b].members.append(i)
             } else {
-                out.append((mark.rect, [mark.kind: 1], mark.weight, id))
+                bars.append((rect, [i]))
             }
         }
-        return bars + out.map { c in
-            Cluster(rect: c.rect, kinds: c.counts.sorted { $0.key.prominence < $1.key.prominence }.map { ($0.key, $0.value) },
-                    weight: c.weight, ids: c.ids)
+        var chips: [Run] = []
+        for run in runs(marks.indices.filter { marks[$0].rect.width <= longMark }) {
+            // (Taken into the shortest bar it's over, the one most its own: zoomed out, if it's too small to tell;
+            // at any zoom, if the bar's too short to split.)
+            if let b = bars.indices.last(where: { bars[$0].rect.minX <= run.rect.maxX + 1 && run.rect.minX <= bars[$0].rect.maxX + 1 }),
+               (!apart && run.rect.width < legibleChip) || bars[b].rect.width < splitsFrom {
+                bars[b].rect = bars[b].rect.union(run.rect)
+                bars[b].members += run.members
+            } else {
+                chips.append(run)
+            }
         }
+        func cluster(_ run: Run, over: Bool = false) -> Cluster {
+            let members = run.members.sorted { marks[$0].rect.minX < marks[$1].rect.minX }
+            let counts = members.reduce(into: [TimelineEvent.Kind: Int]()) { $0[marks[$1].kind, default: 0] += 1 }
+            let longest = members.max { marks[$0].rect.width < marks[$1].rect.width }.map { marks[$0] }
+            let leads = longest.flatMap { $0.rect.width > longMark ? $0.kind : nil }
+            let kinds = counts.sorted { a, b in
+                if a.key == leads || b.key == leads { return a.key == leads }
+                return a.key.prominence < b.key.prominence
+            }
+            return Cluster(rect: run.rect, kinds: kinds.map { ($0.key, $0.value) },
+                           weight: members.map { marks[$0].weight }.max() ?? 1,
+                           ids: members.compactMap { ids.indices.contains($0) ? ids[$0] : nil }, over: over)
+        }
+        func overABar(_ run: Run) -> Bool {
+            bars.contains { $0.rect.minX <= run.rect.maxX && run.rect.minX <= $0.rect.maxX }
+        }
+        // (A long one over a longer one is set apart from it too.)
+        return bars.enumerated().map { i, bar in cluster(bar, over: bars[..<i].contains { $0.rect.minX <= bar.rect.maxX && bar.rect.minX <= $0.rect.maxX }) }
+            + chips.map { cluster($0, over: overABar($0)) }
+    }
+
+    /// The cut in a bar either side of a chip set over it.
+    static let cut = 2.0
+
+    /// Where a hover card points along a mark: its middle; or, the mark running past the lanes' edge (its middle
+    /// maybe out of view, or far from the pointer), the pointer, within what's in view of it.
+    static func anchorX(_ mark: CGRect, pointer: Double, width: Double) -> Double {
+        guard mark.minX < 0 || mark.maxX > width else { return mark.midX }
+        return min(max(pointer, max(mark.minX, 0)), min(mark.maxX, width))
+    }
+
+    /// Zoomed in far enough for what's over a long bar to be its own chip.
+    static func apart(_ visible: ClosedRange<Date>) -> Bool {
+        visible.upperBound.timeIntervalSince(visible.lowerBound) <= apartWithin * 1.01
+    }
+
+    /// What leads a chip of several, as its colour does: a long one that's most of it, else the most telling.
+    func lead(of group: (events: [TimelineEvent], rect: CGRect), width: Double, visible: ClosedRange<Date>) -> TimelineEvent {
+        if let longest = group.events.max(by: { $0.seconds < $1.seconds }) {
+            let w = markRect(longest, width: width, visible: visible).width
+            if w > Self.longMark, w >= group.rect.width / 2 { return longest }
+        }
+        return group.events.min { ($0.kind.prominence, $0.start) < ($1.kind.prominence, $1.start) }!
     }
 
     /// The chip of several events under a point (within a few points), with its events in time order; nil for a
@@ -1465,7 +1552,7 @@ struct TimelineLanes: View, @MainActor Animatable {
         guard let nearest = event(at: point, width: width, visible: visible) else { return nil }
         let shown = (timeline.index[nearest.camera]?.overlapping(visible) ?? []).filter { timeline.shownKinds.contains($0.kind) }
         let clusters = Self.clusters(shown.map { (kind: $0.kind, rect: markRect($0, width: width, visible: visible), weight: 1.0) },
-                                     ids: shown.map(\.id))
+                                     ids: shown.map(\.id), apart: Self.apart(visible))
         guard let hit = clusters.first(where: { $0.ids.contains(nearest.id) }), hit.ids.count > 1 else { return nil }
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return (hit.ids.compactMap { byID[$0] }.sorted { $0.start < $1.start }, hit.rect)
@@ -1614,9 +1701,6 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let shape = Path(roundedRect: bar, cornerRadius: min(6, bar.width / 2))
                 context.fill(shape, with: .style(.background))
                 context.fill(shape, with: .color(.indigo.opacity(selected ? 0.3 : 0.2)))
-                if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
-                    context.stroke(Path(roundedRect: Self.outline(bar, in: size), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
-                }
                 // The stripes keep to the time axis, so they don't slide as the view pans.
                 var hatch = Path()
                 let origin = x(timeline.day, width: size.width, visible: visible)
@@ -1638,17 +1722,20 @@ struct TimelineLanes: View, @MainActor Animatable {
                     context.fill(Path(roundedRect: plate, cornerRadius: 4), with: .style(.background.opacity(0.85)))
                     context.draw(label, at: CGPoint(x: plate.midX, y: plate.midY))
                 }
+                // Hovered: its outline over all of it (drawn first, the stripes crossed it where it's kept inside the
+                // lanes' edge).
+                if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
+                    context.stroke(Path(roundedRect: Self.outline(bar, in: size), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
+                }
             }
             // The hovered one last, on top of any it overlaps, so its outline is whole.
             // Those in view (found in the camera's index, not by looking at all), shown or fading with their filter;
             // marks of a kind within a point of each other drawn as one (zoomed out, a busy day is a few hundred
             // shapes a lane at most, however many events), the hovered one on its own, on top.
             let marks = (timeline.index[camera.id]?.overlapping(visible) ?? []).filter { visibility($0.kind, at: frame) > 0 }
-            let hovered = marks.first { $0.id == highlighted }
-            let drawn = marks.filter { $0.id != highlighted }
-            let clusters = Self.clusters(drawn.map {
+            let clusters = Self.clusters(marks.map {
                 (kind: $0.kind, rect: markRect($0, width: size.width, visible: visible), weight: visibility($0.kind, at: frame))
-            }, ids: drawn.map(\.id))
+            }, ids: marks.map(\.id), apart: Self.apart(visible))
             var symbols: [TimelineEvent.Kind: GraphicsContext.ResolvedText] = [:]
             func symbol(_ kind: TimelineEvent.Kind, height: Double) -> GraphicsContext.ResolvedText {
                 // As text, so the symbol keeps its own shape (a walking figure is taller than wide); each kind's made
@@ -1659,14 +1746,26 @@ struct TimelineLanes: View, @MainActor Animatable {
                 symbols[kind] = made
                 return made
             }
-            let hoveredCluster = hovered.map { Cluster(rect: markRect($0, width: size.width, visible: visible),
-                                                         kinds: [($0.kind, 1)], weight: visibility($0.kind, at: frame)) }
-            for (cluster, isHovered) in clusters.map({ ($0, !highlightedGroup.isEmpty && !highlightedGroup.isDisjoint(with: $0.ids)) })
-                + (hoveredCluster.map { [($0, true)] } ?? []) {
+            // The hovered one drawn where it is among the others (drawn last, a parked car's bar hid what was over
+            // it), its outline last of all.
+            var outlines: [(rect: CGRect, weight: Double)] = []
+            for (index, cluster) in clusters.enumerated() {
+                let isHovered = highlighted.map { cluster.ids.contains($0) } == true
+                    || (!highlightedGroup.isEmpty && !highlightedGroup.isDisjoint(with: cluster.ids))
                 let mark = cluster.rect
                 let lead = cluster.lead
                 var context = context
                 context.opacity = cluster.weight
+                // Under chips set over it: cut round each, following its corners, the lane showing through an even
+                // gap, so which rounded ends are the chip's and which the bar's is plain.
+                var cuts = Path()
+                for other in clusters[(index + 1)...] where other.over
+                    && other.rect.minX <= mark.maxX && mark.minX <= other.rect.maxX {
+                    let radius = min(4, other.rect.width / 2)
+                    cuts.addRoundedRect(in: other.rect.insetBy(dx: -Self.cut, dy: -Self.cut),
+                                        cornerSize: CGSize(width: radius + Self.cut, height: radius + Self.cut), style: .continuous)
+                }
+                if !cuts.isEmpty { context.clip(to: cuts, options: .inverse) }
                 let shape = Path(roundedRect: mark, cornerRadius: min(4, mark.width / 2))
                 // One chip: in the colour of what leads it, a thin band along its foot for the others with it (in
                 // proportion), and their symbols, the leading one first, where there's room.
@@ -1683,10 +1782,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                         }
                     }
                 }
-                if isHovered {
-                    context.stroke(Path(roundedRect: Self.outline(mark, in: size), cornerRadius: 5),
-                                   with: .color(.primary), lineWidth: 1.5)
-                }
+                if isHovered { outlines.append((mark, cluster.weight)) }
                 if mark.width > 22, mark.height >= 10 {
                     var sx = mark.minX + 4
                     for (kind, _) in cluster.kinds {
@@ -1697,6 +1793,11 @@ struct TimelineLanes: View, @MainActor Animatable {
                         sx += box.width + 4
                     }
                 }
+            }
+            for (rect, weight) in outlines {
+                var context = context
+                context.opacity = weight
+                context.stroke(Path(roundedRect: Self.outline(rect, in: size), cornerRadius: 5), with: .color(.primary), lineWidth: 1.5)
             }
         }
 
