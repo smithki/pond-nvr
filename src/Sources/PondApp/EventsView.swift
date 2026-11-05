@@ -354,11 +354,12 @@ struct EventsView: View {
                 // Their events found that aren't in the grid yet (older than the newest it reads): added, so they show.
                 let known = Set(events.map(\.id))
                 let added = others.events.filter { !known.contains($0.id) && !deleted.contains($0.id) }
-                withAnimation(.snappy(duration: 0.3)) {
+                let answer = EventSearcher.merged(result, others.results, includeMine: shown.includes(nil))
+                // The grid crossfades to the answer, at its top.
+                swap(top: true) {
                     if !added.isEmpty { events = (events + added).sorted { $0.start > $1.start } }
-                    search = EventSearcher.merged(result, others.results, includeMine: shown.includes(nil))
+                    search = answer
                 }
-                request = GridScroll(kind: .top, animated: false)
             case let .failure(problem):
                 searchProblem = problem
             }
@@ -370,7 +371,17 @@ struct EventsView: View {
         searching = false
         slow = false
         searchProblem = nil
-        withAnimation(.snappy(duration: 0.3)) { search = nil }
+        // Back to them all, the card at the top still there.
+        if search != nil { swap(top: false) { search = nil } }
+    }
+
+    /// The events shown changed wholesale: by the grid, faded out and in, if it's shown (else at once).
+    func swap(top: Bool, _ change: @escaping @MainActor () -> Void) {
+        if loaded, !shown.isEmpty {
+            request = GridScroll(kind: .swap(top: top), change: change)
+        } else {
+            withAnimation(.snappy(duration: 0.3)) { change() }
+        }
     }
 
     /// A part of how the question was read taken off it; the rest answered again (not read again).
@@ -483,6 +494,10 @@ struct EventsView: View {
     var grid: some View {
         // (Over the cards, the panel doesn't narrow them.)
         let open = selected != nil && !panelCovers
+        // Each camera named once here, not as each card's made, frame after frame (each time asking for the list of
+        // cameras anew).
+        let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
+        let names: (String) -> String = { named[$0] ?? name($0) }
         return GeometryReader { geo in
             EventGrid(sections: days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) },
                          events: Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
@@ -490,7 +505,7 @@ struct EventsView: View {
                          columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
                          panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh, request: $request,
-                         name: name, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
+                         name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
                          onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },

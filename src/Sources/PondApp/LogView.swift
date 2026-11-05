@@ -76,6 +76,8 @@ struct LogSection: View {
     let log: ServiceLog
     /// How tall the lines are: what the tab has left, so the page itself never scrolls.
     var height = 300.0
+    /// Where the lines end, told to the page (FillsRoom), if it's sized to its room.
+    var room: Binding<PageRoom>?
     /// The source shown; empty: all of them.
     @State private var source = ""
     @State private var kind = LogKindFilter.events
@@ -166,6 +168,7 @@ struct LogSection: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
+        .modifier(EndsRoom(room: room))
         .listRowInsets(EdgeInsets())
     }
 
@@ -411,3 +414,12 @@ final class LogTextView: NSTextView {
     override var textContainerOrigin: NSPoint { NSPoint(x: 4, y: LogText.top) }
 }
 
+
+/// Tells a page sized to its room where its list ends (when there's a page to tell).
+struct EndsRoom: ViewModifier {
+    let room: Binding<PageRoom>?
+
+    func body(content: Content) -> some View {
+        if let room { content.endsPageRoom(room) } else { content }
+    }
+}

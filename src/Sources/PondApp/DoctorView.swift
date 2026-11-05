@@ -10,28 +10,14 @@ import SwiftUI
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
     @State private var everything = false
-    /// The list of what happened takes the room the page leaves, so a camera's page fits without scrolling
-    /// (only the list scrolls): from where it starts to the tab's bottom, less the form's margin. The page
-    /// doesn't scroll while it fits, so where the list starts stays put (scrolled, it moved, the list grew, and
-    /// the page scrolled on and on); with too many findings for even a short list, the page scrolls instead.
-    @State private var tabHeight = 560.0
-    @State private var listTop: Double?
-    /// The page as last measured overflowing (what makes its height: camera, tab, findings, a check): while it
-    /// is the same, where the list starts isn't measured again, as scrolling moves it (the list then grew with
-    /// the scroll, and the page scrolled on).
-    @State private var overflowing: String?
-    /// The form's inset at its sides (the list spans its card, so its left edge is the card's): the same is kept
-    /// below the last card, at the window's bottom edge.
-    @State private var sideInset = 20.0
+    /// The list of what happened takes the room the page leaves, so a camera's page fits without scrolling (only the
+    /// list scrolls); with too many findings for even a short list, the page scrolls instead (FillsRoom).
+    @State private var listHeight = 200.0
+    @State private var room = PageRoom()
+    /// Ignored findings shown: they're folded away under the others until asked for.
+    @State private var showIgnored = false
 
     static let shortestList = 96.0
-
-    /// From the list's top to the tab's bottom, less the side inset (its card then sits as far from the bottom
-    /// edge as from the sides; measured on screen to the point).
-    var room: Double { tabHeight - (listTop ?? tabHeight) - sideInset }
-    var listHeight: Double { max(Self.shortestList, room) }
-    /// It fits: the page holds still.
-    var fits: Bool { room >= Self.shortestList }
 
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
     var doctor: CameraDoctor { model.doctor }
@@ -51,9 +37,7 @@ struct DoctorView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollDisabled(model.doctorCamera != nil && fits)
-        .coordinateSpace(.named(Self.space))
-        .onGeometryChange(for: Double.self) { $0.size.height } action: { tabHeight = $0 }
+        .fillsRoom($listHeight, minimum: Self.shortestList, room: $room)
         .task {
             while !Task.isCancelled {
                 await doctor.refresh(config: model.config)
@@ -62,12 +46,6 @@ struct DoctorView: View {
         }
     }
 
-    nonisolated static let space = "doctor"
-
-    /// What the page's height comes from, above the list.
-    func pageKey(_ camera: Config.Camera) -> String {
-        "\(camera.id) \(Int(tabHeight)) \(doctor.findings[camera.id]?.count ?? 0) \(doctor.checks[camera.id]?.lines.count ?? -1) \(model.homeKitRecording(for: camera) != nil)"
-    }
 
     /// The page's first row, its title: which camera (or all) as a heading like the page's others, in line with
     /// them, opening a menu of the cameras (a chevron after it says so); then what can be done with it.
@@ -190,12 +168,23 @@ struct DoctorView: View {
     @ViewBuilder
     func cameraSections(_ camera: Config.Camera) -> some View {
         let found = doctor.findings[camera.id] ?? []
+        // Those ignored, folded away under the rest (still seen there, and given back with Unignore).
+        let ignored = found.filter { doctor.isIgnored(camera.id, $0) }
+        let shown = found.filter { !doctor.isIgnored(camera.id, $0) }
         Section {
-            if found.isEmpty {
+            if shown.isEmpty {
                 Label("No problems in the last hour", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
             }
-            ForEach(found) { finding in FindingRow(camera: camera, finding: finding) }
+            ForEach(shown) { finding in FindingRow(camera: camera, finding: finding) }
+            if !ignored.isEmpty {
+                FoldRow(title: "Ignored", summary: "\(ignored.count)", expanded: $showIgnored)
+                if showIgnored {
+                    ForEach(ignored) { finding in
+                        FindingRow(camera: camera, finding: finding).padding(.leading, FoldRow.indent)
+                    }
+                }
+            }
             homeKitRecordingRow(camera)
             if let check = doctor.checks[camera.id] {
                 // The last check, under the findings it may explain.
@@ -216,17 +205,13 @@ struct DoctorView: View {
         Section {
             IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
                 // A list of its own for each camera and each filter: each opens at its newest, as the first did
-                // (the same scroll view, given other lines, kept where it was).
-                .id("\(camera.id) \(everything)")
+                // (the same scroll view, given other lines, kept where it was). And for each height: a check's result
+                // above it moves it down and shortens it, and the scroll view, resized, drew none of its rows until
+                // scrolled.
+                .id("\(camera.id) \(everything) \(Int(listHeight))")
                 .frame(height: listHeight)
                 .listRowInsets(EdgeInsets())
-                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.space)).origin } action: { origin in
-                    let page = pageKey(camera)
-                    guard overflowing != page else { return }
-                    listTop = origin.y
-                    if origin.x > 0 { sideInset = origin.x }
-                    if !fits { overflowing = page }
-                }
+                .endsPageRoom($room)
         } header: {
             HStack {
                 Text("What happened")
@@ -263,7 +248,7 @@ struct StatusDot: View {
     }
 }
 
-/// One finding: what, the evidence and since when, what to try; ignored or not.
+/// One finding: what, the evidence and since when, what to try; and Ignore (or, under Ignored, Unignore).
 struct FindingRow: View {
     @Environment(AppModel.self) private var model
     let camera: Config.Camera
@@ -288,7 +273,6 @@ struct FindingRow: View {
                     .help(ignored ? "Show it on the camera\u{2019}s tile again" : "Keep it here, but off the camera\u{2019}s tile")
             }
         }
-        .opacity(ignored ? 0.55 : 1)
         .padding(.vertical, 2)
     }
 

@@ -1233,6 +1233,14 @@ struct TimelineLanes: View, @MainActor Animatable {
         }
     }
 
+    /// A hovered mark's outline: just outside it, but kept inside the lanes (a mark at their edge, or running past
+    /// it, had its outline cut off there), the whole of its line in view.
+    static func outline(_ mark: CGRect, in size: CGSize) -> CGRect {
+        let room = CGRect(origin: .zero, size: size).insetBy(dx: 0.75, dy: 0.75)
+        let around = mark.insetBy(dx: -1.5, dy: -1.5).intersection(room)
+        return around.isNull ? mark : around
+    }
+
     func markRect(_ event: TimelineEvent, width: Double, visible: ClosedRange<Date>) -> CGRect {
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let lane = laneRect(cameras.firstIndex { $0.id == event.camera } ?? 0, width: width)
@@ -1597,7 +1605,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                 context.fill(shape, with: .style(.background))
                 context.fill(shape, with: .color(.indigo.opacity(selected ? 0.3 : 0.2)))
                 if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
-                    context.stroke(Path(roundedRect: bar.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
+                    context.stroke(Path(roundedRect: Self.outline(bar, in: size), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
                 }
                 // The stripes keep to the time axis, so they don't slide as the view pans.
                 var hatch = Path()
@@ -1666,7 +1674,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                     }
                 }
                 if isHovered {
-                    context.stroke(Path(roundedRect: mark.insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5),
+                    context.stroke(Path(roundedRect: Self.outline(mark, in: size), cornerRadius: 5),
                                    with: .color(.primary), lineWidth: 1.5)
                 }
                 if mark.width > 22, mark.height >= 10 {
@@ -2076,20 +2084,25 @@ enum EventPictures {
         return image
     }
 
-    /// Read ahead, in the background, those not kept.
-    nonisolated static func prefetch(_ urls: [URL]) {
+    /// Read ahead, in the background, those not kept; then `done`, on the main thread (once all of them are kept, or
+    /// being read by an earlier read-ahead).
+    nonisolated static func prefetch(_ urls: [URL], then done: (@Sendable @MainActor () -> Void)? = nil) {
         let wanted = urls.filter { cache.object(forKey: $0 as NSURL) == nil }
         let fresh = reading.withLock { reading in
             let fresh = wanted.filter { !reading.contains($0) }
             reading.formUnion(fresh)
             return fresh
         }
-        guard !fresh.isEmpty else { return }
+        guard !fresh.isEmpty else {
+            if let done { DispatchQueue.main.async { done() } }
+            return
+        }
         queue.async {
             for url in fresh {
                 if cache.object(forKey: url as NSURL) == nil, let image = read(url) { cache.setObject(image, forKey: url as NSURL) }
                 _ = reading.withLock { $0.remove(url) }
             }
+            if let done { DispatchQueue.main.async { done() } }
         }
     }
 

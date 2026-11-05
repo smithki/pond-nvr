@@ -8,8 +8,9 @@ struct RecorderView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmUninstall = false
     @State private var log = ServiceLog()
-    /// The tab's height: the log takes what the rest leaves, so the page fits without scrolling.
-    @State private var tabHeight = 560.0
+    /// The log's height: what the rest of the page leaves (FillsRoom).
+    @State private var logHeight = 200.0
+    @State private var room = PageRoom()
     /// The media engine's budget, as the service has it.
     @State private var media: MediaBudget.Report?
 
@@ -71,10 +72,11 @@ struct RecorderView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LogSection(log: log, height: max(140, tabHeight - (media == nil ? 366 : 394)))
+            LogSection(log: log, height: logHeight, room: $room)
         }
         .formStyle(.grouped)
-        .onGeometryChange(for: Double.self) { $0.size.height } action: { tabHeight = $0 }
+        // The log takes the room the rest of the page leaves, so it fits without scrolling.
+        .fillsRoom($logHeight, minimum: 140, room: $room)
         .task {
             while !Task.isCancelled {
                 model.refreshService()

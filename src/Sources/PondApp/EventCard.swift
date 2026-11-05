@@ -5,7 +5,7 @@ import SwiftUI
 
 /// One event: its picture with its subject boxed and its kind on it, what happened, where and when. A click opens its
 /// details; two, the timeline there.
-struct EventCard: View {
+struct EventCard: View, Equatable {
     let event: TimelineEvent
     let camera: String
     let selected: Bool
@@ -17,6 +17,11 @@ struct EventCard: View {
     @State private var hovering = false
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
+
+    /// The same if it shows the same (its actions, made anew with each of the grid's, aren't compared).
+    nonisolated static func == (a: EventCard, b: EventCard) -> Bool {
+        a.event == b.event && a.camera == b.camera && a.selected == b.selected && a.fresh == b.fresh
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
