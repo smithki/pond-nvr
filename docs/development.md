@@ -33,11 +33,17 @@ swift scripts/capture-window.swift /tmp/events.png --mode events --appearance li
 swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks behind another app's window
 ```
 
- `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.
+ `--mode live|timeline|events` opens a view first, and `--settings general|cameras|doctor|storage|retention|remote|recorder` also opens Settings on that tab; `--camera ID` opens that camera's settings, and `--live` starts the timeline live.
 
 **Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
 
-**Trying the timeline without a camera.** Any H.264 MP4 copied into `<recordings>/continuous/<camera>/<YYYY-MM-DD>/<HH-MM-SS>.mp4` (UTC) shows up, for example a minute of test pattern made with `ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=20 -t 60 -c:v libx264 -pix_fmt yuv420p seg.mp4`, copied under successive names, with a settings file of its own (`POND_CONFIG`).
+**Trying it without a camera.** Demo mode (`make demo`, [demo.md](demo.md)) has made-up cameras recorded, watched and controlled like real ones, a second home to reach, H.265 cameras, and scenarios for what goes wrong, in a world of their own.
+
+**Probes against real recordings.** Two tests run only when pointed at a real setup, for questions the made-up streams can't answer:
+- `BoxTimingProbe` (Watch): how far detection's boxes are out from the recorded picture, by running the model again on recordings around each sighting. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> POND_PROBE_DB=<pond.sqlite> POND_MODELS=<models> swift test --package-path src --filter BoxTimingProbe`.
+- `RealLiveEdgeProbe` (the app): where the timeline's live edge sits on a camera's real recordings. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> swift test --package-path src --filter RealLiveEdgeProbe`.
+
+They read the recordings and database without changing them.
 
 **The soak, for video decoding's memory.** Decoded pictures live in macOS's video decoder service and the kernel, not in Pond's own memory, so a leak there doesn't show in Pond and isn't caught by the usual tests; one froze a 16 GB Mac in under an hour. After changing anything that decodes video (detection, the closer looks, HomeKit's re-encoding), run `scripts/soak.sh`: made-up cameras (8 at 4K by default, their video generated on the Mac, none needed) decoded as the service decodes them, for a few minutes, passing if the decoder service and wired memory stay flat. `--quick` is 2 cameras for 30 s; `--cameras`, `--size`, `--minutes`, `--recording` and `--taps` change the scene. A watchdog outside the test stops it at an eighth of the Mac's memory in the decoder service, and nothing it starts is left running, whatever happens. In the running service, `VideoMemoryGuard` does the same job (and logs the decoder service's size hourly).
 

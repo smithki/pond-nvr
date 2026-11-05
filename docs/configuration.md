@@ -8,7 +8,7 @@ pond check
 
 (`pond init` creates the file) which reports every problem in the settings, whether the storage folders are ready (and how much space is free), and whether each camera has a password in the Keychain.
 
-`pond` and the app save only settings without problems, writes the file atomically and keeps it readable only by you. A file written by a newer pond is refused rather than half understood (`version`).
+`pond` and the app save only settings without problems, write the file atomically and keep it readable only by you. A file written by a newer pond is refused rather than half understood (`version`).
 
 ## Example
 
@@ -42,6 +42,12 @@ pond check
 ```
 
 Only `storage` is required; everything else has the defaults shown.
+
+## This Pond
+
+| Setting | Default | What it is |
+|---|---|---|
+| `name` | this Mac's name | How this Pond is shown beside others paired with it (in the Recording button's menu, the camera rail, the Timeline), and the name devices pairing with it see. In the app: Settings › General. |
 
 ## Storage
 

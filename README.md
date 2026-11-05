@@ -4,17 +4,17 @@ A network video recorder for the Mac, written in Swift ([pond.camera](https://po
 
 Work in progress. What works today:
 
-- **Continuous recording** of every camera's main stream, in 1-minute MP4 files, with retention by age, size and free space. It reconnects when a camera drops, and stops writing (and says so) when the drive is unplugged instead of filling the startup disk.
-- **Pond NVR.app**: a live view of every camera with sound, a timeline to play back any day, and settings for cameras, storage, retention and the background recorder (with its log).
+- **Continuous recording** of every camera's main stream (or its sub-stream, to save room), H.264 or H.265 as it sends it, in 1-minute MP4 files, with retention by age, size and free space. It reconnects when a camera drops, and stops writing (and says so) when the drive is unplugged instead of filling the startup disk.
+- **Pond NVR.app**: a live view of every camera with sound, a timeline to play back any day, the events seen, and settings for everything; in the menu bar, whether Pond is recording, and a notification when it stops.
 - **HomeKit**, implemented natively (the HomeKit Accessory Protocol in Swift): each camera you choose is a camera in the Home app, with snapshots, live video and sound, several viewers at once, and **HomeKit Secure Video** recording on the camera's own motion detection. Doorbells are supported as video doorbells.
 - **Camera controls**: under a camera watched on its own, a dock to move it, keep and go to positions, switch day and night, talk through its speaker and change its picture and volume, through its make's own API where Pond knows one (Reolink) and ONVIF otherwise.
 - **Events, on the Mac alone**: people, vehicles and animals found in each camera's video (Core ML), with zones; each event described in a sentence and found again by plain-language search ("a courier at the front door this week"), with Apple's on-device models only.
 - **Camera health**: a doctor for each camera, saying what's going wrong, since when, and what to try.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
+- **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, through a signaling service of your own; its cameras, events and timeline beside this Mac's, and told when it stops recording ([docs/remote.md](docs/remote.md)).
+- **Demo mode**: made-up cameras to explore Pond with, before having any ([docs/demo.md](docs/demo.md)).
 
-- **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, through a signaling service of your own; its cameras, events and timeline beside this Mac's ([docs/remote.md](docs/remote.md)).
-
-Under way: the iPhone app, and groups of cameras. See [docs/roadmap.md](docs/roadmap.md).
+Next: an iPhone app on the same protocol, and a signed release. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Requirements
 
@@ -55,7 +55,7 @@ pond service install                               # record whenever you are log
 - **Timeline**: the recordings of any day, a lane per camera. Click or drag to move, space to play or pause, ← and → for 10 seconds, ½× to 16×, zoom from a whole day to 15 minutes; scroll back across midnight into earlier days. **LIVE** (L) shows the selected camera as it is now.
 - **Events**: what the cameras saw, a card each, by day, beside a rail of every day kept; details in a panel. **Search** in plain words ("a man in a red jacket last night"), on the Mac only ([docs/search.md](docs/search.md)).
 
-Settings (⌘,) has **Cameras**, **Storage**, **Retention** and **Recorder**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
+Settings (⌘,) has **General**, **Cameras**, **Doctor**, **Storage**, **Retention**, **Remote Access** and **Recorder**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
 
 ## HomeKit
 
@@ -95,6 +95,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Recorder. The fi
 - [docs/search.md](docs/search.md): searching events in plain words, the sentences and the picture model behind it.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
 - [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.
+- [docs/remote.md](docs/remote.md): other Ponds, from away: pairing, how a connection is made, what each party sees; [deploy/](deploy/README.md): the signaling service (and an optional relay or mesh) to run yourself.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.

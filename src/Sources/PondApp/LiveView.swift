@@ -576,7 +576,7 @@ struct CameraRail: View {
     var overflow: RailOverflow {
         RailOverflow(top: contentSpan.lowerBound < headerBottom - 1, bottom: footerTop > 0 && contentSpan.upperBound > footerTop + 1)
     }
-    static let railSpace = "rail"
+    nonisolated static let railSpace = "rail"
     /// Ponds whose cameras are folded away in the rail (their ids; "" this Mac), kept.
     @AppStorage("railFoldedPonds") private var foldedText = ""
     /// The same, once changed here (the view's own state: what's kept is read again only when the rail appears).

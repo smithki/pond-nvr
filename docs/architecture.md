@@ -4,47 +4,41 @@
 
 ```
 camera ──RTSP──► Ingest (StreamHub: one connection per stream) ──┬──► Recorder ──► 1-minute MP4 segments on disk
- main + sub                                                      ├──► Pond NVR.app's live views (through the service's StreamRelay)
+ main + sub                                                      ├──► the app's live views (through the service's StreamRelay)
                                                                  ├──► HomeKit live view (SRTP to each viewer)
-                                                                 └──► prebuffer (last few seconds) ──► HKSV (fMP4 over HomeKit Data Stream)
+                                                                 ├──► prebuffer (last few seconds) ──► HKSV (fMP4 over HomeKit Data Stream)
+                                                                 └──► another Pond's live view (Remote: SRTP over a peer-to-peer session)
 camera's sub-stream (Watch) ──► Detection ──► events ──► Understanding ──► Search (the service; the app and pond ask it)
                                                  └──► HomeKit motion sensor (or the camera's own motion, Devices) ──► the home hub asks for a recording
 ```
 
-One SwiftPM package, `src/`, with a module per responsibility:
+Two programs come out of it: `pond`, the command and the background service (`pond run`, a launchd agent), which records, watches, serves HomeKit and answers other Ponds; and `Pond NVR.app`, which shows and sets it all, and asks `pond` for anything that needs a camera's password. A third, `pond-signal`, is the signaling service other Ponds meet through, run on a server of one's own ([deploy/](../deploy/README.md)).
 
-| Module | Responsibility | Builds on Linux | Status |
-|---|---|---|---|
-| `PondCore` | Settings and `ConfigStore`, storage folders (`StorageLocation`), the retention rules, the `CredentialStore` interface | yes | done for phase 0 |
-| `PondMac` | macOS-only pieces: the Keychain (`KeychainCredentialStore`) | no | done |
-| `PondCLI` | The `pond` command's logic: settings, storage, retention, cameras, `run`, and the launchd agent (`pond service`). Its outside world (settings file, Keychain, camera, terminal) is passed in, so it is tested with fakes | yes | done |
-| `Ingest` | RTSP client (TCP interleaved, Digest login, keepalive), SDP, H.264 SPS and AAC config, RTP depacketizing (H.264 single/STAP-A/FU-A, H.265 single/AP/FU, AAC-hbr; `VideoDepacketizer` for either video codec), RTCP sender reports to wall time, one shared connection per stream (`StreamHub`, which replays the video since the latest keyframe to a late reader), and `StreamRelay`, the service's local socket for the app's live views | yes | done |
-| `Media` | fMP4 muxer (`MP4`, `FragmentWriter`: fragments cut at keyframes) | yes | done |
-| `Recorder` | Packets to MP4: `StreamRecorder` puts video and audio on one timeline from the first keyframe (RTCP sender reports keep sound in step) and cuts 1-minute segments at keyframes; `SegmentFiles` writes them (`.partial` until complete, never to a missing drive); `CameraWorker` records one camera on its own thread and reconnects with backoff; `RetentionSweeper` deletes by the retention rules; `RecordingIndex` lists what was recorded when; `RecordingService` runs it all (`pond run`); `FileLog` writes the service's log | yes | done |
-| `HAP` | HomeKit Accessory Protocol: TLV8, `BigUInt` and SRP-6a (3072-bit group, SHA-512; in M1, N and g are hashed unpadded, as HomeKit does), pair setup and pair verify, `FrameCipher` sessions, HTTP with timed writes, the accessory database (`Accessory`, `Service`, `Characteristic`), `AccessoryServer` (routing, events, `/pairings`, `/resource`, `/prepare`), `HAPListener` (Bonjour), and the HomeKit Data Stream (`DataStream`: HKDF keys from the session, ChaCha20-Poly1305 frames, `Opack` messages). One standalone accessory per camera, not a bridge. Uses CryptoKit | no | done |
-| `HAPCamera` | A camera as an accessory (`CameraAccessory`: stream management, microphone, motion sensor, doorbell), snapshots (`Snapshotter`), the Keychain record (`HomeKitRecord`), `HomeKitHost`; live view: stream setup (`StreamManagement`), RTP packets (`RTPPacketizer`), SRTP, sound (`AudioTranscoder`: AAC-LC to AAC-ELD), optional re-encoding (`VideoTranscoder` on VideoToolbox, steered by `RateControl` from the viewer's RTCP reports) and the stream itself (`LiveSession`); HKSV: the recording services and selection (`RecordingController`), the prebuffer (`Prebuffer`) and one recording sent to the hub (`RecordingSession`) | no | done |
-| `Devices` | What a camera is (maker, model, serial, firmware, doorbell), its events (motion, doorbell presses) and its controls (PTZ, talking back, and declared items: day and night, image settings, volume, home, tours, relays), behind `CameraProvider`: `ReolinkProvider` (HTTP API) and `ONVIFProvider`; `DeviceReader` asks them in turn, `CameraControls` resolves each control to the first provider that offers it, `CameraSessions` shares one login per camera, and `ControlServer` serves the app over a socket (see [controls.md](controls.md)) | no | done |
-| `Control` | Shared by the CLI and the app: the login service (`ServiceControl`, `LaunchAgent`, launchd), its log (`LogReader`) and the wording of camera checks (`CameraCheck`) | yes | done |
-| `PondApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and video depacketizer (H.264 or H.265) feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`: the cards laid out by Pond; `EventRail`, `EventCard`, `EventDetail`; search asked of the service). The Settings window has Cameras, Storage, Retention and Recorder over `AppModel`, which saves through `ConfigStore` and leaves reading passwords to `pond` | no | done |
-| `Storage` | SQLite index of segments, events, descriptions and embeddings | yes | later |
-| `Detection` | Motion gate, YOLO in Core ML, Vision, a multi-object tracker, zones, event lifecycle | no | later |
-| `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no | done |
-| Search (in `Watch`) | `Understander` (the service: each event described and embedded, older ones too), the understanding table in `EventStore`, `EventSearch` (filters, then ranking by picture match and sentence words), and `SearchService` (the service answering questions for the app and `pond search` over the control socket, its models kept ready). See [search.md](search.md). Also `ClipKeeper` (each event's clip, copied out of the recording) and `RecordingComposition` (recorded minutes as one piece of video, for the app's timeline and details and for clips) | yes | done |
+One SwiftPM package, `src/`, with a module per responsibility. Those marked Linux build there too (`make test-docker`); the rest need macOS's frameworks.
+
+| Module | Responsibility | Linux |
+|---|---|---|
+| `PondCore` | Settings and `ConfigStore`, storage folders (`StorageLocation`) and estimates, retention rules, the `CredentialStore` interface, privacy and camera health state shared by the app and the service, demo mode's scenarios (`Demo`) | yes |
+| `PondMac` | The Keychain (`KeychainCredentialStore`; a file in a demo's folder instead, in demo mode) | no |
+| `PondCLI` | The `pond` command's logic: settings, storage, retention, cameras, `run`, and the login service (`pond service`). Its outside world (settings file, Keychain, camera, terminal) is passed in, so it is tested with fakes | yes |
+| `Ingest` | RTSP client (TCP interleaved, Digest login, keepalive), SDP, codec parameters (H.264 and H.265 SPS, AAC config), RTP depacketizing (H.264, H.265, AAC; `VideoDepacketizer` for either video codec), RTCP sender reports to wall time, one shared connection per stream (`StreamHub`, which replays the video since the latest keyframe to a late reader), `StreamRelay` (the service's local socket for the app's live views), and the media engine's budget (`MediaBudget`) | yes |
+| `Media` | fMP4 muxer (`MP4`, `FragmentWriter`: fragments cut at keyframes; `avc1` and `hvc1`) | yes |
+| `Recorder` | Packets to MP4: `StreamRecorder` puts video and audio on one timeline from the first keyframe (RTCP sender reports keep sound in step) and cuts 1-minute segments at keyframes; `SegmentFiles` writes them (`.partial` until complete, never to a missing drive); `CameraWorker` records one camera on its own thread and reconnects with backoff; `RetentionSweeper` deletes by the retention rules; `RecordingIndex` lists what was recorded when; `RecordingService` runs it all (`pond run`); `FileLog` writes the service's log | yes |
+| `Control` | Shared by the CLI and the app: the login service (`ServiceControl`, `LaunchAgent`, launchd), its log (`LogReader`) and the wording of camera checks (`CameraCheck`) | yes |
+| `HAP` | HomeKit Accessory Protocol: TLV8, `BigUInt` and SRP-6a (3072-bit group, SHA-512; M1, N and g hashed unpadded, as HomeKit does), pair setup and pair verify, `FrameCipher` sessions, HTTP with timed writes, the accessory database (`Accessory`, `Service`, `Characteristic`), `AccessoryServer` (routing, events, `/pairings`, `/resource`, `/prepare`), `HAPListener` (Bonjour), and the HomeKit Data Stream (`DataStream`: HKDF keys from the session, ChaCha20-Poly1305 frames, `Opack` messages). One standalone accessory per camera, not a bridge. Uses CryptoKit | no |
+| `HAPCamera` | A camera as an accessory (`CameraAccessory`: stream management, microphone, motion sensor, doorbell), snapshots (`Snapshotter`), the Keychain record (`HomeKitRecord`), `HomeKitHost`; live view: stream setup (`StreamManagement`), RTP packets (`RTPPacketizer`, `VideoPacketizer`), SRTP, sound (`AudioTranscoder`: AAC-LC to AAC-ELD), re-encoding (`VideoTranscoder` on VideoToolbox, steered by `RateControl` from the viewer's RTCP reports) and the stream itself (`LiveSession`, also what another Pond is sent); HKSV: the recording services and selection (`RecordingController`), the prebuffers (`Prebuffer`) and one recording sent to the hub (`RecordingSession`) | no |
+| `Devices` | What a camera is (maker, model, serial, firmware, doorbell), its events (motion, doorbell presses) and its controls (PTZ, talking back, privacy, and declared items: day and night, image settings, volume, home, tours, relays), behind `CameraProvider`: `ReolinkProvider` (its HTTP API and Baichuan protocol) and `ONVIFProvider`; `DeviceReader` asks them in turn, `CameraControls` resolves each control to the first provider that offers it, `CameraSessions` shares one login per camera, discovery finds cameras on the network, and `ControlServer` serves the app over a socket (see [controls.md](controls.md)) | no |
+| `Health` | Camera health kept for the doctor (`HealthStore`, in Pond's SQLite database): vitals in 5-minute counts, and incidents | no |
+| `Detection` | Detection models (Core ML, with a manifest: `ModelStore`), run on the Neural Engine (`Detector`), their answers in Pond's terms (people, vehicles, bikes, animals, packages, items) | no |
+| `Watch` | Each camera's sub-stream watched (`CameraWatcher`: motion first, then the model; a closer look at the main stream for what's small), what's seen followed (`Tracker`) and made into events (`EventBuilder`, `LeftItems`), kept with their pictures (`EventStore`) and clips (`ClipKeeper`); the video decoder's memory watched (`VideoMemoryGuard`); and search: `Understander` (each event described and embedded), `EventSearch` and `SearchService` (see [search.md](search.md)) | no |
+| `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no |
+| `Traversal` | Finding a way between two Ponds: STUN, TURN (a relay of one's own), candidates and the checks between them (`PathFinder`), and the UDP socket they use | yes |
+| `Signal` | `pond-signal`: a blind courier for sealed envelopes between paired devices, over WebSockets, and a STUN responder | yes |
+| `Remote` | Remote access: identities and pairing, sealed envelopes, paths and sessions (`PathSessions`), the encrypted channel (`SecureChannel`), live video over it (`RemoteVideo`), the remote API (`RemoteAPI`), and other Ponds' cameras for this Mac's app (`RemoteViewing`). See [remote.md](remote.md) | no |
+| `Demo` | Demo mode's made-up cameras: scenes drawn and encoded as a camera's stream (`DemoStream`), their controls (`DemoProvider`), sound, and history made on first start. See [demo.md](demo.md) | no |
+| `PondApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and video depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`, `EventRail`, `EventCard`, `EventDetail`; search asked of the service), with other Ponds beside this Mac's; the Settings window; and the menu bar item, which watches the recorder (`ServiceWatch`). `AppModel` saves through `ConfigStore` and leaves reading passwords to `pond` | no |
 
 The models sit behind small protocols (`DescriptionModel`, the query parser), so an MLX or cloud model could replace Apple's without touching the rest. The default is on-device only.
-
-## Phases
-
-The order of the work; [roadmap.md](roadmap.md) has each goal's status and plan, including audio and ONVIF.
-
-0. **Scaffold and camera check.** The settings file, the `pond` command, TLV8. Done.
-1. **Ingest and recording.** RTSP, fMP4 segments, retention, the app's live view and timeline. Done (the SQLite index waits for events).
-2. **HAP core.** Pairing with the Home app; each camera appears with a motion sensor and snapshots. Done.
-3. **Live view.** Stream setup, SRTP video, AAC-ELD audio, several viewers, optional re-encoding. Done.
-4. **HKSV.** HomeKit Data Stream, recording settings, fMP4 from the prebuffer. Done.
-5. **Detection and events.** The motion sensor switches from raw motion to "a relevant object in a zone". Done (event clips next; packages wait for a model).
-6. **Understanding.** Descriptions and embeddings, including for older events. Done.
-7. **Search.** Plain-language questions, results that open the clip. Done.
 
 ## What Reolink's RTSP server does
 
@@ -52,7 +46,7 @@ Seen on a Reolink E1 Pro (RTSP server "BC Streaming Media v2022.10.01"); `Ingest
 
 - **Digest authentication** on DESCRIBE, SETUP and PLAY (realm `BC Streaming Media`).
 - **Interleaved data before the PLAY reply:** an RTCP sender report can arrive on channel 1 before the `200 OK` for PLAY, so the reader must accept `$` frames while waiting for any RTSP reply.
-- **Privacy mode:** every request succeeds but no RTP arrives, and the sender reports say 0 packets sent. Treat "connected, no video for 10 s, sender reports at 0" as *camera in privacy mode*, report it as that, and retry slowly instead of reconnecting in a loop. HomeKit can later show it through the camera's operating mode.
+- **Privacy mode:** every request succeeds but no RTP arrives, and the sender reports say 0 packets sent. Pond treats "connected, no video for 10 s, sender reports at 0" as *camera in privacy mode*, says so, and retries slowly instead of reconnecting in a loop.
 - **Uneven RTP timestamps:** the steps between frames vary (20 fps averages 4500 ticks at 90 kHz, but single steps range from about 100 to over 6000). The muxer must take each frame's own timestamp, not assume a fixed frame rate.
 - **A slightly malformed SPS on the sub-stream** (`ffmpeg`: "Overread VUI by 8 bits"). Harmless for stream copy, and VideoToolbox accepts it.
 - **The description does not always carry the codec parameters.** The sub-stream's SDP sometimes has an `a=fmtp` line with the SPS and sometimes none at all, from one connection to the next. The SPS also comes inside the video before each keyframe, so the resolution must be read from there when the description leaves it out (`FlowAnalyzer` does).

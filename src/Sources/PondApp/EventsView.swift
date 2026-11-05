@@ -93,7 +93,7 @@ struct EventsView: View {
         /// The rail, and the panel beside it.
         case wide
 
-        init(_ width: Double) {
+        @MainActor init(_ width: Double) {
             self = width == 0 || width >= EventsView.railWithPanelNeeds ? .wide : width >= EventsView.railNeeds ? .medium : .narrow
         }
     }

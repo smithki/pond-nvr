@@ -1,6 +1,6 @@
 # Roadmap
 
-What's left to do: goals under way, next, and later. What's finished is in [done.md](done.md), with how each was done; the build phases are in [architecture.md](architecture.md#phases).
+What's left to do: goals under way, next, and later. What's finished is in [done.md](done.md), with how each was done.
 
 Status: **in progress**, **next**, **later**. A goal moves to done.md when it's finished.
 
@@ -10,10 +10,9 @@ Status: **in progress**, **next**, **later**. A goal moves to done.md when it's 
 |---|---|---|
 | A signed, notarized release | later | Today Pond is built from source; a release needs a Developer ID, notarization and an app bundle identifier of its own. It also settles how search's picture model reaches users (about 390 MB: in the app, or downloaded on first use). |
 
-
 ## ONVIF
 
-Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login). It brings a standard way to do what Pond now does per brand, and more:
+Many cameras speak ONVIF (SOAP over HTTP, with WS-Security username-token login). It's a standard way to do what Pond also does per brand (Reolink's own API), and more:
 
 | Goal | Status | Notes |
 |---|---|---|
@@ -51,7 +50,7 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 
 ## Small fixes
 
-A backlog: small, contained problems seen in use, each worth a fix but not a goal of its own. Taken up between larger pieces of work, and removed from here when done (the changelog has them then).
+A backlog: small, contained problems seen in use, each worth a fix but not a goal of its own. Taken up between larger pieces of work, and removed from here when done.
 
 | Fix | Notes |
 | --- | --- |

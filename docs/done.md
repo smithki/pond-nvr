@@ -1,6 +1,6 @@
 # What's been built
 
-The roadmap's finished goals, by area, with how each was done. What's left is in [roadmap.md](roadmap.md); the changes, newest first, in [CHANGELOG.md](../CHANGELOG.md).
+The roadmap's finished goals, by area, with how each was done. What's left is in [roadmap.md](roadmap.md); what's in each release, in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Recording and the app
 
@@ -27,7 +27,7 @@ The roadmap's finished goals, by area, with how each was done. What's left is in
 |---|---|
 | Pairing, accessory database, Bonjour | Native HAP in Swift (`HAP`), one standalone accessory per camera. |
 | Snapshots | A sub-stream keyframe through VideoToolbox, or the running live stream's latest. |
-| Live video and sound | The camera's H.264 as is over SRTP (sub-stream, or main for a viewer that allows 1.5 Mbit/s), switching on a mid-stream reconfigure; AAC-LC → AAC-ELD at the asked packet time. |
+| Live video and sound | The camera's H.264 as is over SRTP (sub-stream, or main for a viewer that allows 1.5 Mbit/s), switching on a mid-stream reconfigure; an H.265 camera's re-encoded to H.264. AAC-LC → AAC-ELD at the asked packet time. |
 | Several viewers at once | 1–4 per camera (default 2), all on one camera connection. |
 | Re-encoding for the Home app | Optional per camera: sized and encoded per viewer on the Mac's video hardware, steered by each viewer's RTCP reports (`RateControl`). Not for cameras that send B-frames. |
 | Fast start | `StreamHub` replays the video since the latest keyframe; `instantLive` keeps the sub-stream open. |
