@@ -64,6 +64,39 @@ import Understanding
         #expect(tracker.tracks.isEmpty)
     }
 
+    /// A parked car at night: the picture over it flickers (noise, infrared, passing headlights), its box keeps
+    /// within a hair of where it is; it never moves (it kept an event going for hours).
+    @Test func aParkedCarFlickeringAtNightHasntMoved() {
+        var tracker = Tracker()
+        let t0 = Date()
+        var moves = 0
+        for step in 0 ..< 600 {
+            let jitter = Double(step % 7 - 3) * 0.0007
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.85,
+                                box: .init(x: 0.595 + jitter, y: 0.52, width: 0.141 + jitter, height: 0.072))
+            for s in tracker.update([car], mask: Self.everything, at: t0.addingTimeInterval(Double(step) * 2)) where s.track.lastMoved == t0.addingTimeInterval(Double(step) * 2) {
+                moves += 1
+            }
+        }
+        // (Its first sighting only: where the picture changed when it was first seen.)
+        #expect(moves == 1)
+    }
+
+    /// Someone walking slowly moves, though no one step's far: from where they last moved, it adds up.
+    @Test func aSlowWalkerMoves() {
+        var tracker = Tracker()
+        let t0 = Date()
+        var moves = 0
+        for step in 0 ..< 20 {
+            let time = t0.addingTimeInterval(Double(step) * 0.5)
+            for s in tracker.update([Self.person(0.1 + Double(step) * 0.02)], mask: Self.everything, at: time) where s.track.lastMoved == time {
+                moves += 1
+            }
+        }
+        // 0.02 a step, a tenth of its size (0.6) in four: moved every few steps.
+        #expect(moves >= 5)
+    }
+
     @Test func somethingNeverSeenWhereThingsMoveHasntMoved() {
         var tracker = Tracker()
         let parked = Detection(label: "car", category: .vehicle, confidence: 0.8, box: .init(x: 0.6, y: 0.4, width: 0.2, height: 0.1))
@@ -118,15 +151,19 @@ import Understanding
         var tracker = Tracker()
         var builder = EventBuilder(camera: "drive")
         let t0 = Date()
-        let car = Detection(label: "car", category: .vehicle, confidence: 0.9, box: .init(x: 0.5, y: 0.5, width: 0.3, height: 0.2))
+        // (Each moving: where the picture changed, and gone somewhere.)
+        func car(_ step: Int) -> Detection {
+            Detection(label: "car", category: .vehicle, confidence: 0.9, box: .init(x: 0.4 + Double(step) * 0.04, y: 0.5, width: 0.3, height: 0.2))
+        }
         for step in 0 ..< 3 {
             let time = t0.addingTimeInterval(Double(step) * 0.5)
-            _ = builder.update(tracker.update([car], mask: Self.moving, at: time), at: time)
+            _ = builder.update(tracker.update([car(step)], mask: Self.moving, at: time), at: time)
         }
         #expect(builder.current?.category == .vehicle)
         for step in 3 ..< 6 {
             let time = t0.addingTimeInterval(Double(step) * 0.5)
-            _ = builder.update(tracker.update([car, TrackerTests.person(0.1, confidence: 0.7)], mask: Self.moving, at: time), at: time)
+            let person = TrackerTests.person(0.05 + Double(step - 3) * 0.08, confidence: 0.7)
+            _ = builder.update(tracker.update([car(step), person], mask: Self.moving, at: time), at: time)
         }
         #expect(builder.current?.category == .person)
         #expect(builder.current?.labels == ["car": 1, "person": 1])
@@ -314,7 +351,7 @@ import Understanding
         let t0 = Date()
         for step in 0 ..< 3 {
             let time = t0.addingTimeInterval(Double(step) * 0.5)
-            let found = [Self.thing(.person, x: 0.5, bottom: 0.9)].compactMap { d in rules.zones(for: d).map { (d, $0) } }
+            let found = [Self.thing(.person, x: 0.45 + Double(step) * 0.03, bottom: 0.9)].compactMap { d in rules.zones(for: d).map { (d, $0) } }
             let sightings = tracker.update(found.map(\.0), mask: EventBuilderTests.moving, at: time) { d in found.first { $0.0 == d }?.1 ?? [] }
             _ = builder.update(sightings, at: time)
         }
@@ -423,7 +460,7 @@ import Understanding
         // One person, whose box jumps (a new track) halfway.
         for step in 0 ..< 6 {
             let time = t0.addingTimeInterval(Double(step) * 0.25)
-            let x = step < 3 ? 0.1 : 0.6
+            let x = (step < 3 ? 0.1 : 0.6) + Double(step % 3) * 0.06   // (walking)
             let d = Detection(label: "person", category: .person, confidence: 0.9, box: .init(x: x, y: 0.2, width: 0.1, height: 0.5))
             _ = builder.update(tracker.update([d], mask: moving, at: time), at: time)
         }
@@ -513,8 +550,8 @@ import Understanding
         let moving = MotionMask(columns: 1, rows: 1, cells: [0])
         for step in 0 ..< 6 {
             let time = t0.addingTimeInterval(Double(step) * 0.25)
-            let cat = Detection(label: "cat", category: .animal, confidence: 0.8, box: .init(x: 0.1, y: 0.6, width: 0.1, height: 0.1))
-            let dog = Detection(label: "dog", category: .animal, confidence: 0.8, box: .init(x: 0.6, y: 0.6, width: 0.15, height: 0.15))
+            let cat = Detection(label: "cat", category: .animal, confidence: 0.8, box: .init(x: 0.1 + Double(step) * 0.02, y: 0.6, width: 0.1, height: 0.1))
+            let dog = Detection(label: "dog", category: .animal, confidence: 0.8, box: .init(x: 0.6 + Double(step) * 0.02, y: 0.6, width: 0.15, height: 0.15))
             _ = builder.update(tracker.update([cat, dog], mask: moving, at: time), at: time)
         }
         #expect(builder.current?.labels == ["cat": 1, "dog": 1])

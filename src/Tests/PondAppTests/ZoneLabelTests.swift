@@ -105,6 +105,19 @@ import Watch
 }
 
 @MainActor
+@Suite struct LongBarTests {
+    /// A car parked for hours with someone passing it a moment: the car's bar stays the car's colour (it took the
+    /// person's while they were in view), the person a chip of their own over it.
+    @Test func aLongBarKeepsItsOwnColourUnderWhatsShort() {
+        let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [
+            (.vehicle, CGRect(x: 0, y: 0, width: 600, height: 20), 1), (.person, CGRect(x: 40, y: 0, width: 3, height: 20), 1)]
+        let clusters = TimelineLanes.clusters(marks, ids: ["car", "person"])
+        #expect(clusters.map(\.ids) == [["car"], ["person"]])
+        #expect(clusters[0].lead == .vehicle && clusters[1].lead == .person)
+    }
+}
+
+@MainActor
 @Suite struct ClusterIDTests {
     @Test func aChipKnowsItsEvents() {
         let marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)] = [

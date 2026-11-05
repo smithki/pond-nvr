@@ -1427,10 +1427,20 @@ struct TimelineLanes: View, @MainActor Animatable {
         var lead: TimelineEvent.Kind { kinds.first?.kind ?? .motion }
     }
 
-    /// What's drawn for a lane: its marks (each with how much it shows) joined where they touch.
+    /// Wider than this, a mark's a bar of its own: not joined with what touches it.
+    static let ownBar = 24.0
+
+    /// What's drawn for a lane: its marks (each with how much it shows) joined where they touch; a long one (wider
+    /// than `ownBar`) apart, first, in its own colour, and what's short drawn over it. (Joined, a car parked for
+    /// two hours took the colour of someone who passed it for a moment, and lost it as they went out of view.)
     static func clusters(_ marks: [(kind: TimelineEvent.Kind, rect: CGRect, weight: Double)], ids: [String] = []) -> [Cluster] {
+        let long = marks.indices.filter { marks[$0].rect.width > ownBar }.sorted { marks[$0].rect.minX < marks[$1].rect.minX }
+        let bars = long.map { i in
+            Cluster(rect: marks[i].rect, kinds: [(marks[i].kind, 1)], weight: marks[i].weight,
+                    ids: ids.indices.contains(i) ? [ids[i]] : [])
+        }
         var out: [(rect: CGRect, counts: [TimelineEvent.Kind: Int], weight: Double, ids: [String])] = []
-        for i in marks.indices.sorted(by: { marks[$0].rect.minX < marks[$1].rect.minX }) {
+        for i in marks.indices.filter({ marks[$0].rect.width <= ownBar }).sorted(by: { marks[$0].rect.minX < marks[$1].rect.minX }) {
             let mark = marks[i], id = ids.indices.contains(i) ? [ids[i]] : []
             if let last = out.last, mark.rect.minX <= last.rect.maxX + 1 {
                 out[out.count - 1].rect = last.rect.union(mark.rect)
@@ -1441,7 +1451,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                 out.append((mark.rect, [mark.kind: 1], mark.weight, id))
             }
         }
-        return out.map { c in
+        return bars + out.map { c in
             Cluster(rect: c.rect, kinds: c.counts.sorted { $0.key.prominence < $1.key.prominence }.map { ($0.key, $0.value) },
                     weight: c.weight, ids: c.ids)
         }
