@@ -1,12 +1,11 @@
 Pond
 Copyright 2026 Ian K Smith
 
-This product is licensed under the GNU Affero General Public License, version 3 (see LICENSE). Versions
-before this change were released under the Apache License, Version 2.0, and remain available under it.
+This product is licensed under the GNU Affero General Public License, version 3 (see LICENSE).
 Contributions are accepted under the Pond Contributor License Agreement (CLA.md).
 
 Parts of the HomeKit implementation (the accessory protocol, camera streaming, HomeKit Secure Video and
-the HomeKit Data Stream) were written with reference to these projects, also under the Apache License 2.0:
+the HomeKit Data Stream) were written with reference to these projects, under the Apache License 2.0:
 - HAP-NodeJS (https://github.com/homebridge/HAP-NodeJS)
 - HomeKitADK (https://github.com/apple/HomeKitADK)
 Source files that follow one of them closely name it in a comment.

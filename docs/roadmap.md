@@ -4,11 +4,21 @@ What's left to do: goals under way, next, and later. What's finished is in [done
 
 Status: **in progress**, **next**, **later**. A goal moves to done.md when it's finished.
 
-## Recording and the app
+## Release
+
+What it takes for anyone to use Pond without building it, find out what it does, and support it.
 
 | Goal | Status | Notes |
 |---|---|---|
-| A signed, notarized release | later | Today Pond is built from source; a release needs a Developer ID, notarization and an app bundle identifier of its own. It also settles how search's picture model reaches users (about 390 MB: in the app, or downloaded on first use). |
+| A signed, notarized release | next | A Developer ID, notarization and an app bundle identifier of Pond's own, so the app installs like any Mac app. It settles how search's picture model reaches users (about 390 MB: in the app, or downloaded on first use), and comes with updates (Sparkle, from Pond's own feed, signed), release notes from the changelog, and a release built and notarized by CI from a tag, not on a developer's Mac. |
+| The website | later | At pond.camera: a landing page with Pond's story (an NVR that's yours, on your Mac, nothing sent to anyone), what it does, and pictures of it (demo mode makes them, with no one's own cameras in them); a **downloads** page for the notarized release (and older ones, with their notes and checksums); and a **privacy** statement saying what Pond and the site collect (nothing, and no analytics). |
+| User documentation | later | Everything from a user's side, on the website: getting started (a Mac, a drive, cameras), each view and setting, cameras by make, HomeKit, remote access, the doctor's findings, troubleshooting, and the questions people ask. Written from `docs/` and the app, kept in the repository and published from it, so it changes with the code. |
+| Advanced documentation | later | For people who run their own services or work on Pond: the signaling service, a relay and a mesh (Tailscale, Headscale) set up; how Pond works inside (the architecture, how video moves, remote access's protocol, the security model); building, testing and contributing (the CLA, conventions, demo mode for bug reports). Also published from the repository. |
+| Donations | later | One-off and monthly, through GitHub Sponsors (and perhaps Open Collective, whose books are public), linked from the app's About, the website and the README; no features held back for donors. |
+| Open books | later | What Pond has cost to make, published and kept up to date: development (from the repository: commits, lines, and time spent, kept in a ledger beside it), AI assistance (from the providers' usage exports), the services it runs on (the signaling server, the domain, the Developer Program), and what donations brought in. A page on the website, built from those files, so supporters see where money goes. |
+| Ready for others | later | What a public project needs beside the code: `SECURITY.md` (how to report a vulnerability privately, and what's in scope), a code of conduct, issue templates (a bug report names a demo scenario, or attaches the doctor's report), CI on macOS for every pull request (tests and the release build, not only the Linux part), the camera compatibility list open to additions, and the trademark question settled (whether the name and logo, `assets/Logo.af`, are free to use with the code or kept). |
+| First run without a guide | later | Someone who downloads Pond finds their way alone: a first window that says what's needed and does it (a drive, Local Network access, the first camera found on the network and added, the recorder started), with demo mode offered for those with no camera yet. |
+| Moving to a new Mac | later | Settings, passwords, HomeKit identities (so cameras stay in the Home app), remote access's keys and pairings, and the index, carried over: an export and an import, or a guide. Recordings stay on their drive. |
 
 ## ONVIF
 
@@ -40,7 +50,6 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 | Shared work between Ponds | later | A paired Pond with power to spare (a Mac Studio, a MacBook Pro at home) takes on another's work that can wait: describing events (the language model), embedding their pictures for search, and running a new detection model back over weeks of recordings. The inputs are small (a picture, a short clip) and so are the answers (a sentence, an embedding), sent over the same sealed connection as remote access, and on the Macs of whoever owns them, so nothing leaves their own devices. A Pond hands work over when its backlog grows or it can't do the work itself (no Apple Intelligence), and does it itself whenever the other is asleep or away. Live work stays where the cameras are: recording to HomeKit, live views and detection on live video aren't sent anywhere (the video would cross the network twice, against HomeKit's deadlines, and across homes, upload speeds can't carry it). A home with more cameras than one Mac can watch splits its cameras between Ponds instead (see sites). Comes after remote access. |
 | Camera groups | later | Groups of cameras within a Pond (Front of house, Garage), named and ordered, for the grid, the lanes and the filters (distinct from zones). |
 | One-way sites | later | A Pond seen from another without seeing back (a cabin seen from home, not home from the cabin): pairing that grants one direction only. Other Ponds as sites in Live, Events and the Timeline are done (remote access, in [done.md](done.md)). |
-| Sponsorship | later | Donations and sponsors (GitHub Sponsors, Open Collective). |
 
 ## Detection, events, search
 
