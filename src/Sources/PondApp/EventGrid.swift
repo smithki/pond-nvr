@@ -451,7 +451,8 @@ struct EventGrid: View {
                     Label("Now", systemImage: "arrow.up")
                         .font(.callout.weight(.semibold))
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        // As tall as the day's capsule beside it (its words are larger).
+                        .frame(maxHeight: .infinity)
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -462,6 +463,8 @@ struct EventGrid: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: offset > 120)
+        // (The row as tall as the day's capsule: the button takes that height.)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.bottom, 8)
     }
 
