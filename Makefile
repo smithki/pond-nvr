@@ -56,6 +56,9 @@ app: build
 	@# The icon, from Icon Composer (app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
 	@# AppIcon.icns, as Xcode would.
 	@mkdir -p "$(APP)/Contents/Resources"
+	@# The icon's own mark, for the menu bar (cropped to it and drawn as a template image by the app, so it follows
+	@# the icon when that changes).
+	@cp app/AppIcon.icon/Assets/mark.svg "$(APP)/Contents/Resources/Mark.svg"
 	@xcrun actool app/AppIcon.icon --compile "$(APP)/Contents/Resources" --platform macosx --minimum-deployment-target 27.0 \
 	  --app-icon AppIcon --output-partial-info-plist "$(APP)/Contents/Resources/.icon-info.plist" \
 	  --output-format human-readable-text >/dev/null

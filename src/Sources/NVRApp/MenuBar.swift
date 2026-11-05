@@ -26,17 +26,53 @@ enum OpenAtLogin {
     }
 }
 
-/// The menu bar's symbol: recording, or something's wrong.
+/// The menu bar's mark: Pond's logomark while it's recording (dimmed while it isn't), a warning while something's
+/// wrong.
 struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
+
+    /// The app icon's own mark (its SVG, in the bundle), cropped to what's drawn in it and made a template image
+    /// (coloured as the menu bar's other icons), the menu bar's height; nil outside the app bundle. Worked out from the
+    /// icon each launch, so a new icon brings a new mark.
+    static let mark: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "Mark", withExtension: "svg"), let svg = NSImage(contentsOf: url),
+              let cropped = cropped(svg) else { return nil }
+        let height = 16.0
+        let image = NSImage(cgImage: cropped, size: NSSize(width: height * Double(cropped.width) / Double(cropped.height), height: height))
+        image.isTemplate = true
+        return image
+    }()
+
+    /// The image drawn large (for a sharp mark at 2× and 3×), cropped to where anything's drawn.
+    static func cropped(_ image: NSImage, side: Int = 512) -> CGImage? {
+        guard let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self), let whole = context.makeImage() else { return nil }
+        var (left, right, top, bottom) = (side, -1, side, -1)
+        for y in 0 ..< side {
+            for x in 0 ..< side where data[(y * side + x) * 4 + 3] > 8 {
+                left = min(left, x); right = max(right, x); top = min(top, y); bottom = max(bottom, y)
+            }
+        }
+        guard right >= left else { return nil }
+        // (A pixel's margin, so antialiased edges aren't cut.)
+        let box = CGRect(x: left - 1, y: top - 1, width: right - left + 3, height: bottom - top + 3)
+            .intersection(CGRect(x: 0, y: 0, width: side, height: side))
+        return whole.cropping(to: box)
+    }
 
     var body: some View {
         if model.watch.problem != nil || !model.watch.otherPonds.isEmpty {
             Image(systemName: "exclamationmark.triangle")
-        } else if model.isRecording {
-            Image(systemName: "record.circle")
+        } else if let mark = Self.mark {
+            Image(nsImage: mark).opacity(model.isRecording ? 1 : 0.45)
         } else {
-            Image(systemName: "circle.dashed")
+            Image(systemName: model.isRecording ? "record.circle" : "circle.dashed")
         }
     }
 }
