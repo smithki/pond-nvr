@@ -209,15 +209,19 @@ struct EventGrid: View {
     /// scroll: scrolling through days of cards made and read every one on the way (each new card's picture read and
     /// decoded as it came), which stuttered, and the rail's outline restarted with every day that passed.
     static let farJump = 2.0
+    /// Closing the panel, nearer than that: further than a screen, every card flying that far as it reshaped was
+    /// too much; a jump instead.
+    static let farPanel = 1.0
     /// A far jump lands this far short of where it's going (on the side it came from) and scrolls the rest as it
     /// fades in, so it's seen to arrive from that way.
     static let jumpLead = 180.0
-    /// That last of the way: slow, easing to a stop (a hint of where it came from, not a scroll to follow).
-    static let jumpArrives = Animation.timingCurve(0.25, 0.6, 0.3, 1, duration: 0.9)
+    /// That last of the way: setting off gently (as the cards fade in) and easing to a stop, a hint of where it
+    /// came from rather than a scroll to follow.
+    static let jumpArrives = Animation.timingCurve(0.35, 0, 0.15, 1, duration: 0.9)
     /// Scrolled faster than this many screens a second (the scroller dragged, or a long fling), for a few moments
     /// running, the cards are plain blocks, dimmed, and the day and hour they're at is shown over them; slower than
     /// the second, the cards are shown again (their pictures read first).
-    static let scrubStarts = 8.0
+    static let scrubStarts = 5.0
     static let scrubEnds = 2.5
 
     @State private var position = ScrollPosition(edge: .top)
@@ -509,7 +513,7 @@ struct EventGrid: View {
             return move(from: before, to: anchored(from: before))
         }
         let here = anchored(from: before)
-        if abs(centred - here) > Self.farJump * max(viewHeight, 1) {
+        if abs(centred - here) > Self.farPanel * max(viewHeight, 1) {
             // Both at once: the cards on screen reshaping as the panel goes, while they fade out; then, unseen,
             // there (the move let go), faded in as the panel finishes.
             move(from: before, to: here)
