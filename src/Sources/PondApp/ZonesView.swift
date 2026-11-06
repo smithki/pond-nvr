@@ -12,6 +12,8 @@ struct ZoneEditorSheet: View {
     let camera: Config.Camera
     /// The zones as they'll be saved with the camera; set on Done.
     @Binding var zones: [Config.Zone]
+    /// An ignored zone to begin with, chosen (an event's area, from its menu: Ignore This Area…).
+    var ignoring: IgnoredArea? = nil
     @State private var draft: [Config.Zone] = []
     @State private var selected: String?
     @State private var picture: CGImage?
@@ -75,6 +77,7 @@ struct ZoneEditorSheet: View {
         .onAppear {
             draft = zones
             selected = zones.first?.id
+            if let ignoring { add(.ignore, points: ignoring.points, categories: ignoring.categories) }
             aspect = CameraAspect.known(camera.id)
         }
         .task {
@@ -191,12 +194,12 @@ struct ZoneEditorSheet: View {
         return categories.map { title($0) }.joined(separator: ", ")
     }
 
-    func add(_ kind: Config.Zone.Kind) {
+    func add(_ kind: Config.Zone.Kind, points: [[Double]]? = nil, categories: [String]? = nil) {
         var n = draft.count + 1
         while draft.contains(where: { $0.id == "zone-\(n)" }) { n += 1 }
         let name = kind == .ignore ? "Ignored \(draft.filter(\.isIgnored).count + 1)" : "Zone \(draft.filter { !$0.isIgnored }.count + 1)"
-        let zone = Config.Zone(id: "zone-\(n)", name: name, points: [[0.3, 0.4], [0.7, 0.4], [0.7, 0.8], [0.3, 0.8]],
-                               kind: kind == .ignore ? .ignore : nil)
+        let zone = Config.Zone(id: "zone-\(n)", name: name, points: points ?? [[0.3, 0.4], [0.7, 0.4], [0.7, 0.8], [0.3, 0.8]],
+                               kind: kind == .ignore ? .ignore : nil, categories: categories)
         draft.append(zone)
         selected = zone.id
     }

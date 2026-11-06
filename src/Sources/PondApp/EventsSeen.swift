@@ -52,7 +52,8 @@ final class EventsSeen {
 
     /// What's been read lately: this Mac's, or other Ponds'.
     func found(_ events: [TimelineEvent], elsewhere: Bool) {
-        let recent = Dictionary(events.filter { $0.start > before && $0.kind != .privacy }.map { ($0.id, $0.start) },
+        // (Not the quieted: probably nothing, they're not news.)
+        let recent = Dictionary(events.filter { $0.start > before && $0.kind != .privacy && $0.quieted == nil }.map { ($0.id, $0.start) },
                                 uniquingKeysWith: { a, _ in a })
         if elsewhere { if recent != self.elsewhere { self.elsewhere = recent } } else if recent != here { here = recent }
     }

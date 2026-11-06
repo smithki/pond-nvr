@@ -5,6 +5,7 @@ import Control
 import Devices
 import PondCore
 import SwiftUI
+import Watch
 
 struct CamerasView: View {
     @Environment(AppModel.self) private var model
@@ -705,6 +706,9 @@ struct EditCameraSheet: View {
     @State private var showHomeKitOptions = false
     @State private var zones: [Config.Zone] = []
     @State private var editingZones = false
+    /// What's been said of its events (this wasn't anything, it was something), and forgetting it, confirming.
+    @State private var feedback: [EventFeedback] = []
+    @State private var confirmForgetFeedback = false
     @State private var confirmForget = false
     @State private var identifying = false
     /// The camera's recordings, for the remove prompt.
@@ -1166,9 +1170,39 @@ struct EditCameraSheet: View {
                 Text("Zones")
                 Text(zonesSummary)
             }
+            // What it's learnt from what was said of its events, and forgetting it.
+            if !feedback.isEmpty {
+                LabeledContent {
+                    Button("Forget\u{2026}") { confirmForgetFeedback = true }
+                } label: {
+                    Text("Learnt from your feedback")
+                    Text(feedbackSummary)
+                }
+            }
         } header: {
             Text("Detection")
         }
+        .task(id: camera.id) {
+            let source = EventSource(config: model.config), id = camera.id
+            feedback = await Task.detached { source?.feedback(camera: id) ?? [] }.value
+        }
+        .confirmationDialog("Forget what \(camera.name) has learnt?", isPresented: $confirmForgetFeedback) {
+            Button("Forget", role: .destructive) {
+                model.forgetFeedback(camera: camera.id)
+                feedback = []
+            }
+        } message: {
+            Text("Events you said weren\u{2019}t anything, or were, are forgotten, and none are quieted for being like them.")
+        }
+    }
+
+    /// What's been said, and the rules learnt from it.
+    var feedbackSummary: String {
+        let dismissed = feedback.count { $0.verdict == .nothing }, confirmed = feedback.count - dismissed
+        let rules = EventJudge(feedback: feedback).rules.map(\.words)
+        let said = [dismissed > 0 ? "\(dismissed) you said weren\u{2019}t anything" : nil,
+                    confirmed > 0 ? "\(confirmed) you said were something" : nil].compactMap { $0 }.joined(separator: ", ")
+        return ([said.prefix(1).uppercased() + said.dropFirst() + "."] + rules.map { "Quieting: \($0)." }).joined(separator: " ")
     }
 
     var zonesSummary: String {

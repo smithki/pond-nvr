@@ -1046,6 +1046,8 @@ struct RailThumbnail: View {
                 .disabled(onStage && !canRemove)
             Divider()
             Button("Camera Settings…", systemImage: "gearshape", action: openCameraSettings)
+            Button("Edit Zones…", systemImage: "square.dashed") { model.editZones(camera.id) }
+                .disabled(!model.canEditZones(camera.id))
             Button("Doctor…", systemImage: "stethoscope", action: openDoctor)
         }
         .help(onStage ? (canRemove ? "\(camera.name): click to take off the screen" : "\(camera.name): at least one camera stays on the screen")
@@ -1220,6 +1222,7 @@ struct Stage: View {
                         .animation(jumps || place.leaving ? nil : moveAnimation(place.index), value: lineup)
                         .allowsHitTesting(!place.leaving)
                         .onTapGesture(count: 2) { solo(camera.id) }
+                        .modifier(CameraMenu(camera: camera.id, solo: { solo(camera.id) }))
                         // Adding mirrors removing: the others make room first, then the new tile pops into the
                         // gap (rather than landing on tiles that are still moving out of the way).
                         // Placed with .position, a tile's view spans the stage: its own centre, as a point of
@@ -2283,5 +2286,27 @@ extension Array {
         var yes: [Element] = [], no: [Element] = []
         for e in self { if matches(e) { yes.append(e) } else { no.append(e) } }
         return (yes, no)
+    }
+}
+
+/// A stage tile's menu: its camera from here (its settings, its zones, its doctor; another Pond's, only watched).
+struct CameraMenu: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
+    let camera: String
+    let solo: () -> Void
+
+    func body(content: Content) -> some View {
+        let own = model.ownCamera(camera) != nil
+        content.contextMenu {
+            Button("Watch Only This", action: solo)
+            Divider()
+            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.showCameraSettings(camera) { openSettings() } }
+                .disabled(!own)
+            Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(camera) }
+                .disabled(!model.canEditZones(camera))
+            Button("Doctor\u{2026}", systemImage: "stethoscope") { model.showDoctor(camera: camera) }
+                .disabled(!own)
+        }
     }
 }

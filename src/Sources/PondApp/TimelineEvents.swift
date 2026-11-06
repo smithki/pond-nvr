@@ -98,8 +98,24 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
     var labels: [String: Int] = [:]
     /// The watched zones it was in, by name.
     var zones: [String] = []
+    /// Probably nothing, and why: like what the user dismissed (EventJudge). Left out of Events unless asked for.
+    var quieted: Quieted?
 
     var seconds: Double { end.timeIntervalSince(start) }
+
+    /// Its kind as detection has it (for what's said of it, and learnt).
+    var category: DetectedCategory {
+        switch kind {
+        case .person: .person
+        case .vehicle: .vehicle
+        case .bike: .bike
+        case .animal: .animal
+        case .package: .package
+        case .item: .item
+        case .ring: .ring
+        case .motion, .privacy: .other
+        }
+    }
 }
 
 /// One camera's events by start, with the longest's length: those in a stretch of time are found by search
@@ -156,10 +172,13 @@ struct EventSource: Sendable {
         guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }
         // Each one's sentence (the service's, once it's written one: what's in the picture, in words) stands for it;
         // until then, what was found.
-        let described = store.understanding(since: from).compactMapValues { $0.description.flatMap { $0.isEmpty ? nil : $0 } }
+        let understood = store.understanding(since: from)
+        let described = understood.compactMapValues { $0.description.flatMap { $0.isEmpty ? nil : $0 } }
+        // What the user's said of events, to judge these by: those like the dismissed, quieted.
+        let judge = EventJudge(feedback: store.feedback())
         return store.events(since: from).filter { $0.event.start < to }.map { kept in
             let e = kept.event
-            return TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
+            var event = TimelineEvent(id: e.id, camera: e.camera, kind: .init(e.category), start: e.start,
                                  end: kept.ongoing ? max(e.end, now) : max(e.end, e.start.addingTimeInterval(1)),
                                  summary: e.category == .ring ? summary(e) : described[e.id] ?? summary(e), snapshot: e.snapshot.map { URL(fileURLWithPath: (eventsFolder as NSString).appendingPathComponent($0)) },
                                  ongoing: kept.ongoing,
@@ -168,7 +187,31 @@ struct EventSource: Sendable {
                                  confidence: e.category == .ring ? nil : e.confidence,
                                  labels: e.category == .ring ? [:] : e.labels,
                                  zones: e.zones.map { zoneNames["\(e.camera)/\($0)"] ?? $0 })
+            if e.category != .ring {
+                event.quieted = judge.judge(id: e.id, camera: e.camera, category: e.category, start: e.start, box: e.box,
+                                            embedding: understood[e.id].flatMap { $0.subject ?? $0.scene })
+            }
+            return event
         }
+    }
+
+    /// Said of an event: "this wasn't anything", or "it was something" (kept, to learn from).
+    func say(_ verdict: EventFeedback.Verdict, of event: TimelineEvent) {
+        guard let store = EventStore(path: database) else { return }
+        store.record(EventFeedback(id: event.id, camera: event.camera, category: event.category, start: event.start,
+                                   box: event.box, verdict: verdict))
+    }
+
+    /// What's been said of a camera's events, and what it's learnt from that.
+    func feedback(camera: String) -> [EventFeedback] {
+        guard FileManager.default.fileExists(atPath: database), let store = EventStore(path: database, readOnly: true) else { return [] }
+        return store.feedback(camera: camera)
+    }
+
+    /// Forgotten: everything said of a camera's events.
+    func forgetFeedback(camera: String) {
+        guard let store = EventStore(path: database) else { return }
+        store.forgetFeedback(camera: camera)
     }
 
     /// Deleted, with their pictures (the recordings they were in, and what was found in them, are kept).

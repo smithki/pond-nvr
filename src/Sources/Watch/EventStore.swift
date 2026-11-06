@@ -9,7 +9,7 @@ import SQLite3
 public final class EventStore: @unchecked Sendable {
     private var db: OpaquePointer?
     /// Every use of the connection, one at a time (writes in order, off the caller's thread).
-    private let queue = DispatchQueue(label: "pond.events")
+    let queue = DispatchQueue(label: "pond.events")
 
     /// Opened (made, with its table, unless `readOnly`); nil if it can't be.
     public init?(path: String, readOnly: Bool = false) {
@@ -38,6 +38,9 @@ public final class EventStore: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS deleted (id TEXT PRIMARY KEY, time REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS understanding (
                 id TEXT PRIMARY KEY, description TEXT, scene BLOB, subject BLOB, embedder TEXT, time REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS feedback (
+                id TEXT PRIMARY KEY, camera TEXT NOT NULL, category TEXT NOT NULL, start REAL NOT NULL,
+                x REAL, y REAL, w REAL, h REAL, verdict TEXT NOT NULL, embedding BLOB, embedder TEXT, time REAL NOT NULL);
             """, nil, nil, nil) == SQLITE_OK
             guard made else { return nil }
             // Added since the table was first made (fails, harmlessly, when it's there).
@@ -335,13 +338,13 @@ public final class EventStore: @unchecked Sendable {
     }
 
     @discardableResult
-    private func run(_ sql: String, _ values: [Any?]) -> Bool {
+    func run(_ sql: String, _ values: [Any?]) -> Bool {
         guard let statement = prepare(sql, values) else { return false }
         defer { sqlite3_finalize(statement) }
         return sqlite3_step(statement) == SQLITE_DONE
     }
 
-    private func rows<T>(_ sql: String, _ values: [Any?], _ make: (Row) -> T?) -> [T] {
+    func rows<T>(_ sql: String, _ values: [Any?], _ make: (Row) -> T?) -> [T] {
         guard let statement = prepare(sql, values) else { return [] }
         defer { sqlite3_finalize(statement) }
         var out: [T] = []

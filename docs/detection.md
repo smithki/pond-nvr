@@ -60,7 +60,7 @@ Packages are a category of their own, but the built-in model doesn't know them (
 
 ### Zones
 
-Without zones, the whole picture counts. A camera's zones, drawn on its picture in its settings (Detection › Edit Zones), narrow that:
+Without zones, the whole picture counts. A camera's zones, drawn on its picture in its settings (Detection › Edit Zones), or from a right-click on its tile in Live or on one of its events (Edit Zones…; on an event, Ignore This Area… opens them with that event's box drawn as an ignored zone for its kind), narrow that:
 
 - **Watched zones**: once a camera has one, events come only from what's in a watched zone, and only of the kinds it takes (people and left items on the steps, say, but not the neighbour's cat). An event lists the zones it was in.
 - **Ignored zones**: nothing there counts, and nothing moving there (a busy road, a tree in the wind) starts the model.
@@ -80,6 +80,16 @@ A camera's motion sensor in the Home app follows its events: on when one begins 
 The model sees the whole picture squeezed to 640×640, so something small in it (a cat across the room, someone at the end of the drive) is a few dozen pixels. Where something moves, the watcher also gives the model a close-up: the moving area with room around it, at least 640 pixels square, cut from the main stream at full resolution. The main stream is decoded only while something moves (through the recorder's own connection, from its latest keyframe, so a picture is at hand at once) and let go a few seconds after. What the close-up finds is put back in the whole picture's terms and merged with the rest. One more run of the model (about 10 ms) for each of up to two moving areas, only while something moves. `pond detect FILE --camera ID --closer` replays a recording this way.
 
 The watchers share one model, and the camera connection that recording and live view already use. Decoding is done by the media engine, so watching costs little until something moves.
+
+## What you say of events
+
+**This Wasn't Anything** (an event's menu, on its card or in its details) tells Pond an event wasn't worth one, and later events like it are *quieted*: still recorded and made (and HomeKit hears of them as ever), but marked "probably nothing" with why, left out of Events and of the new count. The **Quieted** chip in Events shows them; **It Was Something** on one undoes it for what's like it. An event is quieted when it's:
+
+- **one you dismissed**;
+- **under a learnt rule**: three or more of one kind dismissed in one spot (their boxes' middles within an eighth of the picture, their sizes within twice each other) in one part of the day (night is 7 p.m. to 7 a.m.), and none of that kind said to be something there: another of the kind in that spot then ("vehicles here at night");
+- **like one you dismissed**: of the kind, near its spot, its picture's embedding (the one search uses, of its subject) very like that one's (cosine 0.9 or more), and more like it than like any said to be something there: a shadow, a flag, a reflection, called a person again.
+
+What's said is kept in Pond's database (its `feedback` table: the event's camera, kind, box and time, the verdict, and a copy of its embedding, so it outlasts the event). A camera's settings say what it's learnt (Detection › Learnt from your feedback), and **Forget…** clears it.
 
 ## Trying a model
 

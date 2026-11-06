@@ -75,7 +75,14 @@ struct EventsView: View {
         var front: Bool
     }
 
-    var forCamera: [TimelineEvent] { events.filter { camera == nil || $0.camera == camera } }
+    /// The camera's (or every camera's): those shown, quieted or not as asked (only the quieted, or none of them).
+    var forCamera: [TimelineEvent] {
+        let quietedOnly = model.eventsState.quietedOnly
+        return events.filter { (camera == nil || $0.camera == camera) && ($0.quieted != nil) == quietedOnly }
+    }
+
+    /// How many of the camera's are quieted (probably nothing), for their chip.
+    var quietedCount: Int { events.count { (camera == nil || $0.camera == camera) && $0.quieted != nil } }
     /// Shown: the camera's, of the kinds on; of a search, those it found (best first, when it ranks them).
     var shown: [TimelineEvent] {
         let newOnly = model.eventsState.newOnly
@@ -248,7 +255,7 @@ struct EventsView: View {
             EventsFilterBar(model: model, cameras: cameras, railShown: railFits, kinds: kinds,
                             counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count),
                             newCount: model.eventsState.newOnly != nil ? shown.count : forCamera.count(where: model.seenEvents.isNew),
-                            newIDs: Set(forCamera.filter(model.seenEvents.isNew).map(\.id)),
+                            newIDs: Set(forCamera.filter(model.seenEvents.isNew).map(\.id)), quietedCount: quietedCount,
                             question: $question, searching: searching, slow: slow, problem: searchProblem, result: search,
                             submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
                 .padding(.top, 8)
@@ -292,6 +299,8 @@ struct EventsView: View {
             choose(e)
             return .handled
         }
+        // Something said of an event: read again (what's like it, quieted).
+        .onChange(of: model.feedbackChanged) { Task { await load() } }
         .task {
             // Opened with a question (`--search QUESTION`: for trying it, and pictures for the docs): asked at once.
             if let asked = launchArgument("--search"), question.isEmpty {
@@ -609,6 +618,8 @@ struct EventsFilterBar: View {
     /// How many are new (or, with only the new shown, how many those are), and the new ones' ids, for New's chip.
     var newCount = 0
     var newIDs: Set<String> = []
+    /// How many are quieted (probably nothing), for their chip.
+    var quietedCount = 0
     /// The search: its field, whether it's being answered, how it was read (its parts, a chip each), and what's
     /// done when it's asked, cleared, or a part's taken off.
     @Binding var question: String
@@ -841,6 +852,28 @@ struct EventsFilterBar: View {
             .buttonBorderShape(.capsule)
             .disabled(model.seenEvents.count == 0)
             .help("Count every event as seen")
+            // The quieted (like those dismissed): there while there are some (or they're shown), to look them over.
+            let quieted = model.eventsState.quietedOnly
+            if quieted || quietedCount > 0 {
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { model.eventsState.quietedOnly.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "moon.zzz").foregroundStyle(quieted ? Color.accentColor : .secondary)
+                        if titled { Text("Quieted") }
+                        Text("\(quietedCount)").monospacedDigit().foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: Double(quietedCount)))
+                    }
+                    .font(.callout)
+                    .padding(.horizontal, titled ? 10 : 8)
+                    .padding(.vertical, 5)
+                    .opacity(quieted ? 1 : 0.7)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .glassEffect(quieted ? .regular.tint(Color.accentColor.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
+                .help(quieted ? "Show the events not quieted" : "Show the events quieted as probably nothing (like those you dismissed)")
+            }
         }
     }
 

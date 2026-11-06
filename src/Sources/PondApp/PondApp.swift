@@ -370,6 +370,8 @@ struct ContentView: View {
             if model.showingOverview, overviewCentre == nil { overviewCentre = middle }
         }
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
+        // A camera's zones, from a tile's or an event's menu.
+        .sheet(item: $model.zoneEditing) { ZoneEditingSheet(editing: $0) }
         // The Ponds paired with this one, and which are connected, for the switcher: every 10 s (every 2 s until the
         // service first answers).
         .task {

@@ -17,6 +17,8 @@ struct EventCard: View, Equatable {
     let open: () -> Void
     let delete: () -> Void
     @State private var hovering = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
 
@@ -40,7 +42,7 @@ struct EventCard: View, Equatable {
                             .help("New: not seen yet")
                             .transition(.scale.combined(with: .opacity))
                     }
-                    Text("\(camera) \u{00B7} \(event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(EventCallout.length(event.seconds))")
+                    Text("\(camera) \u{00B7} \(event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(event.quieted?.words ?? EventCallout.length(event.seconds))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -71,6 +73,22 @@ struct EventCard: View, Equatable {
                 Button("Show Picture in Finder") { NSWorkspace.shared.activateFileViewerSelecting([snapshot]) }
             }
             if event.pond == nil {
+                // What it was (for what's like it, from now on).
+                Divider()
+                if event.quieted != nil {
+                    Button("It Was Something", systemImage: "exclamationmark.bubble") { model.say(.something, of: event) }
+                } else {
+                    Button("This Wasn\u{2019}t Anything", systemImage: "moon.zzz") { model.say(.nothing, of: event) }
+                }
+                // Its camera, from here: its settings, its zones, and this event's area left alone from now on.
+                Divider()
+                Button("Ignore This Area\u{2026}", systemImage: "eye.slash") { model.editZones(event.camera, ignoring: event) }
+                    .disabled(!model.canEditZones(event.camera) || event.box == nil)
+                Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(event.camera) }
+                    .disabled(!model.canEditZones(event.camera))
+                Button("Camera Settings\u{2026}", systemImage: "gearshape") {
+                    model.showCameraSettings(event.camera) { openSettings() }
+                }
                 Divider()
                 Button("Delete Event…", role: .destructive, action: delete)
             }

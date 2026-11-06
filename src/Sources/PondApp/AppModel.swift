@@ -86,6 +86,10 @@ final class AppModel {
     /// How each camera is doing (the doctor), and what its window shows (DoctorWindow).
     let doctor = CameraDoctor()
     var doctorPage: DoctorPage = .cameras
+    /// Counted up as something's said of an event (read again, for what's quieted).
+    var feedbackChanged = 0
+    /// The zone editor asked for from the main window (a tile's or an event's menu).
+    var zoneEditing: ZoneEditing?
     /// Which events are new (seen once on screen in Events).
     let seenEvents = EventsSeen(demo: DemoSession.scenario?.name)
     /// Opens a window by its id (SwiftUI's, kept by the views that have it), for what opens one from outside a view:
@@ -742,4 +746,6 @@ struct EventsState: Equatable {
     /// Only the new ones: those new as it was turned on (kept, though they're seen as they're looked at), and any come
     /// in since. Nil: every event.
     var newOnly: Set<String>?
+    /// Only the quieted ones (probably nothing: like those dismissed), to look over; otherwise they're left out.
+    var quietedOnly = false
 }

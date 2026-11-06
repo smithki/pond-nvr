@@ -193,6 +193,13 @@ struct EventDetail: View {
                 }
                 if event.pond == nil {
                     Divider()
+                    // What it was (for what's like it, from now on).
+                    if event.quieted != nil {
+                        Button("It Was Something", systemImage: "exclamationmark.bubble") { model.say(.something, of: event) }
+                    } else {
+                        Button("This Wasn\u{2019}t Anything", systemImage: "moon.zzz") { model.say(.nothing, of: event) }
+                    }
+                    Divider()
                     Button("Delete Event…", role: .destructive, action: delete)
                 }
             } label: {
