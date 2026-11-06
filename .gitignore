@@ -18,3 +18,12 @@ __pycache__/
 # Swift
 .build/
 .swiftpm/
+
+# Never anyone's footage, pictures or Pond database (scripts/check-private.sh refuses them too): recordings, events,
+# snapshots, test scenes from a real home. Made-up media is named in scripts/private-allowlist.txt and added on purpose.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+Recordings/
+Scenes/

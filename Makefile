@@ -19,12 +19,13 @@ endif
 APPLE_DEV := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
 SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/dev/null | grep '"Pond Local Signing"'),Pond Local Signing,-))
 
-.PHONY: help build app demo check test test-docker clean install update signing
+.PHONY: help build app demo check hooks test test-docker clean install update signing
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
 	@echo "make app            build dist/Pond NVR.app (the settings app, with pond inside for the login service)"
-	@echo "make check          compile everything, tests included, with warnings as errors"
+	@echo "make check          no footage in the repository; compile everything, tests included, with warnings as errors"
+	@echo "make hooks          once per checkout: a commit hook that refuses footage, pictures and databases"
 	@echo "make test           run the tests here (they write only temporary files, so a Mac is fine)"
 	@echo "make test-docker    run the tests of the modules that build on Linux, in a throwaway container (needs Docker)"
 	@echo "make install        build, then copy pond to /usr/local/bin (sudo)"
@@ -92,7 +93,13 @@ app: build
 	fi
 
 check:
+	@scripts/check-private.sh
 	swift build --package-path $(PKG) --build-tests -Xswiftc -warnings-as-errors
+
+# A pre-commit hook of this checkout's own: what's staged is checked for footage, pictures and databases.
+hooks:
+	@printf '#!/bin/sh\nexec scripts/check-private.sh --staged\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+	@echo "✓ .git/hooks/pre-commit: no footage, pictures or databases in a commit"
 
 test:
 	swift test --package-path $(PKG)

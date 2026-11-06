@@ -1,0 +1,5 @@
+# Made-up media the repository may keep (scripts/check-private.sh): one path a line, with why above it.
+# A test pattern (ffmpeg's testsrc), for HomeKit's stream tests.
+src/Tests/HAPCameraTests/Fixtures/in-order.h264
+# A test pattern (ffmpeg's testsrc), five seconds, for the app's playback tests.
+src/Tests/PondAppTests/Fixtures/five-seconds.mp4

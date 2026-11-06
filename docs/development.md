@@ -51,6 +51,22 @@ The package is in `src/`; `swift build --package-path src` and Xcode (open `src/
 
 **Toolchain.** Swift Testing and the default build system need Xcode's toolchain. If `xcode-select -p` says `/Library/Developer/CommandLineTools`, the Makefile sets `DEVELOPER_DIR` to Xcode for its own commands. Running `swift` by hand, either do the same (`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`) or switch for good with `sudo xcode-select -s /Applications/Xcode.app`.
 
+## Footage stays private
+
+No one's recordings, event pictures, snapshots, test scenes or Pond database (camera names, times, what was seen) are kept in the repository or shared with contributors or other users: not the maintainers' own, not a user's in a bug report. `scripts/check-private.sh` refuses any recording, picture or database file (it runs in `make check`; `make hooks` adds it as a pre-commit hook), unless `scripts/private-allowlist.txt` names it: made-up media only, such as a test pattern or a drawing of the demo's, each with why. A bug's shown with a demo scenario ([demo.md](demo.md)) or the doctor's report, which leaves out addresses, passwords and pictures.
+
+What a Pond learns from its owner (events said to be nothing or something, the rules and likenesses from them, any tuning) stays in that Pond's own database, on its Mac; nothing of it is sent anywhere, and no Pond learns from another's cameras.
+
+## How detection changes are judged
+
+Everything every Pond starts with (detection's thresholds, the tracker's rules, what quiets an event) changes only on evidence anyone can see and run again, so no one home's cameras decide what all homes get:
+
+- **Shared scenes:** the demo's made-up scenes (in the repository, the same on any Mac) and public datasets whose terms allow it (downloaded to the Mac that runs them, not kept here). A change must not make them worse, misses above all.
+- **Many homes, numbers only:** testers run the same scenes harness on their own private scenes, on their own Macs, and report only the scores (misses and false events, per kind of scene); their footage never leaves them. A change has to hold up across homes, not in one.
+- **One home finds, it doesn't decide:** a problem seen on one's own cameras (a parked car that kept an event going all night, say) says what to look into; the fix is made general, and its numbers are chosen and checked on shared scenes before it ships.
+
+Learning from one's own feedback is a Pond's own business, tuned for its own cameras and checked against examples held back from what it learned from (so it's never graded on what it was taught, and never hides what its owner said mattered).
+
 ## Where things go
 
 - One module per responsibility; the table is in [architecture.md](architecture.md).
