@@ -237,6 +237,12 @@ struct LiveView: View {
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
                 // The overview's Show These Cameras: those that need attention, alone on the stage (the rail filtered
                 // to them too).
+                // The camera window's Show in Live: that camera alone.
+                .onChange(of: model.soloRequest, initial: true) { _, asked in
+                    guard let asked else { return }
+                    if model.liveCameras.contains(where: { $0.id == asked }) { solo(asked) }
+                    model.soloRequest = nil
+                }
                 .onChange(of: model.stagingNeedsAttention, initial: true) { _, asked in
                     guard asked > 0 else { return }
                     let needing = model.attentionCameras
@@ -929,12 +935,8 @@ struct RailThumbnail: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettingsWindow
 
-    /// Settings → Cameras, with this camera's sheet open.
-    func openCameraSettings() {
-        model.settingsTab = .cameras
-        model.cameraToEdit = camera.id
-        openSettingsWindow()
-    }
+    /// The camera's settings, on its page in the camera window.
+    func openCameraSettings() { model.showCameraSettings(camera.id) }
 
     /// The doctor's window, at this camera.
     func openDoctor() { model.showDoctor(camera: camera.id) }
@@ -2301,7 +2303,7 @@ struct CameraMenu: ViewModifier {
         content.contextMenu {
             Button("Watch Only This", action: solo)
             Divider()
-            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.showCameraSettings(camera) { openSettings() } }
+            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.showCameraSettings(camera) }
                 .disabled(!own)
             Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(camera) }
                 .disabled(!model.canEditZones(camera))

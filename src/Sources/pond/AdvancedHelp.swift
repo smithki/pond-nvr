@@ -6,7 +6,7 @@ enum AdvancedHelp {
 Usage: pond advanced <command> [options]
 
 Testing tools: for trying detection models and checking a new version against this Pond's own events. Test scenes
-are kept with beta and test features on (Settings › General › Advanced).
+are kept with beta and test features on (Settings › Advanced).
 
 Detection
   advanced detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--compute all|ane|gpu|cpu]

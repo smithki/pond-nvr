@@ -15,7 +15,7 @@ public struct Config: Codable, Equatable, Sendable {
     public var cameras: [Camera]
     /// Reaching this Mac from outside (remote access); left out, it's off.
     public var remote: Remote?
-    /// Beta and test features (Settings › General › Advanced): what's being tried before everyone has it, and what
+    /// Beta and test features (Settings › Advanced): what's being tried before everyone has it, and what
     /// checking a new version needs (test scenes kept from this Pond's events). Left out, off.
     public var testFeatures: Bool?
 

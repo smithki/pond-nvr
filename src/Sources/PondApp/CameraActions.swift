@@ -66,12 +66,16 @@ extension AppModel {
         zoneEditing = ZoneEditing(camera: camera, ignoring: event.flatMap(IgnoredArea.init))
     }
 
-    /// Settings › Cameras, at this camera.
-    func showCameraSettings(_ camera: String, open: () -> Void) {
-        settingsTab = .cameras
-        cameraToEdit = camera
-        open()
+    /// A camera alone on Live's stage, in the main window brought forward (its Pond shown, if it wasn't).
+    func showInLive(_ camera: String) {
+        if !shownPonds.includes(AppModel.pond(of: camera)) { shownPonds = .all }
+        mode = .live
+        soloRequest = camera
+        AppModel.openWindow?("main")
     }
+
+    /// The camera's settings, on its page in the camera window.
+    func showCameraSettings(_ camera: String) { showCamera(camera, tab: .settings) }
 
     /// A camera's zones, kept as the editor's Done gives them.
     func saveZones(_ zones: [Config.Zone], for camera: String) {

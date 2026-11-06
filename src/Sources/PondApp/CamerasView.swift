@@ -675,6 +675,9 @@ struct EditCameraSheet: View {
     var focus: Field?
     /// As tall as the window allows; the form scrolls inside.
     var height = 500.0
+    /// On a camera's page in the camera window (its Settings tab), not a sheet: the page's size, Revert for Cancel, and
+    /// Save leaving it open.
+    var embedded = false
     @FocusState private var focused: Field?
     enum Field { case password, address }
     @State private var name = ""
@@ -767,7 +770,8 @@ struct EditCameraSheet: View {
 
             footer
         }
-        .frame(width: 560, height: height)
+        .frame(width: embedded ? nil : 560, height: embedded ? nil : height)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         // A new address for the camera moves the stream addresses with it (those on its old address).
         .onChange(of: host) { old, new in
             func moved(_ url: String) -> String {
@@ -779,22 +783,7 @@ struct EditCameraSheet: View {
             subURL = moved(subURL)
         }
         .onAppear {
-            name = camera.name
-            host = camera.host
-            mainURL = camera.main
-            subURL = camera.sub
-            provider = camera.device?.provider ?? ""
-            username = camera.username
-            newID = camera.id
-            kind = camera.kind
-            homeKitViewers = camera.homeKitViewerSlots
-            instantLive = camera.keepsLiveReady
-            homeKitVideo = camera.homekitVideo ?? .camera
-            homeKitRecording = camera.homekitRecording == true
-            detection = camera.watches
-            recordsSub = camera.recordsSub == true
-            homeKitMotion = camera.homekitMotion ?? .detection
-            zones = camera.zones
+            load()
             // Opened to fix the password: show the login.
             if focus == .password { showLogin = true }
         }
@@ -828,11 +817,11 @@ struct EditCameraSheet: View {
         .confirmationDialog("Remove \(camera.name)?", isPresented: $confirmRemove) {
             Button("Remove Camera", role: .destructive) {
                 model.remove(camera.id)
-                dismiss()
+                finish(removed: true)
             }
             Button("Remove Camera and Recordings", role: .destructive) {
                 model.remove(camera.id, deleteRecordings: true)
-                dismiss()
+                finish(removed: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -840,6 +829,37 @@ struct EditCameraSheet: View {
         }
         // Measured when the sheet opens: a prompt's text is not updated once it is showing.
         .task { recordingsSize = await model.recordingsSize(of: camera.id) }
+    }
+
+    /// The fields as the camera is saved (on opening, and Revert).
+    func load() {
+        let camera = saved
+        name = camera.name
+        host = camera.host
+        mainURL = camera.main
+        subURL = camera.sub
+        provider = camera.device?.provider ?? ""
+        username = camera.username
+        password = ""
+        newID = camera.id
+        kind = camera.kind
+        homeKitViewers = camera.homeKitViewerSlots
+        instantLive = camera.keepsLiveReady
+        homeKitVideo = camera.homekitVideo ?? .camera
+        homeKitRecording = camera.homekitRecording == true
+        detection = camera.watches
+        recordsSub = camera.recordsSub == true
+        homeKitMotion = camera.homekitMotion ?? .detection
+        zones = camera.zones
+    }
+
+    /// Done with it: a sheet closes; on a camera's page, it stays, as saved (or, removed, the page goes to all cameras).
+    func finish(removed: Bool = false) {
+        if embedded {
+            if removed { model.doctorPage = .cameras } else { load() }
+        } else {
+            dismiss()
+        }
     }
 
     /// The camera as saved now (HomeKit changes apply on Save).
@@ -1219,13 +1239,16 @@ struct EditCameraSheet: View {
 
     var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "video.fill")
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 44, height: 44)
-                .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // (On its page, the window's title names it: only who it logs in as, and where.)
+            if !embedded {
+                Image(systemName: "video.fill")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 44, height: 44)
+                    .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
             VStack(alignment: .leading, spacing: 2) {
-                Text(name.isEmpty ? camera.name : name).font(.title2.bold()).lineLimit(1)
+                if !embedded { Text(name.isEmpty ? camera.name : name).font(.title2.bold()).lineLimit(1) }
                 Text("\(camera.id) · \(camera.username)@\(camera.host)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1251,7 +1274,11 @@ struct EditCameraSheet: View {
             if let problem {
                 Text(problem).font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
-            Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            if embedded {
+                Button("Revert") { load() }
+            } else {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
             Button("Save") { Task { await save() } }
                 .keyboardShortcut(.defaultAction)
                 .disabled(problem != nil)
@@ -1305,8 +1332,12 @@ struct EditCameraSheet: View {
                 return
             }
         }
-        if newID != camera.id, !model.rename(camera.id, to: newID) { return }
-        dismiss()
+        if newID != camera.id {
+            guard model.rename(camera.id, to: newID) else { return }
+            // Renamed on its page: the page follows it.
+            if embedded { model.doctorPage = .camera(newID) }
+        }
+        finish()
     }
 }
 
@@ -1422,7 +1453,9 @@ struct StreamAddressField: View {
     /// An rtsp:// address without a login (the password is kept in the Keychain).
     static func isValid(_ address: String) -> Bool {
         let trimmed = address.trimmingCharacters(in: .whitespaces)
-        guard let parts = URLComponents(string: trimmed), parts.scheme?.lowercased() == "rtsp", parts.host?.isEmpty == false
+        // (Or a demo camera's: its scheme of its own, made-up streams the demo draws.)
+        guard let parts = URLComponents(string: trimmed), let scheme = parts.scheme?.lowercased(),
+              scheme == "rtsp" || scheme == Demo.scheme, parts.host?.isEmpty == false
         else { return false }
         return parts.user == nil && parts.password == nil
     }

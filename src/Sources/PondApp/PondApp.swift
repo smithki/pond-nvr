@@ -34,7 +34,7 @@ struct PondApp: App {
         // The doctor, a window of its own (one): for working out why, beside the view it's about. One size: its pages
         // are laid out to fit it (the form's sections and the card under them line up at this width; wider, the
         // form's margins grow and the card's don't).
-        Window("Doctor", id: DoctorWindow.id) {
+        Window("Cameras", id: DoctorWindow.id) {
             DoctorWindow()
                 .environment(model)
                 .preferredColorScheme(appearance.scheme)
@@ -421,10 +421,18 @@ struct ContentView: View {
                 model.cameraToEdit = id
                 openSettings()
             }
-            // --doctor [ID|recorder]: the doctor's window, open (at that camera, or the recorder).
+            // --doctor [ID [settings]|recorder]: the camera window, open (at that camera's doctor or settings, or the
+            // recorder).
             if let at = CommandLine.arguments.firstIndex(of: "--doctor") {
-                let next = at + 1 < CommandLine.arguments.count ? CommandLine.arguments[at + 1] : ""
-                model.showDoctor(next == "recorder" ? .recorder : next.hasPrefix("-") || next.isEmpty ? .cameras : .camera(next))
+                let args = CommandLine.arguments
+                let next = at + 1 < args.count ? args[at + 1] : ""
+                if next == "recorder" {
+                    model.showDoctor(.recorder)
+                } else if next.hasPrefix("-") || next.isEmpty {
+                    model.showDoctor(.cameras)
+                } else {
+                    model.showCamera(next, tab: at + 2 < args.count && args[at + 2] == "settings" ? .settings : .doctor)
+                }
             }
             // --add-camera: Add Camera, open (likewise).
             if CommandLine.arguments.contains("--add-camera") { model.addingCamera = true }

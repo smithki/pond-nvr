@@ -187,8 +187,12 @@ public enum HealthDiagnosis {
         let cameras = Set(all.map(\.camera)).subtracting([""])
         var times: [Date] = []
         for incident in unreachable {
-            if starts.contains(where: { incident.time.timeIntervalSince($0) >= 0 && incident.time.timeIntervalSince($0) < 60 }) {
-                times.append(incident.time)
+            // Just after the service started: this Mac's network not up yet, unless the others reached theirs (one
+            // camera unreachable as the rest connect is that camera's, off or gone; with one camera, there's no
+            // telling, so it's taken as the Mac's).
+            if let start = starts.first(where: { incident.time.timeIntervalSince($0) >= 0 && incident.time.timeIntervalSince($0) < 60 }) {
+                let atStart = Set(unreachable.filter { $0.time.timeIntervalSince(start) >= 0 && $0.time.timeIntervalSince(start) < 60 }.map(\.camera))
+                if cameras.count < 2 || atStart.count >= max(2, (cameras.count + 1) / 2) { times.append(incident.time) }
                 continue
             }
             let together = Set(unreachable.filter { abs($0.time.timeIntervalSince(incident.time)) < 30 }.map(\.camera))

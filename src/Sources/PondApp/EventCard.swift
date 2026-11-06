@@ -87,7 +87,7 @@ struct EventCard: View, Equatable {
                 Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(event.camera) }
                     .disabled(!model.canEditZones(event.camera))
                 Button("Camera Settings\u{2026}", systemImage: "gearshape") {
-                    model.showCameraSettings(event.camera) { openSettings() }
+                    model.showCameraSettings(event.camera)
                 }
                 Divider()
                 Button("Delete Event…", role: .destructive, action: delete)

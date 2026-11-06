@@ -86,6 +86,8 @@ final class AppModel {
     /// How each camera is doing (the doctor), and what its window shows (DoctorWindow).
     let doctor = CameraDoctor()
     var doctorPage: DoctorPage = .cameras
+    /// A camera's page in the camera window: its doctor or its settings.
+    var cameraTab: CameraTab = .doctor
     /// Counted up as something's said of an event (read again, for what's quieted).
     var feedbackChanged = 0
     /// The zone editor asked for from the main window (a tile's or an event's menu).
@@ -224,6 +226,8 @@ final class AppModel {
     var railNeedsAttention = false
     /// Asked (from the overview) to put the cameras that need attention on the stage, alone: Live does, when it changes.
     var stagingNeedsAttention = 0
+    /// Asked (from the camera window) to show one camera alone on Live's stage: Live does, then clears it.
+    var soloRequest: String?
     /// Cameras on the network (found at launch, at most daily, and when Add Camera opens), whether a look is
     /// under way, the ones not to mention again, and the one Add Camera starts from. See DiscoveryModel.
     var foundCameras: [FoundCamera] = DemoSession.scenario == nil ? AppModel.keptFoundCameras() : []

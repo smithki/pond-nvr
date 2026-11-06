@@ -97,6 +97,21 @@ import Testing
         #expect(!HealthDiagnosis.findings(camera: "porch", incidents: incidents, samples: [], now: Self.now).contains { $0.kind == .dropsOff })
     }
 
+    @Test func oneCameraUnreachableAsTheServiceStartsWhileTheOthersConnectIsThatCameras() {
+        // Each time the service started, the garden connected and the porch didn't: the porch's, not this Mac's.
+        var incidents: [HealthIncident] = []
+        for minutes in [40.0, 25, 10] {
+            incidents += [Self.at(minutes, "", .serviceStarted), Self.at(minutes - 0.2, "porch", .unreachable),
+                          Self.at(minutes - 0.2, "garden", .connected)]
+        }
+        let found = HealthDiagnosis.findings(camera: "porch", incidents: incidents, samples: [], now: Self.now).map(\.kind)
+        #expect(!found.contains(.macNetwork))
+        #expect(found.contains(.dropsOff))
+        // Both unreachable as it started: this Mac's network, as before.
+        let both = incidents.filter { $0.kind != .connected } + [40.0, 25, 10].map { Self.at($0 - 0.2, "garden", .unreachable) }
+        #expect(HealthDiagnosis.findings(camera: "porch", incidents: both, samples: [], now: Self.now).map(\.kind) == [.macNetwork])
+    }
+
     static func sample(_ minutesAgo: Double, _ edit: (inout HealthSample) -> Void) -> HealthSample {
         var sample = HealthSample(camera: "porch", start: now.addingTimeInterval(-minutesAgo * 60))
         edit(&sample)

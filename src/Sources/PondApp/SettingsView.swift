@@ -6,7 +6,7 @@ import Understanding
 import Watch
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, cameras, storage, retention, remote
+    case general, cameras, storage, retention, remote, advanced
 
     var id: String { rawValue }
 }
@@ -24,6 +24,7 @@ struct SettingsView: View {
                 needsSettings { RetentionView() }
             }
             Tab("Remote Access", systemImage: "network", value: SettingsTab.remote) { needsSettings { RemoteAccessView() } }
+            Tab("Advanced", systemImage: "gearshape.2", value: SettingsTab.advanced) { AdvancedSettings() }
         }
         // Tall enough that a camera's settings (a sheet as tall as this) fit unscrolled with their sections
         // closed.
@@ -63,13 +64,6 @@ struct GeneralSettings: View {
             } footer: {
                 Text("Dark by default: video is easier to watch on a dark surround.").foregroundStyle(.secondary)
             }
-            Section {
-                LocationRow(symbol: "doc.text", path: model.store.path)
-            } header: {
-                Text("Settings file")
-            } footer: {
-                Text("Shared by the app and the pond command. Change it with POND_CONFIG or --config.").foregroundStyle(.secondary)
-            }
             UnderstandingSection()
             // (In a demo, its toolbar's menu switches between them.)
             if DemoSession.scenario == nil {
@@ -92,9 +86,26 @@ struct GeneralSettings: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            AdvancedSection()
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Advanced: beta and test features, and the app itself (its version, its settings file).
+struct AdvancedSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Form {
+            if model.config != nil { AdvancedSection() }
             Section {
                 LabeledContent("Version", value: Brand.version)
+                LocationRow(symbol: "doc.text", path: model.store.path)
+            } header: {
+                Text("About Pond")
+            } footer: {
+                Text("The settings file is shared by the app and the pond command. Change it with POND_CONFIG or --config.")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -125,8 +136,6 @@ struct AdvancedSection: View {
                     Text("\(size.scenes) kept, \(ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)). Checked with pond advanced scenes.")
                 }
             }
-        } header: {
-            Text("Advanced")
         }
         .task(id: model.config?.testFeatures) {
             guard let library else { return }

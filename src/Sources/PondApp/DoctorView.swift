@@ -173,6 +173,7 @@ struct DoctorView: View {
             header(camera)
         }
         Section("Last 24 hours") {
+            IncidentStrip(incidents: doctor.incidents(of: camera.id), samples: doctor.samples(of: camera.id))
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
                 .frame(height: 90)
         }
@@ -317,6 +318,108 @@ struct DayCharts: View {
                 .chartXAxis { Self.hours }
             }
         }
+    }
+}
+
+/// The day at a glance, drawn as the Timeline draws a day: when the camera was down (red), private (indigo), and
+/// marks where its video stalled or Pond restarted it (orange), over the same 24 hours as the charts below.
+struct IncidentStrip: View {
+    let incidents: [HealthIncident]
+    /// Its five minutes at a time: green only where video was seen (not while this Mac was off).
+    let samples: [HealthSample]
+
+    /// unknown: before anything was recorded of it (drawn as the bare track).
+    enum State: Equatable { case unknown, up, down, hidden }
+
+    struct Span: Identifiable {
+        let start: Date, end: Date, state: State
+        var id: Date { start }
+    }
+
+    /// What a kind says of the camera from then on (nil: it doesn't change it).
+    static func state(after kind: HealthIncident.Kind) -> State? {
+        switch kind {
+        case .connected, .madePublic: .up
+        case .unreachable, .loginRefused, .failed, .wakeFailed: .down
+        case .privacyMode, .madePrivate: .hidden
+        case .stalled, .controlFailed, .serviceStarted, .restarted: nil
+        }
+    }
+
+    static func spans(_ incidents: [HealthIncident], in day: ClosedRange<Date>) -> [Span] {
+        let sorted = incidents.sorted { $0.time < $1.time }
+        var state = sorted.last { $0.time < day.lowerBound }.flatMap { Self.state(after: $0.kind) } ?? .unknown
+        var since = day.lowerBound
+        var spans: [Span] = []
+        for incident in sorted where day.contains(incident.time) {
+            guard let next = Self.state(after: incident.kind), next != state else { continue }
+            if state != .unknown { spans.append(Span(start: since, end: incident.time, state: state)) }
+            state = next
+            since = incident.time
+        }
+        if state != .unknown { spans.append(Span(start: since, end: day.upperBound, state: state)) }
+        return spans
+    }
+
+    static let marked: Set<HealthIncident.Kind> = [.stalled, .restarted]
+
+    var body: some View {
+        let day = DayCharts.day
+        let spans = Self.spans(incidents, in: day)
+        let marks = incidents.filter { day.contains($0.time) && Self.marked.contains($0.kind) }.map(\.time)
+        VStack(alignment: .leading, spacing: 4) {
+            Canvas { context, size in
+                let length = day.upperBound.timeIntervalSince(day.lowerBound)
+                func x(_ time: Date) -> CGFloat { size.width * time.timeIntervalSince(day.lowerBound) / length }
+                let track = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
+                context.fill(track, with: .color(.secondary.opacity(0.2)))
+                context.clip(to: track)
+                for sample in samples where sample.frames > 0 && day.contains(sample.start) {
+                    let rect = CGRect(x: x(sample.start), y: 0, width: x(sample.start.addingTimeInterval(HealthSample.seconds)) - x(sample.start) + 0.5,
+                                      height: size.height)
+                    context.fill(Path(rect), with: .color(Self.color(.up)))
+                }
+                for span in spans where span.state != .up {
+                    let rect = CGRect(x: x(span.start), y: 0, width: max(2, x(span.end) - x(span.start)), height: size.height)
+                    context.fill(Path(rect), with: .color(Self.color(span.state)))
+                }
+                for time in marks {
+                    context.fill(Path(CGRect(x: x(time) - 1, y: 0, width: 2, height: size.height)), with: .color(.orange))
+                }
+            }
+            .frame(height: 10)
+            .accessibilityLabel(Self.summary(spans, marks: marks.count))
+            HStack(spacing: 12) {
+                Self.key(.green.opacity(0.35), "Connected")
+                Self.key(.red, "Down")
+                Self.key(.indigo, "Private")
+                Self.key(.orange, "Stalled or restarted")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    static func color(_ state: State) -> Color {
+        switch state {
+        case .up: .green.opacity(0.35)
+        case .down: .red
+        case .hidden: .indigo
+        case .unknown: .clear
+        }
+    }
+
+    static func key(_ color: Color, _ title: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(title)
+        }
+    }
+
+    static func summary(_ spans: [Span], marks: Int) -> String {
+        let down = spans.filter { $0.state == .down }.count, hidden = spans.filter { $0.state == .hidden }.count
+        if down == 0 && hidden == 0 && marks == 0 { return "Connected all day" }
+        return "Down \(down) times, private \(hidden) times, \(marks) stalls or restarts"
     }
 }
 
