@@ -142,7 +142,7 @@ struct RemoteAccessView: View {
         .disabled(!serviceRunning)
         .overlay(alignment: .bottom) {
             if !serviceRunning {
-                Text("The recorder isn\u{2019}t running: remote access is kept by it (Settings › Recorder).")
+                Text("The recorder isn\u{2019}t running: remote access is kept by it (the doctor\u{2019}s Recorder page).")
                     .font(.callout)
                     .padding(8)
                     .background(.regularMaterial, in: Capsule())

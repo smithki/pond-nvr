@@ -6,7 +6,7 @@ import Understanding
 import Watch
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, cameras, doctor, storage, retention, remote, recorder
+    case general, cameras, storage, retention, remote
 
     var id: String { rawValue }
 }
@@ -19,13 +19,11 @@ struct SettingsView: View {
         TabView(selection: $model.settingsTab) {
             Tab("General", systemImage: "gearshape", value: SettingsTab.general) { GeneralSettings() }
             Tab("Cameras", systemImage: "video", value: SettingsTab.cameras) { needsSettings { CamerasView() } }
-            Tab("Doctor", systemImage: "stethoscope", value: SettingsTab.doctor) { needsSettings { DoctorView() } }
             Tab("Storage", systemImage: "externaldrive", value: SettingsTab.storage) { needsSettings { StorageView() } }
             Tab("Retention", systemImage: "clock.arrow.circlepath", value: SettingsTab.retention) {
                 needsSettings { RetentionView() }
             }
             Tab("Remote Access", systemImage: "network", value: SettingsTab.remote) { needsSettings { RemoteAccessView() } }
-            Tab("Recorder", systemImage: "record.circle", value: SettingsTab.recorder) { needsSettings { RecorderView() } }
         }
         // Tall enough that a camera's settings (a sheet as tall as this) fit unscrolled with their sections
         // closed.

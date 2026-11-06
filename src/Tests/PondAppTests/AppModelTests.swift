@@ -121,6 +121,27 @@ final class StubLaunchd: Launchd, @unchecked Sendable {
         #expect(r.lines == [CheckLine(.error, "The camera refused the username admin or the password.", fix: .password)])
     }
 
+    @Test func whatNeedsAttentionIsListedWorstFirst() async {
+        let m = model()
+        m.createSettings()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        #expect(m.add(Config.Camera.reolink(id: "porch", name: "Porch", host: "192.168.1.41", username: "admin"), password: "pw"))
+        // Not started: that's all there is to say, in a few words for the toolbar.
+        #expect(m.attention.map(\.id) == ["recorder"])
+        #expect(m.attention.first?.fix == .startRecorder)
+        #expect(m.statusWords == "Not recording")
+        await m.installService()?.value
+        #expect(m.attentionCount == 0)
+        #expect(m.statusWords == "Recording")
+        // Kept private: listed (to make public again) but not counted.
+        m.privateCameras = ["porch"]
+        #expect(m.attention.map(\.id) == ["private porch"])
+        #expect(m.attention.first?.fix == .privacy("porch"))
+        #expect(m.attentionCount == 0)
+        #expect(m.statusWords == "Recording \u{00B7} 1 private")
+        await m.uninstallService().value
+    }
+
     @Test func savingWhileRecordingAsksForARestartOnlyForStorage() async {
         let m = model()
         m.createSettings()

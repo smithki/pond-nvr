@@ -9,6 +9,7 @@ import SwiftUI
 struct PondSwitcher: View {
     @Environment(AppModel.self) private var model
     @State private var nudged = false
+    @State private var probe = MiddleProbe()
 
     /// What the button says, in its tooltip.
     var meaning: String {
@@ -23,6 +24,8 @@ struct PondSwitcher: View {
         let switches = !model.otherPonds.isEmpty
         let count = model.attentionCount
         Button {
+            // Where the button is now (it moves as the views' toolbars differ), for the overview to centre on.
+            if !model.showingOverview, let middle = probe.middleFromLeading { model.overviewButtonFromLeading = middle }
             withAnimation(.snappy(duration: 0.3)) {
                 model.showingFoundCameras = false
                 model.showingOverview.toggle()
@@ -62,7 +65,7 @@ struct PondSwitcher: View {
         // Its words changed at once, not morphed from the middle (which nudged the mark and the chevron about), and
         // the toolbar's glass takes the new width at once too, as Find Cameras' does.
         .transaction(value: "\(switches) \(count) \(model.shownName) \(model.statusWords)") { $0.animation = nil }
-        .reportingMiddleFromLeading { if model.overviewButtonFromLeading != $0 { model.overviewButtonFromLeading = $0 } }
+        .reportingMiddleFromLeading(probe: probe) { if model.overviewButtonFromLeading != $0 { model.overviewButtonFromLeading = $0 } }
         .fixedSize()
         .help(meaning)
         .accessibilityLabel(switches ? "\(model.shownName), \(count) need attention" : model.statusWords)

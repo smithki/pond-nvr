@@ -54,20 +54,34 @@ extension View {
         background(MiddleReporter(report: report))
     }
 
-    /// The same, from its window's leading edge (for a button at the toolbar's leading end).
-    func reportingMiddleFromLeading(_ report: @escaping (CGFloat) -> Void) -> some View {
-        background(MiddleReporter(report: report, fromLeading: true))
+    /// The same, from its window's leading edge (for a button at the toolbar's leading end); `probe` measures it on
+    /// asking, too (a toolbar item that moves without changing size, as when an item before it goes, says nothing).
+    func reportingMiddleFromLeading(probe: MiddleProbe? = nil, _ report: @escaping (CGFloat) -> Void) -> some View {
+        background(MiddleReporter(report: report, fromLeading: true, probe: probe))
+    }
+}
+
+/// Where a reporting view's middle is now, measured when asked.
+final class MiddleProbe {
+    fileprivate weak var view: ReportingView?
+
+    /// From the window's leading edge, now (the toolbar's laid out by the time anyone clicks).
+    @MainActor var middleFromLeading: CGFloat? {
+        guard let view, let content = view.window?.contentView else { return nil }
+        return view.convert(view.bounds, to: content).midX
     }
 }
 
 private struct MiddleReporter: NSViewRepresentable {
     var report: (CGFloat) -> Void
     var fromLeading = false
+    var probe: MiddleProbe?
 
     func makeNSView(context: Context) -> ReportingView {
         let view = ReportingView()
         view.report = report
         view.fromLeading = fromLeading
+        probe?.view = view
         return view
     }
 

@@ -83,9 +83,12 @@ final class AppModel {
     var dockNarrowest: CGFloat = LiveLayout.narrowestDock
     /// No room for the adjustments beside the stage (a narrow window): they're the dock's second frame instead.
     var sidebarFloats = false
-    /// How each camera is doing (the doctor), and the camera it's showing (nil: all of them).
+    /// How each camera is doing (the doctor), and what its window shows (DoctorWindow).
     let doctor = CameraDoctor()
-    var doctorCamera: String?
+    var doctorPage: DoctorPage = .cameras
+    /// Opens a window by its id (SwiftUI's, kept by the views that have it), for what opens one from outside a view:
+    /// the doctor's, from a notification or the model.
+    static var openWindow: ((String) -> Void)?
     /// The rail is shown or hidden by the window's size just now: at once, not slid (its showing is a stored
     /// preference, which reaches the view apart from the change's transaction).
     var railMovesAtOnce = false

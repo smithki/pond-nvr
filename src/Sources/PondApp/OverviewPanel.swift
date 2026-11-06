@@ -61,28 +61,25 @@ struct OverviewPanel: View {
                     ForEach(items) { AttentionRow(item: $0, act: act) }
                 }
             }
-            // The cameras that need attention, alone in the rail.
-            let cameras = model.attentionCameras
-            if !cameras.isEmpty {
-                Button {
-                    model.mode = .live
-                    model.railNeedsAttention = true
-                    model.stagingNeedsAttention += 1
-                    UserDefaults.standard.set(true, forKey: LiveView.railKey)
-                    close()
-                } label: {
-                    Label(cameras.count == 1 ? "Show This Camera" : "Show These \(cameras.count) Cameras",
-                          systemImage: "line.3.horizontal.decrease")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
-            }
             Divider()
             HStack(spacing: 8) {
-                Button("Recorder\u{2026}") { open(.recorder) }
+                Button("Recorder\u{2026}") { close(); model.showDoctor(.recorder) }
+                // The cameras that need attention, alone on the stage in Live, the rail filtered to them.
+                let cameras = model.attentionCameras
+                if !cameras.isEmpty {
+                    Button("Show in Live") {
+                        model.mode = .live
+                        model.railNeedsAttention = true
+                        model.stagingNeedsAttention += 1
+                        UserDefaults.standard.set(true, forKey: LiveView.railKey)
+                        close()
+                    }
+                    .help(cameras.count == 1 ? "Show the camera that needs attention in Live, and only it in the list of cameras"
+                                             : "Show the \(cameras.count) cameras that need attention in Live, and only them in the list of cameras")
+                }
                 if multi { Button("Remote Access\u{2026}") { open(.remote) } }
                 Spacer(minLength: 0)
-                Button("Open the Doctor\u{2026}") { model.doctorCamera = nil; open(.doctor) }
+                Button("Open the Doctor\u{2026}") { close(); model.showDoctor() }
             }
             .controlSize(.small)
         }
@@ -126,9 +123,12 @@ struct OverviewPanel: View {
     func act(_ fix: Attention.Fix) {
         switch fix {
         case let .doctor(camera):
-            model.doctorCamera = camera
-            open(.doctor)
-        case .recorderSettings: open(.recorder)
+            close()
+            model.showDoctor(camera: camera)
+        case .recorder:
+            close()
+            model.showDoctor(.recorder)
+        case .startRecorder: _ = model.installService()
         case .restartRecorder: _ = model.restartService()
         case .storageSettings: open(.storage)
         case .remoteSettings: open(.remote)
@@ -178,7 +178,7 @@ struct AttentionRow: View {
             case let fix?:
                 Button(Self.words(fix)) { act(fix) }
                     .controlSize(.small)
-                    .disabled(fix == .restartRecorder && model.isChangingService)
+                    .disabled((fix == .restartRecorder || fix == .startRecorder) && model.isChangingService)
             case nil:
                 EmptyView()
             }
@@ -187,9 +187,10 @@ struct AttentionRow: View {
 
     static func words(_ fix: Attention.Fix) -> String {
         switch fix {
-        case .doctor: "Doctor"
+        case .doctor, .recorder: "Doctor"
+        case .startRecorder: "Start"
         case .restartRecorder: "Restart"
-        case .recorderSettings, .storageSettings, .remoteSettings: "Settings"
+        case .storageSettings, .remoteSettings: "Settings"
         case .privacy: ""
         }
     }

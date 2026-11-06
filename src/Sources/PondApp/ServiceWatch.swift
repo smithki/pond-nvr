@@ -31,7 +31,7 @@ final class ServiceWatch {
 
         var detail: String {
             switch self {
-            case .notInstalled: "Its recorder isn\u{2019}t installed. Open Pond and install it in Settings › Recorder."
+            case .notInstalled: "Its recorder isn\u{2019}t started. Open Pond and click Start in the overview (the toolbar\u{2019}s state)."
             case let .stopped(why): "It isn\u{2019}t running (\(why)). Open Pond to start it again."
             case let .storage(path): "The recordings folder \(path) isn\u{2019}t available. Plug the drive in (or mount the share); recording starts again by itself."
             case let .notRecording(names):
@@ -39,8 +39,8 @@ final class ServiceWatch {
             }
         }
 
-        /// Where it's fixed.
-        var settings: SettingsTab { if case .notRecording = self { .doctor } else { .recorder } }
+        /// Where it's looked into: the doctor's cameras, or its recorder page.
+        var doctorPage: DoctorPage { if case .notRecording = self { .cameras } else { .recorder } }
     }
 
     /// What's wrong now, if anything.
@@ -59,12 +59,16 @@ final class ServiceWatch {
     private var told: Problem?
     private var task: Task<Void, Never>?
     static let notification = "pond.service"
+    /// Notifications, in the app (not elsewhere, as in tests: outside an app bundle the centre throws).
+    static var center: UNUserNotificationCenter? {
+        Bundle.main.bundleURL.pathExtension == "app" ? UNUserNotificationCenter.current() : nil
+    }
     /// Nothing written for this long, while recording should be, counts as not recording.
     nonisolated static let staleAfter: TimeInterval = 3 * 60
 
     func start(_ model: AppModel) {
         guard task == nil else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        Self.center?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         task = Task { [weak self, weak model] in
             // (A moment first: at login the service may still be starting.)
             try? await Task.sleep(for: .seconds(20))
@@ -137,16 +141,16 @@ final class ServiceWatch {
             now[pond.id] = Quiet(name: pond.name, title: title, detail: pond.problems.joined(separator: "; ").prefix(1).uppercased()
                                  + pond.problems.joined(separator: "; ").dropFirst() + ".")
         }
-        let center = UNUserNotificationCenter.current()
+        let center = Self.center
         for (id, quiet) in now where otherPonds[id] != quiet {
             let content = UNMutableNotificationContent()
             content.title = (DemoSession.scenario == nil ? "" : "Demo: ") + quiet.title
             content.body = quiet.detail
             content.sound = .default
-            center.add(UNNotificationRequest(identifier: "\(Self.notification).\(id)", content: content, trigger: nil))
+            center?.add(UNNotificationRequest(identifier: "\(Self.notification).\(id)", content: content, trigger: nil))
         }
         let fixed = otherPonds.keys.filter { now[$0] == nil }.map { "\(Self.notification).\($0)" }
-        if !fixed.isEmpty { center.removeDeliveredNotifications(withIdentifiers: fixed) }
+        if !fixed.isEmpty { center?.removeDeliveredNotifications(withIdentifiers: fixed) }
         otherPonds = now
     }
 
@@ -155,16 +159,16 @@ final class ServiceWatch {
         problem = now
         guard now != told else { return }
         told = now
-        let center = UNUserNotificationCenter.current()
+        let center = Self.center
         guard let now else {
-            center.removeDeliveredNotifications(withIdentifiers: [Self.notification])
+            center?.removeDeliveredNotifications(withIdentifiers: [Self.notification])
             return
         }
         let content = UNMutableNotificationContent()
         content.title = (DemoSession.scenario == nil ? "" : "Demo: ") + now.title
         content.body = now.detail
         content.sound = .default
-        content.userInfo = ["settings": now.settings.rawValue]
-        center.add(UNNotificationRequest(identifier: Self.notification, content: content, trigger: nil))
+        content.userInfo = ["doctor": now.doctorPage == .recorder ? "recorder" : "cameras"]
+        center?.add(UNNotificationRequest(identifier: Self.notification, content: content, trigger: nil))
     }
 }

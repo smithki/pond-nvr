@@ -83,6 +83,8 @@ struct MenuBarMenu: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        // (So the doctor's window can be opened from here with the main window closed.)
+        let _ = AppModel.openWindow == nil ? (AppModel.openWindow = { openWindow(id: $0) }) : ()
         // What needs attention (the toolbar's overview's list), else the recorder's state.
         let items = model.attention.filter { $0.level >= .warning }
         if items.isEmpty {
@@ -90,7 +92,7 @@ struct MenuBarMenu: View {
         } else {
             ForEach(items.prefix(5)) { Text($0.title) }
             if items.count > 5 { Text("and \(items.count - 5) more") }
-            if items.contains(where: { $0.fix == .recorderSettings }) { Button("Recorder Settings\u{2026}") { show(.recorder) } }
+            if items.contains(where: { $0.fix == .recorder }) { Button("Recorder\u{2026}") { model.showDoctor(.recorder) } }
         }
         let cameras = model.config?.cameras ?? []
         if !cameras.isEmpty {
@@ -105,7 +107,8 @@ struct MenuBarMenu: View {
         Divider()
         Button("Open Live") { open(.live) }
         Button("Open Events") { open(.events) }
-        Button("Open the Doctor\u{2026}") { show(.doctor) }
+        Button("Open the Doctor\u{2026}") { model.showDoctor() }
+            .keyboardShortcut("d", modifiers: [.command, .option])
         Button("Settings\u{2026}") { show(model.settingsTab) }
             .keyboardShortcut(",")
         Divider()

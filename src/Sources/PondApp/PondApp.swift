@@ -31,6 +31,18 @@ struct PondApp: App {
             }
         }
 
+        // The doctor, a window of its own (one): for working out why, beside the view it's about. One size: its pages
+        // are laid out to fit it (the form's sections and the card under them line up at this width; wider, the
+        // form's margins grow and the card's don't).
+        Window("Doctor", id: DoctorWindow.id) {
+            DoctorWindow()
+                .environment(model)
+                .preferredColorScheme(appearance.scheme)
+                .frame(width: DoctorWindow.size.width, height: DoctorWindow.size.height)
+        }
+        .windowResizability(.contentSize)
+        .keyboardShortcut("d", modifiers: [.command, .option])
+
         Settings {
             SettingsView()
                 .environment(model)
@@ -96,6 +108,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage(LiveView.railKey) private var showRail = true
     /// Where the overview was centred as it opened (the button's middle then).
     @State private var overviewCentre: CGFloat?
@@ -148,7 +161,8 @@ struct ContentView: View {
                 .padding(.top, margin)
                 .padding(.leading, leading)
                 .animation(.snappy(duration: 0.3), value: arrowX)
-                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / width, y: 0)).combined(with: .opacity))
+                // (Scaled from the arrow's tip: what's scaled is the card and the room before it.)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: (leading + arrowX) / (leading + width), y: 0)).combined(with: .opacity))
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -164,7 +178,8 @@ struct ContentView: View {
                 .glassEffect(.regular, in: Callout(arrowX: arrowX))
                 .padding([.top, .trailing], margin)
                 .animation(.snappy(duration: 0.3), value: arrowX)
-                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / width, y: 0)).combined(with: .opacity))
+                // (Scaled from the arrow's tip: the card's width and its margin are what's scaled.)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / (width + margin), y: 0)).combined(with: .opacity))
             }
         }
         // Switching views animates the toolbar (its glass morphs as items come and go) but not the views:
@@ -189,21 +204,21 @@ struct ContentView: View {
                 .disabled(model.forwardHistory.isEmpty)
                 .help(model.forwardHistory.last.map { "Forward to \($0.title) (⌘])" } ?? "Forward")
             }
-            // A toggle: the toolbar shows it on while the rail is open. Hidden rather than left out in the other
-            // views, so the toolbar's glass morphs as it goes and comes back with the view switch.
-            // The rail's toggle, in Live only: a toggle, so the toolbar shows it on while the rail is open. Left
-            // out of the toolbar in the other views rather than hidden: it pops cleanly, where the toolbar's
-            // hiding fades it out under the recorder's state.
-            if model.mode == .live, model.config?.cameras.isEmpty == false {
+            // The rail's toggle: on while the rail is open. In every view, so the toolbar holds still as views
+            // change (the state beside it stays put), but only Live has the rail: elsewhere it's off and disabled.
+            if model.config?.cameras.isEmpty == false {
                 ToolbarItem(placement: .navigation) {
+                    let live = model.mode == .live
                     // Not while there's no room for it beside the open controls (shown, the dock hid it again at
                     // once, and bounced), whoever hid it: a wider window, or the controls closed, and it's back on.
                     let madeRoom = !showRail && (model.railMadeRoom || !model.railFits)
-                    Toggle(isOn: $showRail.animation(LiveView.panelAnimation)) {
+                    Toggle(isOn: Binding(get: { live && showRail },
+                                         set: { on in withAnimation(LiveView.panelAnimation) { showRail = on } })) {
                         Label(showRail ? "Hide Cameras" : "Show Cameras", systemImage: "sidebar.leading")
                     }
-                    .disabled(madeRoom)
-                    .help(!madeRoom ? (showRail ? "Hide the list of cameras" : "Show the list of cameras")
+                    .disabled(!live || madeRoom)
+                    .help(!live ? "The list of cameras is in Live"
+                          : !madeRoom ? (showRail ? "Hide the list of cameras" : "Show the list of cameras")
                           : model.railMadeRoom ? "The cameras are hidden to make room for the controls; a wider window shows them again"
                           : "No room for the cameras beside the controls; make the window wider, or hide the controls, to show them")
                 }
@@ -247,6 +262,12 @@ struct ContentView: View {
             }
         }
         .toolbar(removing: .title)
+        .onAppear { AppModel.openWindow = { openWindow(id: $0) } }
+        // Another view: the overview (and Find Cameras' card) close, as a popover would.
+        .onChange(of: model.mode) {
+            model.showingOverview = false
+            model.showingFoundCameras = false
+        }
         .onChange(of: model.showingOverview, initial: true) { _, open in
             overviewCentre = open ? model.overviewButtonFromLeading : nil
         }
@@ -304,12 +325,10 @@ struct ContentView: View {
                 model.cameraToEdit = id
                 openSettings()
             }
-            // --doctor [ID]: the doctor, open (at that camera).
+            // --doctor [ID|recorder]: the doctor's window, open (at that camera, or the recorder).
             if let at = CommandLine.arguments.firstIndex(of: "--doctor") {
-                model.settingsTab = .doctor
                 let next = at + 1 < CommandLine.arguments.count ? CommandLine.arguments[at + 1] : ""
-                model.doctorCamera = next.hasPrefix("-") || next.isEmpty ? nil : next
-                openSettings()
+                model.showDoctor(next == "recorder" ? .recorder : next.hasPrefix("-") || next.isEmpty ? .cameras : .camera(next))
             }
             // --add-camera: Add Camera, open (likewise).
             if CommandLine.arguments.contains("--add-camera") { model.addingCamera = true }
@@ -466,13 +485,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Self.quit()
     }
 
-    /// The service watch's notification clicked: where it's fixed, open.
+    /// The service watch's notification clicked: the doctor, where it's looked into.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let tab = (response.notification.request.content.userInfo["settings"] as? String).flatMap(SettingsTab.init(rawValue:))
+        let recorder = response.notification.request.content.userInfo["doctor"] as? String == "recorder"
         await MainActor.run {
-            if let tab { AppModel.current?.settingsTab = tab }
-            NSApp.activate()
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            AppModel.current?.showDoctor(recorder ? .recorder : .cameras)
         }
     }
 

@@ -41,7 +41,8 @@ The figures above are the defaults. **Thresholds**, under the overview's cameras
 
 ## Where findings show
 
-- **Settings › Doctor** lists every camera with its state. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
+- **The toolbar's state** says when anything needs attention, and its overview lists it with the fix (Doctor, for a camera, opens it here).
+- **The Doctor window** (⌥⌘D, Window › Doctor, or *Open the Doctor…* in the overview and the menu bar) lists the recorder and every camera with its state, down its side, to keep open beside the live view or the timeline while working something out. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
 - **A camera's tile and its row in the camera list** carry a mark (a stethoscope, red for a problem, orange for a warning). Hovering says what's wrong, and clicking opens the doctor at the camera. Notices don't get a mark, and neither do findings you've ignored.
 - **Ignore** on a finding keeps it in the doctor, dimmed, but takes it off the camera's tile and row. It's per camera, for findings you know about and can't fix.
 

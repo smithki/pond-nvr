@@ -78,7 +78,7 @@ Everything of Pond's that decodes or encodes video shares the Mac's media engine
 | Detection on the sub-streams | Shed to keyframes only (a picture every couple of seconds), and given back when there's room. |
 | Closer looks | Closed first, and opened again when there's room. |
 
-Continuous recording decodes nothing and isn't in it. What's shed and given back is logged; the hourly video-decoding line adds the budget, and Settings › Recorder shows it (`media.budget`).
+Continuous recording decodes nothing and isn't in it. What's shed and given back is logged; the hourly video-decoding line adds the budget, and The doctor's Recorder page shows it (`media.budget`).
 
 ## HomeKit Secure Video
 

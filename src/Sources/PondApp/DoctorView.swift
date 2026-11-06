@@ -1,4 +1,5 @@
-// Settings › Doctor: how each camera is doing, from what the recorder sees of it. All cameras at a glance, or one:
+// The doctor's page (in its window, DoctorWindow): how each camera is doing, from what the recorder sees of it. All
+// cameras at a glance, or one:
 // its findings (what's wrong, since when, the evidence, what to try; ignored per camera), its day in charts, and
 // what happened to it, in the log's manner (a day's heading, times, marks; problems by default). Copy Report gives
 // it all as text, without its address or password.
@@ -10,10 +11,6 @@ import SwiftUI
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
     @State private var everything = false
-    /// The list of what happened takes the room the page leaves, so a camera's page fits without scrolling (only the
-    /// list scrolls); with too many findings for even a short list, the page scrolls instead (FillsRoom).
-    @State private var listHeight = 200.0
-    @State private var room = PageRoom()
     /// Ignored findings shown: they're folded away under the others until asked for.
     @State private var showIgnored = false
 
@@ -22,27 +19,28 @@ struct DoctorView: View {
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
     var doctor: CameraDoctor { model.doctor }
 
+    // (Refreshed by its window, every 5 s.)
     var body: some View {
-        Form {
-            if !doctor.hasRecords {
-                Section {
-                    Text("Nothing recorded yet. The recorder keeps what it sees of each camera while it runs.").foregroundStyle(.secondary)
-                } header: {
-                    header(nil)
-                }
-            } else if let id = model.doctorCamera, let camera = cameras.first(where: { $0.id == id }) {
+        if doctor.hasRecords, let id = model.doctorCamera, let camera = cameras.first(where: { $0.id == id }) {
+            // A camera's page fits the window: what happened takes the room the rest leaves (only it scrolls).
+            FittedPage(shortest: Self.shortestList) {
                 cameraSections(camera)
-            } else {
-                overview
+            } card: {
+                whatHappened(camera)
             }
-        }
-        .formStyle(.grouped)
-        .fillsRoom($listHeight, minimum: Self.shortestList, room: $room)
-        .task {
-            while !Task.isCancelled {
-                await doctor.refresh(config: model.config)
-                try? await Task.sleep(for: .seconds(5))
+        } else {
+            Form {
+                if !doctor.hasRecords {
+                    Section {
+                        Text("Nothing recorded yet. The recorder keeps what it sees of each camera while it runs.").foregroundStyle(.secondary)
+                    } header: {
+                        header(nil)
+                    }
+                } else {
+                    overview
+                }
             }
+            .formStyle(.grouped)
         }
     }
 
@@ -51,32 +49,8 @@ struct DoctorView: View {
     /// them, opening a menu of the cameras (a chevron after it says so); then what can be done with it.
     func header(_ camera: Config.Camera?) -> some View {
         HStack(spacing: 10) {
-            Menu {
-                Picker("Camera", selection: Binding(get: { model.doctorCamera }, set: { model.doctorCamera = $0 })) {
-                    Text("All Cameras").tag(String?.none)
-                    Divider()
-                    ForEach(cameras) { Text($0.name).tag(String?.some($0.id)) }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } label: {
-                // As a menu in a settings row draws itself (the log's sources, say): its choice, then its chevrons in a
-                // small round button; here the choice in the heading's type.
-                HStack(spacing: 8) {
-                    Text(camera?.name ?? "All Cameras")
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                        .background(.fill.tertiary, in: .circle)
-                }
-                .contentShape(.rect)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Which camera the doctor shows")
+            // What the section is (the camera's name is the window's title; it's chosen in the window's list).
+            Text(camera == nil ? "Every camera" : "Now")
             Spacer()
             // Its buttons as any others (not in the heading's type).
             Group {
@@ -202,17 +176,11 @@ struct DoctorView: View {
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
                 .frame(height: 90)
         }
-        Section {
-            IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
-                // A list of its own for each camera and each filter: each opens at its newest, as the first did
-                // (the same scroll view, given other lines, kept where it was). And for each height: a check's result
-                // above it moves it down and shortens it, and the scroll view, resized, drew none of its rows until
-                // scrolled.
-                .id("\(camera.id) \(everything) \(Int(listHeight))")
-                .frame(height: listHeight)
-                .listRowInsets(EdgeInsets())
-                .endsPageRoom($room)
-        } header: {
+    }
+
+    /// What happened to the camera, in a card taking the rest of the page.
+    func whatHappened(_ camera: Config.Camera) -> some View {
+        PageCard {
             HStack {
                 Text("What happened")
                 Spacer()
@@ -224,7 +192,13 @@ struct DoctorView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .font(.body)
             }
+        } content: {
+            IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
+                // A list of its own for each camera and each filter: each opens at its newest, as the first did (the
+                // same scroll view, given other lines, kept where it was).
+                .id("\(camera.id) \(everything)")
         }
     }
 }

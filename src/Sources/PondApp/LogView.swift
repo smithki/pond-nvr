@@ -74,10 +74,6 @@ enum LogKindFilter: String, CaseIterable {
 struct LogSection: View {
     @Environment(AppModel.self) private var model
     let log: ServiceLog
-    /// How tall the lines are: what the tab has left, so the page itself never scrolls.
-    var height = 300.0
-    /// Where the lines end, told to the page (FillsRoom), if it's sized to its room.
-    var room: Binding<PageRoom>?
     /// The source shown; empty: all of them.
     @State private var source = ""
     @State private var kind = LogKindFilter.events
@@ -108,8 +104,13 @@ struct LogSection: View {
         }
     }
 
+    /// A card of its own (PageCard), at the foot of its page: its filters, the lines taking the card's room, and
+    /// where the log is.
     var body: some View {
-        Section {
+        PageCard {
+            Text("Log")
+        } content: {
+            VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Picker("Source", selection: $source) {
                     Text("All sources").tag("")
@@ -128,7 +129,10 @@ struct LogSection: View {
                     .textFieldStyle(.roundedBorder)
                     .labelsHidden()
             }
+            .padding(10)
+            Divider().padding(.horizontal, 10)
             lines
+            Divider().padding(.horizontal, 10)
             HStack {
                 Text(LaunchAgent.logPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                     .font(.callout)
@@ -145,15 +149,15 @@ struct LogSection: View {
                 Button("Open Log") { NSWorkspace.shared.open(URL(fileURLWithPath: LaunchAgent.logPath)) }
             }
             .disabled(log.lines.isEmpty)
-        } header: {
-            Text("Log")
+            .padding(10)
+            }
         }
     }
 
     @ViewBuilder
     var lines: some View {
         let rows = shown
-        // The same height whatever it shows, edge to edge between the row's separators.
+        // The card's room whatever it shows, edge to edge between its separators.
         Group {
             if log.lines.isEmpty {
                 Text("Nothing logged yet.").foregroundStyle(.secondary)
@@ -166,10 +170,7 @@ struct LogSection: View {
                         wantsEarlier: log.hasEarlier, loadEarlier: { log.loadEarlier() })
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: height)
-        .modifier(EndsRoom(room: room))
-        .listRowInsets(EdgeInsets())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     func dayTitle(_ day: Substring) -> String {
@@ -415,11 +416,4 @@ final class LogTextView: NSTextView {
 }
 
 
-/// Tells a page sized to its room where its list ends (when there's a page to tell).
-struct EndsRoom: ViewModifier {
-    let room: Binding<PageRoom>?
 
-    func body(content: Content) -> some View {
-        if let room { content.endsPageRoom(room) } else { content }
-    }
-}

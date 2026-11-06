@@ -21,7 +21,10 @@ struct Attention: Identifiable, Equatable {
     enum Fix: Equatable {
         /// The doctor, at a camera (or at its list).
         case doctor(String?)
-        case recorderSettings
+        /// The doctor's recorder page (whether it runs, its log).
+        case recorder
+        /// Not installed: started.
+        case startRecorder
         case restartRecorder
         case storageSettings
         case remoteSettings
@@ -53,10 +56,10 @@ extension AppModel {
         case _ where isRestartingRecorder: break
         case .notInstalled where !cameras.isEmpty:
             out.append(.init(id: "recorder", level: .problem, symbol: "record.circle", title: "Not recording", short: "Not recording",
-                             detail: "The recorder isn\u{2019}t installed.", fix: .recorderSettings))
+                             detail: "The recorder isn\u{2019}t started.", fix: .startRecorder))
         case let .stopped(why):
             out.append(.init(id: "recorder", level: .problem, symbol: "exclamationmark.triangle", title: "The recorder stopped",
-                             short: "Recorder stopped", detail: why, fix: .recorderSettings))
+                             short: "Recorder stopped", detail: why, fix: .recorder))
         case .running where needsRestart:
             out.append(.init(id: "recorder", level: .warning, symbol: "arrow.clockwise.circle", title: "Running with old settings",
                              short: "Restart Recorder", detail: "Restart the recorder to use the new ones.", fix: .restartRecorder))

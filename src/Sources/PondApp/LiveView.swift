@@ -936,12 +936,8 @@ struct RailThumbnail: View {
         openSettingsWindow()
     }
 
-    /// Settings → Doctor, at this camera.
-    func openDoctor() {
-        model.settingsTab = .doctor
-        model.doctorCamera = camera.id
-        openSettingsWindow()
-    }
+    /// The doctor's window, at this camera.
+    func openDoctor() { model.showDoctor(camera: camera.id) }
 
     /// The camera as the snapshot shows it: on the stage, or about to be.
     var shownOnStage: Bool { provisional ?? onStage }
@@ -1781,9 +1777,7 @@ struct CameraTile: View {
             // Opens the doctor at the camera.
             if frozen == nil, let finding = model.doctor.mark(camera.id) {
                 Button {
-                    model.settingsTab = .doctor
-                    model.doctorCamera = camera.id
-                    openSettingsWindow()
+                    model.showDoctor(camera: camera.id)
                 } label: {
                     Image(systemName: "stethoscope")
                         .font(compact ? .caption.weight(.semibold) : .callout.weight(.semibold))

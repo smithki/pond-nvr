@@ -1,4 +1,4 @@
-// Settings › Recorder: the background recorder (the login service running `pond run`), started, restarted or
+// The doctor's recorder page (DoctorWindow): the background recorder (the login service running `pond run`), started, restarted or
 // removed; how full the Mac's media engine is; and the recorder's log.
 import Control
 import Ingest
@@ -8,14 +8,12 @@ struct RecorderView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmUninstall = false
     @State private var log = ServiceLog()
-    /// The log's height: what the rest of the page leaves (FillsRoom).
-    @State private var logHeight = 200.0
-    @State private var room = PageRoom()
     /// The media engine's budget, as the service has it.
     @State private var media: MediaBudget.Report?
 
     var body: some View {
-        Form {
+        // The page fits the window: the log takes the room the rest leaves (only it scrolls).
+        FittedPage(shortest: 140) {
             Section {
                 LabeledContent("Status") {
                     switch model.serviceState {
@@ -68,15 +66,12 @@ struct RecorderView: View {
             } header: {
                 Text("Background recording")
             } footer: {
-                Text("The recorder runs in the background whenever you are logged in, and starts again if it stops. Closing this window does not stop it. The first time, macOS may ask whether it may find devices on your network (Allow) and use the camera passwords (Always Allow).")
+                Text("The recorder runs in the background whenever you are logged in, and starts again if it stops. Closing Pond\u{2019}s windows does not stop it. The first time, macOS may ask whether it may find devices on your network (Allow) and use the camera passwords (Always Allow).")
                     .foregroundStyle(.secondary)
             }
-
-            LogSection(log: log, height: logHeight, room: $room)
+        } card: {
+            LogSection(log: log)
         }
-        .formStyle(.grouped)
-        // The log takes the room the rest of the page leaves, so it fits without scrolling.
-        .fillsRoom($logHeight, minimum: 140, room: $room)
         .task {
             while !Task.isCancelled {
                 model.refreshService()
