@@ -235,6 +235,15 @@ struct LiveView: View {
                 // Whether the rail would fit beside the open controls, for the toolbar's button.
                 .onChange(of: railFits(cameras), initial: true) { _, fits in if model.railFits != fits { model.railFits = fits } }
                 .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
+                // The overview's Show These Cameras: those that need attention, alone on the stage (the rail filtered
+                // to them too).
+                .onChange(of: model.stagingNeedsAttention, initial: true) { _, asked in
+                    guard asked > 0 else { return }
+                    let needing = model.attentionCameras
+                    let ids = model.liveCameras.map(\.id).filter { needing.contains($0) }
+                    if !ids.isEmpty { showAll(ids) }
+                    model.stagingNeedsAttention = 0
+                }
                 .onChange(of: staged(cameras), initial: true) { _, ids in
                     let mixes = Set(ids.map(AppModel.pond(of:))).count > 1
                     if model.stageMixesPonds != mixes { model.stageMixesPonds = mixes }
@@ -318,7 +327,7 @@ struct LiveView: View {
         CameraRail(cameras: railOrder.map { order in order.compactMap { id in cameras.first { $0.id == id } } } ?? cameras,
                    staged: staged(cameras), snapshots: snapshots,
                    health: { health($0, cameras: cameras) },
-                   solo: solo, toggle: toggle, showAll: { showAll(cameras.map(\.id)) },
+                   solo: solo, toggle: toggle, showAll: { showAll($0) },
                    openControls: { openControls($0) },
                    drag: reorderDrag, reorder: reorder)
     }
@@ -560,7 +569,8 @@ struct CameraRail: View {
     let health: (String) -> CameraHealth
     let solo: (String) -> Void
     let toggle: (String) -> Void
-    let showAll: () -> Void
+    /// Puts these on the stage, alone: every camera, or (filtered) those that need attention.
+    let showAll: ([String]) -> Void
     /// Watches a camera on its own with its controls open.
     var openControls: (String) -> Void = { _ in }
     let drag: ReorderDrag
@@ -614,7 +624,7 @@ struct CameraRail: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 PondHeading(name: group.name, pond: group.pond, count: ids.count, folded: folding(key))
                                 if !foldedPonds.contains(key) {
-                                    grid(cameras.filter { ids.contains($0.id) })
+                                    grid(shown.filter { ids.contains($0.id) })
                                 }
                             }
                             .padding(8)
@@ -632,7 +642,7 @@ struct CameraRail: View {
                     .padding(.top, Self.pondGap)
                     .padding(.bottom, 12)
                 } else {
-                    grid(cameras)
+                    grid(shown)
                         .padding(.horizontal, 12)
                         // (A little clear of the header at rest, so nothing's under it until the cameras move.)
                         .padding(.top, 4)
@@ -646,7 +656,9 @@ struct CameraRail: View {
                 return f.minY ... max(f.minY, f.maxY)
             } action: { contentSpan = $0 }
         }
-        .scrollIndicators(.automatic)
+        // No scroll bar, even where the Mac's set to show them always: it took width from the thumbnails as it came
+        // and went, resizing them. The hairlines under the header and over the footer say there's more.
+        .scrollIndicators(.never)
         .safeAreaBar(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 // On a narrow rail the count gives way, so "Show All" stays on one line.
@@ -716,6 +728,23 @@ extension CameraRail {
         Rectangle().fill(.separator).frame(height: 1).opacity(shown ? 1 : 0).animation(.easeOut(duration: 0.15), value: shown)
     }
 
+    /// The cameras that need attention: those in the overview's list (the service watch's, the doctor's), so the
+    /// rail's count is the toolbar's. (A tile gone offline a moment isn't yet: it counts once it's missed recording.)
+    var needingAttention: [Config.Camera] {
+        let listed = model.attentionCameras
+        return cameras.filter { listed.contains($0.id) }
+    }
+
+    /// Whether the rail shows only those (while there are any).
+    var filtering: Bool { model.railNeedsAttention && !needingAttention.isEmpty }
+
+    /// The cameras the rail shows: all, or those that need attention.
+    var shown: [Config.Camera] {
+        guard filtering else { return cameras }
+        let ids = Set(needingAttention.map(\.id))
+        return cameras.filter { ids.contains($0.id) }
+    }
+
     /// Folded away: as kept (read once, when the rail first appears), then as changed here.
     var foldedPonds: Set<String> {
         folded ?? Set(foldedText.split(separator: ",").map { $0 == "-" ? "" : String($0) })
@@ -751,7 +780,24 @@ extension CameraRail {
                 Text("\(staged.count) of \(cameras.count)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            ShowAllButton(allShown: staged.count == cameras.count, title: title, action: showAll)
+            // Only while some need attention: a filter to those alone.
+            let count = needingAttention.count
+            if count > 0 {
+                AttentionFilterButton(count: count, on: filtering) {
+                    // With all the rail's cameras on the stage (Show All), the stage follows the filter: those that
+                    // need attention alone, or every camera again.
+                    let allShown = Set(staged) == Set(shown.map(\.id))
+                    let on = !filtering
+                    withAnimation(.snappy(duration: 0.25)) { model.railNeedsAttention = on }
+                    if allShown {
+                        let needing = Set(needingAttention.map(\.id))
+                        showAll(cameras.map(\.id).filter { !on || needing.contains($0) })
+                    }
+                }
+            }
+            // Filtered, Show All is all of those shown: the cameras that need attention, alone on the stage.
+            let ids = shown.map(\.id)
+            ShowAllButton(allShown: Set(staged) == Set(ids), title: title, filtered: filtering) { showAll(ids) }
         }
         .lineLimit(1)
     }
@@ -763,12 +809,39 @@ struct RailOverflow: Equatable {
     var bottom: Bool
 }
 
+/// The rail's filter: only the cameras that need attention, and how many. On, tinted orange.
+struct AttentionFilterButton: View {
+    let count: Int
+    let on: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.orange))
+                Text("\(count)").monospacedDigit()
+            }
+            .font(.callout.weight(.semibold))
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
+        .tint(on ? .orange : nil)
+        .controlSize(.small)
+        .focusEffectDisabled()
+        .help(on ? "Show every camera in the rail" : count == 1 ? "Show only the camera that needs attention"
+                                                               : "Show only the \(count) cameras that need attention")
+        .accessibilityLabel(on ? "Showing cameras that need attention" : "Show only cameras that need attention")
+    }
+}
+
 /// Puts every camera on the stage. While they all are, it shows so: tinted, with a checkmark that morphs in
 /// from the grid symbol, and it does nothing when clicked.
 struct ShowAllButton: View {
     let allShown: Bool
     /// Room for the words; otherwise the symbol alone.
     let title: Bool
+    /// The rail shows only the cameras that need attention: all of those.
+    var filtered = false
     let action: () -> Void
 
     var body: some View {
@@ -790,7 +863,8 @@ struct ShowAllButton: View {
         .controlSize(.small)
         .focusEffectDisabled()
         .animation(.snappy(duration: 0.25), value: allShown)
-        .help(allShown ? "Every camera is on the screen" : "Put every camera on the screen")
+        .help(filtered ? (allShown ? "Every camera that needs attention is on the screen" : "Put every camera that needs attention on the screen")
+                       : allShown ? "Every camera is on the screen" : "Put every camera on the screen")
         .accessibilityLabel(allShown ? "All cameras shown" : "Show all cameras")
     }
 }

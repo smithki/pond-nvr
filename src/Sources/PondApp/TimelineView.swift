@@ -2399,6 +2399,9 @@ struct HorizontalScroll: NSViewRepresentable {
 struct CapsuleSegments<Option: Hashable>: View {
     @Binding var selection: Option
     let options: [Option]
+    /// Across the width it's given, in equal parts (a long title cut short, whole in its tooltip), rather than each
+    /// its title's width.
+    var fills = false
     let title: (Option) -> String
     @Namespace private var highlight
 
@@ -2412,8 +2415,11 @@ struct CapsuleSegments<Option: Hashable>: View {
                     Text(title(option))
                         .font(.callout.weight(chosen ? .semibold : .regular))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .foregroundStyle(chosen ? .primary : .secondary)
-                        .padding(.horizontal, 11)
+                        .frame(maxWidth: fills ? .infinity : nil)
+                        .padding(.horizontal, fills ? 8 : 11)
                         .padding(.vertical, 5)
                         .background {
                             if chosen {
@@ -2426,11 +2432,12 @@ struct CapsuleSegments<Option: Hashable>: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .help(fills ? title(option) : "")
             }
         }
         .padding(3)
         .background(.black.opacity(0.18), in: Capsule())
-        .fixedSize()
+        .fixedSize(horizontal: !fills, vertical: true)
     }
 }
 

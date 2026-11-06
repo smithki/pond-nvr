@@ -67,7 +67,7 @@ struct MenuBarLabel: View {
     }
 
     var body: some View {
-        if model.watch.problem != nil || !model.watch.otherPonds.isEmpty {
+        if model.attention.contains(where: { $0.level == .problem }) {
             Image(systemName: "exclamationmark.triangle")
         } else if let mark = Self.mark {
             Image(nsImage: mark).opacity(model.isRecording ? 1 : 0.45)
@@ -83,15 +83,14 @@ struct MenuBarMenu: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        if let problem = model.watch.problem {
-            Text(problem.title)
-            Button("\(problem.settings == .doctor ? "Open the Doctor" : "Recorder Settings")\u{2026}") { show(problem.settings) }
+        // What needs attention (the toolbar's overview's list), else the recorder's state.
+        let items = model.attention.filter { $0.level >= .warning }
+        if items.isEmpty {
+            Text(model.recorderWords)
         } else {
-            Text(model.isRecording ? "Recording" : "Not recording")
-        }
-        // Other Ponds gone quiet.
-        ForEach(model.watch.otherPonds.values.sorted { $0.name < $1.name }, id: \.name) { quiet in
-            Text(quiet.title)
+            ForEach(items.prefix(5)) { Text($0.title) }
+            if items.count > 5 { Text("and \(items.count - 5) more") }
+            if items.contains(where: { $0.fix == .recorderSettings }) { Button("Recorder Settings\u{2026}") { show(.recorder) } }
         }
         let cameras = model.config?.cameras ?? []
         if !cameras.isEmpty {
@@ -106,7 +105,7 @@ struct MenuBarMenu: View {
         Divider()
         Button("Open Live") { open(.live) }
         Button("Open Events") { open(.events) }
-        Button("Camera Doctor\u{2026}") { show(.doctor) }
+        Button("Open the Doctor\u{2026}") { show(.doctor) }
         Button("Settings\u{2026}") { show(model.settingsTab) }
             .keyboardShortcut(",")
         Divider()

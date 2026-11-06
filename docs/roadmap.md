@@ -57,6 +57,21 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 | Camera groups | later | Groups of cameras within a Pond (Front of house, Garage), named and ordered, for the grid, the lanes and the filters (distinct from zones). |
 | One-way sites | later | A Pond seen from another without seeing back (a cabin seen from home, not home from the cabin): pairing that grants one direction only. Other Ponds as sites in Live, Events and the Timeline are done (remote access, in [done.md](done.md)). |
 
+## Finding one's way
+
+How the app is laid out: what's where, and whether it's where one looks for it. The main window's three views
+(Live, Timeline, Events) are the core; around them, what's about the home day to day should be in the main window,
+and Settings kept for what one sets once.
+
+| Goal | Status | Notes |
+|---|---|---|
+| Health in the main window | in progress | Whether all's well, in the main window's toolbar wherever one is, opening the doctor's findings in place; not a tab of Settings beside how long to keep recordings. The same place says what "Knowing when it isn't working" finds. Done: the toolbar's state says what needs attention, from one list (the recorder, its drive and room, each camera not recorded or with the doctor's problems and warnings, other Ponds gone quiet or out of reach), and opens an overview of it: each thing with its fix, the cameras kept private (each to make public), the cameras that need attention to show alone, and which Ponds to show. The menu bar item and the camera rail's filter use the same list. Next: the doctor's findings in the main window rather than Settings. |
+| Events as an inbox | next | Events new since one last looked, and those one has seen: a count on the Events view and the menu bar item, new ones marked in the grid, and "mark all seen". Seen is per Mac (and per viewer once there are phones). Without it, Events is a log, and a log stops being opened. Each event goes to its moment on the Timeline in one click, with an obvious way back. |
+| A camera from where one sees it | next | A camera's settings and zones reached from its live tile and from its events (a right-click: Camera Settings…, Edit Zones…), not only from Settings › Cameras. From an event, "Ignore this area…" opens the zone editor with that event's box drawn as an ignored zone; with "this wasn't anything" (Events worth trusting) it's how a camera is taught. |
+| Notifications that fit the home | later | What tells one, and when, set where it belongs: per camera, per zone and per kind (people at the front door after 10 pm, not cars on the driveway), with quiet hours and the household's away and home (from HomeKit). One set of rules for this Mac's notifications, the Home app's and, later, the phone's. |
+| Fewer settings | later | Settings for what's set once: General, Cameras, Storage (with retention: how much room, and how long), Remote Access. The recorder service, the media engine and the log under the doctor's Advanced, for those who need them. |
+| HomeKit at a glance | later | One place that shows which cameras are in the Home app, what each sends there (live, Secure Video, motion) and whether the hub is reaching them, rather than a page in each camera's settings. |
+
 ## Staying up
 
 Pond is a server that looks like an app: it's only as good as the nights it doesn't miss.

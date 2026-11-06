@@ -1,51 +1,57 @@
-// Which Ponds the window shows: all of them together (other Ponds' cameras live beside this Mac's, the rail in a
-// section per Pond), or one. In the toolbar where the recorder's state is, and as it was while this Mac is the only
-// Pond ("Recording"); with others, what's shown ("All Ponds", "Home", "Lake House"). Its menu chooses, and has the
-// recorder's settings and remote access's.
+// The toolbar's state: whether all's well, and which Ponds the window shows. With only this Mac, its state in words
+// ("Recording", "Side Gate not recorded", "3 need attention"); with other Ponds, the one shown ("All Ponds", "Home",
+// "Lake House"), the state in its mark and a count. Clicked, an overview (OverviewPanel): what needs attention at
+// each Pond, with its fix, the cameras kept private, and which Ponds to show.
 import Devices
 import PondCore
 import SwiftUI
 
 struct PondSwitcher: View {
     @Environment(AppModel.self) private var model
-    let openSettings: (SettingsTab) -> Void
     @State private var nudged = false
 
-    /// What the mark says, first in its tooltip.
-    var markMeaning: String {
-        if case let .pond(id) = model.shownPonds, let pond = model.otherPonds.first(where: { $0.id == id }) {
-            return model.isConnected(pond) ? "\(pond.name) is connected (\(model.connection(pond).lowercased()))."
-                                           : "\(pond.name) isn\u{2019}t connected right now."
-        }
-        let name = model.thisPondName == "This Mac" ? "This Mac\u{2019}s" : "\(model.thisPondName)\u{2019}s"
-        return switch model.serviceState {
-        case _ where model.isRestartingRecorder: "\(name) recorder is restarting."
-        case .running where model.needsRestart: "\(name) recorder is running with old settings: restart it to use the new ones."
-        case .running: "Recording: \(name) recorder is running."
-        case .stopped: "Not recording: \(name) recorder has stopped."
-        case .notInstalled: "Not recording: \(name) recorder isn\u{2019}t installed."
-        }
+    /// What the button says, in its tooltip.
+    var meaning: String {
+        let count = model.attentionCount
+        let state = count == 0 ? (model.isRecording ? "All\u{2019}s well." : model.recorderWords + ".")
+            : count == 1 ? (model.attention.first?.title ?? "") + "."
+            : "\(count) things need attention."
+        return state + (model.otherPonds.isEmpty ? "" : " Showing \(model.shownName).") + " Click for an overview."
     }
 
     var body: some View {
         let switches = !model.otherPonds.isEmpty
-        Menu {
-            PondMenu(openSettings: openSettings)
+        let count = model.attentionCount
+        Button {
+            withAnimation(.snappy(duration: 0.3)) {
+                model.showingFoundCameras = false
+                model.showingOverview.toggle()
+            }
         } label: {
             HStack(spacing: 6) {
                 PondMark()
                     .symbolEffect(.bounce, value: model.shownPondsNudge)
-                // With only this Mac, its recorder's state in words, as it always was; with others to choose from,
-                // which Pond is shown (its state in the mark and the help).
-                Text(switches ? model.shownName : model.recorderWords)
+                // With other Ponds, how many things need attention (any Pond's), beside the one shown.
+                if switches, count > 0 {
+                    Text("\(count)")
+                        .monospacedDigit()
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.orange.opacity(0.18), in: Capsule())
+                }
+                Text(switches ? model.shownName : model.statusWords)
                     // Changed by something else (a camera of a Pond not shown chosen in Events): lit a moment. (The
                     // toolbar's glass can't be tinted or outlined, and what's drawn past the label is cut off: the
                     // label's own words are what can say so.)
                     .foregroundStyle(nudged ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 4)
-            // Changed by something else (a camera of a Pond not shown chosen in Events): the button glows a moment, the
-            // whole of it, then fades.
+            // Changed by something else: the button glows a moment, the whole of it, then fades.
             .task(id: model.shownPondsNudge) {
                 guard model.shownPondsNudge > 0 else { return }
                 withAnimation(.easeIn(duration: 0.15)) { nudged = true }
@@ -53,57 +59,25 @@ struct PondSwitcher: View {
                 withAnimation(.easeOut(duration: 1)) { nudged = false }
             }
         }
-        // (A menu either way, and marked as one: in glass of its own beside the navigation buttons, as macOS puts a
-        // menu that says so. Unmarked, it was joined to their glass, alone; marked, apart, with other Ponds.)
-        .menuIndicator(.visible)
+        // Its words changed at once, not morphed from the middle (which nudged the mark and the chevron about), and
+        // the toolbar's glass takes the new width at once too, as Find Cameras' does.
+        .transaction(value: "\(switches) \(count) \(model.shownName) \(model.statusWords)") { $0.animation = nil }
+        .reportingMiddleFromLeading { if model.overviewButtonFromLeading != $0 { model.overviewButtonFromLeading = $0 } }
         .fixedSize()
-        .help(markMeaning + (switches ? " Showing \(model.shownName). Click to show another Pond, or for the recorder\u{2019}s settings."
-                                      : " Click for its settings."))
+        .help(meaning)
+        .accessibilityLabel(switches ? "\(model.shownName), \(count) need attention" : model.statusWords)
     }
 }
 
-/// The Ponds to show, and the recorder's settings: the toolbar's menu, and the camera rail's.
-struct PondMenu: View {
-    @Environment(AppModel.self) private var model
-    let openSettings: (SettingsTab) -> Void
-
-    var body: some View {
-        if !model.otherPonds.isEmpty {
-            Picker("Show", selection: Binding(get: { model.shownPonds }, set: { model.shownPonds = $0 })) {
-                Label("All Ponds", systemImage: "square.grid.2x2").tag(ShownPonds.all)
-                Label(model.thisPondName, systemImage: "desktopcomputer").tag(ShownPonds.this)
-                ForEach(model.otherPonds, id: \.id) { pond in
-                    Label {
-                        Text(pond.name)
-                        Text(model.connection(pond))
-                    } icon: {
-                        Image(systemName: "house")
-                    }
-                    .tag(ShownPonds.pond(pond.id))
-                }
-            }
-            .pickerStyle(.inline)
-        }
-        Section(model.thisPondName) {
-            Label(model.recorderWords, systemImage: "record.circle")
-            if model.needsRestart, case .running = model.serviceState {
-                Button("Restart Recorder", systemImage: "arrow.clockwise") { model.restartService() }
-                    .disabled(model.isChangingService)
-            }
-            Button("Recorder Settings\u{2026}", systemImage: "gearshape") { openSettings(.recorder) }
-        }
-        Section {
-            Button("Remote Access Settings\u{2026}", systemImage: "network") { openSettings(.remote) }
-        }
-    }
-}
-
-/// The shown Pond's state, as a mark: this Mac's recorder, or another's connection.
+/// The state, as a mark: anything needing attention (any Pond's), else the shown Pond's: this Mac's recorder, or
+/// another's connection.
 struct PondMark: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if case let .pond(id) = model.shownPonds, let pond = model.otherPonds.first(where: { $0.id == id }) {
+        if model.attentionCount > 0 {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        } else if case let .pond(id) = model.shownPonds, let pond = model.otherPonds.first(where: { $0.id == id }) {
             Image(systemName: "house.fill").foregroundStyle(model.isConnected(pond) ? .green : .secondary)
         } else {
             switch model.serviceState {
@@ -196,11 +170,15 @@ extension AppModel {
         remoteStatus?.connected.first { $0.device == pond.id }.map { "Connected, \($0.how)" } ?? "Not connected"
     }
 
+    /// This Mac's cameras kept private, by name.
+    var privateHere: [String] { (config?.cameras ?? []).filter { isPrivate($0.id) }.map(\.name) }
+
     var recorderWords: String {
         switch serviceState {
         case _ where isRestartingRecorder: "Restarting\u{2026}"
         case .running where needsRestart: "Restart Recorder"
-        case .running: "Recording"
+        // (A private mode forgotten is a gap in the recordings no one sees otherwise.)
+        case .running: privateHere.isEmpty ? "Recording" : "Recording \u{00B7} \(privateHere.count) private"
         case .stopped: "Recorder stopped"
         case .notInstalled: "Not recording"
         }

@@ -97,6 +97,8 @@ struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
     @AppStorage(LiveView.railKey) private var showRail = true
+    /// Where the overview was centred as it opened (the button's middle then).
+    @State private var overviewCentre: CGFloat?
 
     var body: some View {
         @Bindable var model = model
@@ -116,10 +118,37 @@ struct ContentView: View {
         // window to resize), so it grows and shrinks with its content like any view. A click anywhere else
         // closes it, as a popover's would.
         .overlay {
-            if model.showingFoundCameras {
+            if model.showingFoundCameras || model.showingOverview {
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false } }
+                    .onTapGesture {
+                        withAnimation(.snappy(duration: 0.3)) {
+                            model.showingFoundCameras = false
+                            model.showingOverview = false
+                        }
+                    }
+            }
+        }
+        // The overview, from the toolbar's state: centred under the button as it opens (kept inside the window), and
+        // held there while it's open: the button's words change with the Pond shown, and with them its middle, so
+        // only the arrow moves, gliding to it.
+        .overlay(alignment: .topLeading) {
+            if model.showingOverview {
+                let width: CGFloat = 380, margin: CGFloat = 12
+                let middle = model.overviewButtonFromLeading ?? 260
+                let leading = max(margin, (overviewCentre ?? middle) - width / 2)
+                let arrowX = middle - leading
+                OverviewPanel(close: { withAnimation(.snappy(duration: 0.3)) { model.showingOverview = false } },
+                              openSettings: { tab in
+                                  model.settingsTab = tab
+                                  openSettings()
+                              })
+                .frame(width: width)
+                .glassEffect(.regular, in: Callout(arrowX: arrowX))
+                .padding(.top, margin)
+                .padding(.leading, leading)
+                .animation(.snappy(duration: 0.3), value: arrowX)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / width, y: 0)).combined(with: .opacity))
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -182,10 +211,7 @@ struct ContentView: View {
             // The recorder's state, which is also which Pond is shown: its menu has the recorder's settings and the
             // other Ponds paired with this one.
             ToolbarItem(placement: .navigation) {
-                PondSwitcher { tab in
-                    model.settingsTab = tab
-                    openSettings()
-                }
+                PondSwitcher()
             }
             ToolbarItem(placement: .principal) {
                 // Animated, so the toolbar's glass morphs as items come and go with the view.
@@ -221,6 +247,13 @@ struct ContentView: View {
             }
         }
         .toolbar(removing: .title)
+        .onChange(of: model.showingOverview, initial: true) { _, open in
+            overviewCentre = open ? model.overviewButtonFromLeading : nil
+        }
+        // (Opened before the button had said where it is: centred once it has.)
+        .onChange(of: model.overviewButtonFromLeading) { _, middle in
+            if model.showingOverview, overviewCentre == nil { overviewCentre = middle }
+        }
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
         // The Ponds paired with this one, and which are connected, for the switcher: every 10 s (every 2 s until the
         // service first answers).
@@ -293,6 +326,8 @@ struct ContentView: View {
                 if tick % 3 == 0 { await model.reportLiveViews() }
                 // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
                 if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
+                // The drive's room, for the overview (whether it holds the days kept), every half hour.
+                if tick % 900 == 0 { await model.refreshStorageOutlook() }
                 tick += 1
                 try? await Task.sleep(for: .seconds(2))
             }
@@ -467,7 +502,10 @@ struct FindCamerasButton: View {
         let looking = model.findingCameras && !found
         Button {
             if !found, !model.findingCameras { Task { await model.findCameras() } }
-            withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras.toggle() }
+            withAnimation(.snappy(duration: 0.3)) {
+                model.showingOverview = false
+                model.showingFoundCameras.toggle()
+            }
         } label: {
             // Not animated when cameras turn up: the toolbar's glass takes the new width at once (it doesn't
             // animate items), so the words simply appear.

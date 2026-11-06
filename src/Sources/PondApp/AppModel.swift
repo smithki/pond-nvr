@@ -197,6 +197,14 @@ final class AppModel {
     /// is (its middle) from the window's trailing edge.
     var showingFoundCameras = false
     var findCamerasButtonFromTrailing: CGFloat = 64
+    /// The overview of what needs attention (the toolbar's state, clicked), and where its button's middle is.
+    var showingOverview = CommandLine.arguments.contains("--overview")   // (open from the start: for pictures of it)
+    /// (Nil until the button has said.)
+    var overviewButtonFromLeading: CGFloat?
+    /// The camera rail showing only the cameras that need attention.
+    var railNeedsAttention = false
+    /// Asked (from the overview) to put the cameras that need attention on the stage, alone: Live does, when it changes.
+    var stagingNeedsAttention = 0
     /// Cameras on the network (found at launch, at most daily, and when Add Camera opens), whether a look is
     /// under way, the ones not to mention again, and the one Add Camera starts from. See DiscoveryModel.
     var foundCameras: [FoundCamera] = DemoSession.scenario == nil ? AppModel.keptFoundCameras() : []

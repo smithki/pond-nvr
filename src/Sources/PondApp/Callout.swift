@@ -53,19 +53,27 @@ extension View {
     func reportingMiddleFromTrailing(_ report: @escaping (CGFloat) -> Void) -> some View {
         background(MiddleReporter(report: report))
     }
+
+    /// The same, from its window's leading edge (for a button at the toolbar's leading end).
+    func reportingMiddleFromLeading(_ report: @escaping (CGFloat) -> Void) -> some View {
+        background(MiddleReporter(report: report, fromLeading: true))
+    }
 }
 
 private struct MiddleReporter: NSViewRepresentable {
     var report: (CGFloat) -> Void
+    var fromLeading = false
 
     func makeNSView(context: Context) -> ReportingView {
         let view = ReportingView()
         view.report = report
+        view.fromLeading = fromLeading
         return view
     }
 
     func updateNSView(_ view: ReportingView, context: Context) {
         view.report = report
+        view.fromLeading = fromLeading
     }
 }
 
@@ -73,6 +81,7 @@ private struct MiddleReporter: NSViewRepresentable {
 /// the window changes size (which moves the toolbar's trailing items with it).
 final class ReportingView: NSView {
     var report: (CGFloat) -> Void = { _ in }
+    var fromLeading = false
     private var resizing: NSObjectProtocol?
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -97,7 +106,7 @@ final class ReportingView: NSView {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
             let frame = self.convert(self.bounds, to: content)
-            self.report(content.bounds.width - frame.midX)
+            self.report(self.fromLeading ? frame.midX : content.bounds.width - frame.midX)
         }
     }
 }
