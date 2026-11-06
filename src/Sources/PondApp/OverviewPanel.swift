@@ -9,6 +9,11 @@ import SwiftUI
 struct OverviewPanel: View {
     @Environment(AppModel.self) private var model
     let close: () -> Void
+    /// The sections showing everything (by Pond; "" this Mac): the rest past the first few, asked for. Each time the
+    /// overview opens, folded again.
+    @State private var unfolded: Set<String> = []
+    /// Shown in a section before the rest fold away: the most urgent (the list is worst first).
+    static let firstFew = 3
     let openSettings: (SettingsTab) -> Void
 
     /// A section per Pond: this Mac's first.
@@ -58,7 +63,37 @@ struct OverviewPanel: View {
                     if !items.contains(where: { $0.level >= .warning }) {
                         AttentionRow(item: allWell(section.pond), act: act)
                     }
-                    ForEach(items) { AttentionRow(item: $0, act: act) }
+                    // The first few (worst first), and the rest folded away under how many there are: unfolded,
+                    // they slide in under the others (and stay; there's no folding them again).
+                    let key = section.pond ?? ""
+                    let all = unfolded.contains(key) || items.count <= Self.firstFew + 1
+                    ForEach(all ? items : Array(items.prefix(Self.firstFew))) { item in
+                        AttentionRow(item: item, act: act)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    if !all {
+                        let more = items.count - Self.firstFew
+                        Button {
+                            withAnimation(.snappy(duration: 0.35)) { _ = unfolded.insert(key) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "ellipsis.circle")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 18)
+                                Text(more == 1 ? "1 more" : "\(more) more")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show the rest")
+                        .transition(.opacity)
+                    }
                 }
             }
             Divider()

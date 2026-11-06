@@ -78,7 +78,10 @@ struct EventsView: View {
     var forCamera: [TimelineEvent] { events.filter { camera == nil || $0.camera == camera } }
     /// Shown: the camera's, of the kinds on; of a search, those it found (best first, when it ranks them).
     var shown: [TimelineEvent] {
-        let all = forCamera.filter { !hidden.contains($0.kind) }
+        let newOnly = model.eventsState.newOnly
+        let all = forCamera.filter { event in
+            !hidden.contains(event.kind) && (newOnly.map { $0.contains(event.id) || model.seenEvents.isNew(event) } ?? true)
+        }
         guard let search else { return all }
         let rank = Dictionary(search.ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
         let found = all.filter { rank[$0.id] != nil }
@@ -244,6 +247,8 @@ struct EventsView: View {
         .overlay(alignment: .top) {
             EventsFilterBar(model: model, cameras: cameras, railShown: railFits, kinds: kinds,
                             counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count),
+                            newCount: model.eventsState.newOnly != nil ? shown.count : forCamera.count(where: model.seenEvents.isNew),
+                            newIDs: Set(forCamera.filter(model.seenEvents.isNew).map(\.id)),
                             question: $question, searching: searching, slow: slow, problem: searchProblem, result: search,
                             submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
                 .padding(.top, 8)
@@ -601,6 +606,9 @@ struct EventsFilterBar: View {
     var railShown = true
     let kinds: [TimelineEvent.Kind]
     let counts: [TimelineEvent.Kind: Int]
+    /// How many are new (or, with only the new shown, how many those are), and the new ones' ids, for New's chip.
+    var newCount = 0
+    var newIDs: Set<String> = []
     /// The search: its field, whether it's being answered, how it was read (its parts, a chip each), and what's
     /// done when it's asked, cleared, or a part's taken off.
     @Binding var question: String
@@ -796,8 +804,53 @@ struct EventsFilterBar: View {
         .animation(.snappy(duration: 0.2), value: model.eventsState.camera)
     }
 
+    /// The new ones alone, or all: a chip, always there (shown only while there were new ones, it came and went as
+    /// one came in on screen and was seen a moment later, and the bar jumped each time; now only its count rolls).
+    /// On, it keeps those new as it was turned on (seen as they're looked at, they'd go one by one otherwise).
+    @ViewBuilder
+    func newChip(titled: Bool) -> some View {
+        let on = model.eventsState.newOnly != nil
+        let count = newCount
+        Group {
+            Button {
+                withAnimation(.snappy(duration: 0.25)) { toggleNewOnly() }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(on || count > 0 ? Color.accentColor : .secondary).frame(width: 7, height: 7)
+                    if titled { Text("New") }
+                    Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+                        .contentTransition(.numericText(value: Double(count)))
+                }
+                .font(.callout)
+                .padding(.horizontal, titled ? 10 : 8)
+                .padding(.vertical, 5)
+                .opacity(on ? 1 : 0.7)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(on ? .regular.tint(Color.accentColor.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
+            .help(on ? "Show every event" : "Show only the events you haven\u{2019}t seen")
+            // Every one seen, at once: beside the chip that counts them (always there, as it is; off with none new).
+            Button {
+                withAnimation(.snappy(duration: 0.25)) { model.seenEvents.sawAll() }
+            } label: {
+                if titled { Text("Mark All Seen") } else { Image(systemName: "checkmark.circle") }
+            }
+            .font(.callout)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .disabled(model.seenEvents.count == 0)
+            .help("Count every event as seen")
+        }
+    }
+
+    func toggleNewOnly() {
+        model.eventsState.newOnly = model.eventsState.newOnly == nil ? newIDs : nil
+    }
+
     func kindChips(titled: Bool) -> some View {
         HStack(spacing: titled ? 10 : 6) {
+        newChip(titled: titled)
         ForEach(kinds) { kind in
             let on = !model.eventsState.hidden.contains(kind)
             Button {
@@ -828,6 +881,12 @@ struct EventsFilterBar: View {
     var kindsMenu: some View {
         let on = kinds.filter { !model.eventsState.hidden.contains($0) }.count
         return Menu {
+            Toggle(isOn: Binding(get: { model.eventsState.newOnly != nil }, set: { _ in
+                withAnimation(.snappy(duration: 0.25)) { toggleNewOnly() }
+            })) {
+                Label("Only New", systemImage: "circle.fill")
+            }
+            Divider()
             ForEach(kinds) { kind in
                 Toggle(isOn: Binding(get: { !model.eventsState.hidden.contains(kind) }, set: { show in
                     withAnimation(.snappy(duration: 0.25)) {

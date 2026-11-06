@@ -142,11 +142,61 @@ struct ContentView: View {
                     }
             }
         }
+        // How many events are new, in a card under the Events tab while the pointer's on it (or on the card): a click
+        // shows them alone in Events.
+        .overlay(alignment: .topLeading) {
+            if model.showingNewCard, model.seenEvents.count > 0, model.mode != .events, let picker = model.viewPickerFrame {
+                let width: CGFloat = 230, margin: CGFloat = 12
+                let middle = picker.minX + EventsTab.middle(pickerWidth: picker.width)
+                let leading = max(margin, middle - width / 2)
+                let arrowX = middle - leading
+                NewEventsCard(count: model.seenEvents.count) {
+                    withAnimation(.snappy(duration: 0.25)) { model.showingNewCard = false }
+                    model.showNewEvents()
+                }
+                .frame(width: width)
+                .glassEffect(.regular.interactive(), in: Callout(arrowX: arrowX))
+                .onHover { model.hoveringNewCard = $0 }
+                .padding(.top, Callout.belowToolbar)
+                .padding(.leading, leading)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: (leading + arrowX) / (leading + width), y: 0)).combined(with: .opacity))
+            }
+        }
+        // Shown a moment after the pointer comes to Events (not as it passes over), while there are new ones and
+        // Events isn't what's shown; gone a moment after it leaves both the tab and the card (time to cross between).
+        // Gone at once with nothing new left, or once Events is what's shown.
+        .onChange(of: model.seenEvents.count == 0 || model.mode == .events) { _, gone in
+            if gone, model.showingNewCard { withAnimation(.snappy(duration: 0.25)) { model.showingNewCard = false } }
+        }
+        .task(id: model.hoveringEventsTab || model.hoveringNewCard) {
+            let hovering = model.hoveringEventsTab || model.hoveringNewCard
+            try? await Task.sleep(for: .milliseconds(hovering ? 250 : 300))
+            guard !Task.isCancelled else { return }
+            let show = hovering && model.seenEvents.count > 0 && model.mode != .events
+            if show != model.showingNewCard { withAnimation(.snappy(duration: 0.25)) { model.showingNewCard = show } }
+        }
         // The overview, from the toolbar's state: centred under the button as it opens (kept inside the window), and
         // held there while it's open: the button's words change with the Pond shown, and with them its middle, so
         // only the arrow moves, gliding to it.
+        // (Opened from the toolbar's overflow menu: at the trailing end, under the overflow button, without an arrow.)
+        .overlay(alignment: .topTrailing) {
+            if model.showingOverview, model.overviewFromOverflow {
+                let width: CGFloat = 380, margin: CGFloat = 12
+                let arrowX = width - (Callout.overflowFromTrailing - margin)
+                OverviewPanel(close: { withAnimation(.snappy(duration: 0.3)) { model.showingOverview = false } },
+                              openSettings: { tab in
+                                  model.settingsTab = tab
+                                  openSettings()
+                              })
+                .frame(width: width)
+                .glassEffect(.regular, in: Callout(arrowX: arrowX, arrow: false))
+                .padding(.top, Callout.belowToolbar)
+                .padding(.trailing, margin)
+                .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / (width + margin), y: 0)).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .topLeading) {
-            if model.showingOverview {
+            if model.showingOverview, !model.overviewFromOverflow {
                 let width: CGFloat = 380, margin: CGFloat = 12
                 let middle = model.overviewButtonFromLeading ?? 260
                 let leading = max(margin, (overviewCentre ?? middle) - width / 2)
@@ -158,7 +208,7 @@ struct ContentView: View {
                               })
                 .frame(width: width)
                 .glassEffect(.regular, in: Callout(arrowX: arrowX))
-                .padding(.top, margin)
+                .padding(.top, Callout.belowToolbar)
                 .padding(.leading, leading)
                 .animation(.snappy(duration: 0.3), value: arrowX)
                 // (Scaled from the arrow's tip: what's scaled is the card and the room before it.)
@@ -175,8 +225,9 @@ struct ContentView: View {
                 }
                 .padding(.top, 10)
                 .frame(width: width)
-                .glassEffect(.regular, in: Callout(arrowX: arrowX))
-                .padding([.top, .trailing], margin)
+                .glassEffect(.regular, in: Callout(arrowX: arrowX, arrow: !model.foundCamerasFromOverflow))
+                .padding(.top, Callout.belowToolbar)
+                .padding(.trailing, margin)
                 .animation(.snappy(duration: 0.3), value: arrowX)
                 // (Scaled from the arrow's tip: the card's width and its margin are what's scaled.)
                 .transition(.scale(scale: 0.9, anchor: UnitPoint(x: arrowX / (width + margin), y: 0)).combined(with: .opacity))
@@ -225,34 +276,51 @@ struct ContentView: View {
             }
             // The recorder's state, which is also which Pond is shown: its menu has the recorder's settings and the
             // other Ponds paired with this one.
-            ToolbarItem(placement: .navigation) {
-                PondSwitcher()
-            }
+            ToolbarItem(placement: .navigation) { PondSwitcher() }
             ToolbarItem(placement: .principal) {
                 // Animated, so the toolbar's glass morphs as items come and go with the view.
                 Picker("View", selection: $model.mode.animation(.snappy(duration: 0.3))) {
                     ForEach(Mode.allCases) { mode in
-                        // (Events with room after its name for its count, drawn over it: below.)
-                        let new = mode == .events ? model.seenEvents.count : 0
-                        Text(new > 0 ? mode.title + CountBadge.room(new) : mode.title).tag(mode)
+                        Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                // How many events are new, in a capsule of colour at the end of Events' segment (the last): a segmented
-                // control takes only words in its segments, so it's drawn over, in the room left for it.
-                .overlay(alignment: .trailing) {
-                    let new = model.seenEvents.count
-                    if new > 0 {
-                        CountBadge(count: new)
-                            .padding(.trailing, 9)
-                            .allowsHitTesting(false)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy(duration: 0.25), value: model.seenEvents.count > 0)
+                // (No focus ring: the window gives it keyboard focus as it opens, and the ring sat round it for no
+                // reason anyone had given. Still reached from the keyboard, as other toolbar controls are.)
+                .focusEffectDisabled()
                 .disabled(model.config == nil)
+                .reportingFrame { if model.viewPickerFrame != $0 { model.viewPickerFrame = $0 } }
+                // Anything new in Events: a dot in the top corner of its segment (the last), as on an icon; how many is
+                // in the menu bar item and the day rail. Over the control, not in it, so the segments never change
+                // width as it comes and goes; inside it, since what's drawn past a toolbar item is cut off.
+                .overlay(alignment: .topTrailing) {
+                    ZStack {
+                        if model.seenEvents.count > 0 {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 7, height: 7)
+                                .transition(.scale(scale: 0.2).combined(with: .opacity))
+                        }
+                    }
+                    // (Clear of the edge of the segment's hover highlight.)
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+                    .allowsHitTesting(false)
+                    .animation(.spring(duration: 0.35, bounce: 0.4), value: model.seenEvents.count > 0)
+                }
+                // The pointer over Events: the card of how many are new opens under it (EventsTab).
+                .onContinuousHover { phase in
+                    let over: Bool = switch phase {
+                    case let .active(point): EventsTab.contains(point.x, pickerWidth: Double(model.viewPickerFrame?.width ?? 0))
+                    case .ended: false
+                    }
+                    if model.hoveringEventsTab != over { model.hoveringEventsTab = over }
+                }
             }
+            // The last to go when the toolbar's short of room (the toolbar's own overflow, in a narrow window):
+            // items of lower priority go first, ties from the trailing end.
+            .visibilityPriority(.high)
             // In a demo, which one, always in sight (nothing here is the real setup), in glass of its own; its menu
             // switches to another.
             if let demo = DemoSession.scenario {
@@ -281,6 +349,18 @@ struct ContentView: View {
         .onChange(of: model.mode) {
             model.showingOverview = false
             model.showingFoundCameras = false
+            // (A made-up count of new events, seen.)
+            if model.mode == .events, model.seenEvents.fake != nil { model.seenEvents.fake = 0 }
+        }
+        // --fake-new-events N: a made-up count of new events (for trying the count's look): N to begin with, one more
+        // every 4 s outside Events (its digits rolling), cleared by showing Events.
+        .task {
+            guard let start = launchArgument("--fake-new-events").flatMap(Int.init) else { return }
+            model.seenEvents.fake = start
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                if model.mode != .events, let n = model.seenEvents.fake { model.seenEvents.fake = n + 1 }
+            }
         }
         .onChange(of: model.showingOverview, initial: true) { _, open in
             overviewCentre = open ? model.overviewButtonFromLeading : nil
@@ -528,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 /// "Cameras Found" with a green viewfinder and count instead (something to do), each to add or ignore.
 struct FindCamerasButton: View {
     @Environment(AppModel.self) private var model
+    @State private var probe = MiddleProbe()
 
     var body: some View {
         let cameras = model.newCameras
@@ -535,6 +616,12 @@ struct FindCamerasButton: View {
         let looking = model.findingCameras && !found
         Button {
             if !found, !model.findingCameras { Task { await model.findCameras() } }
+            // Where the button is now: in the toolbar, or (chosen from its overflow menu) the overflow button.
+            if !model.showingFoundCameras {
+                let middle = probe.middleFromTrailing
+                model.foundCamerasFromOverflow = middle == nil
+                model.findCamerasButtonFromTrailing = middle ?? Callout.overflowFromTrailing
+            }
             withAnimation(.snappy(duration: 0.3)) {
                 model.showingOverview = false
                 model.showingFoundCameras.toggle()
@@ -561,7 +648,12 @@ struct FindCamerasButton: View {
             }
         }
         .transaction(value: found) { $0.animation = nil }
-        .reportingMiddleFromTrailing { if model.findCamerasButtonFromTrailing != $0 { model.findCamerasButtonFromTrailing = $0 } }
+        // Moved into the toolbar's overflow menu (or back), its card goes: what it pointed at has gone.
+        .reportingMiddleFromTrailing(probe: probe, inToolbar: { shown in
+            if model.showingFoundCameras, shown == model.foundCamerasFromOverflow {
+                withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false }
+            }
+        }) { if model.findCamerasButtonFromTrailing != $0 { model.findCamerasButtonFromTrailing = $0 } }
         .help(cameras.isEmpty ? "Look for cameras on your network that aren\u{2019}t set up in Pond"
                               : "Cameras on your network that aren\u{2019}t set up in Pond: add them, or ignore them")
         .disabled(model.config == nil)
@@ -642,23 +734,68 @@ struct FoundCamerasPanel: View {
     }
 }
 
-/// A count in a capsule tinted with the accent colour (the new events, on the Events segment).
-struct CountBadge: View {
+
+/// Where the Events tab is in the view picker: the last of its segments, each as wide as its word and the same room
+/// beside it (as a segmented control sizes them), within the control's own inset.
+enum EventsTab {
+    static let inset = 4.0
+
+    static func words(_ mode: Mode) -> Double {
+        (mode.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]).width
+    }
+
+    /// Its span, from the picker's leading edge.
+    static func span(pickerWidth: Double) -> ClosedRange<Double> {
+        let modes = Mode.allCases
+        let room = max(0, (pickerWidth - 2 * inset - modes.map(words).reduce(0, +)) / Double(modes.count))
+        let width = words(.events) + room
+        let end = pickerWidth - inset
+        return max(0, end - width) ... max(0, end)
+    }
+
+    static func middle(pickerWidth: Double) -> Double {
+        let span = span(pickerWidth: pickerWidth)
+        return (span.lowerBound + span.upperBound) / 2
+    }
+
+    static func contains(_ x: Double, pickerWidth: Double) -> Bool { pickerWidth > 0 && span(pickerWidth: pickerWidth).contains(x) }
+}
+
+/// The card under the Events tab: how many events are new; a click shows them alone in Events.
+struct NewEventsCard: View {
+    /// Between the card's edge and its highlight.
+    static let inset: CGFloat = 6
     let count: Int
-
-    static func words(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
-
-    /// Room for it after a segment's name: figure spaces, as many as it has digits and a little more.
-    static func room(_ count: Int) -> String { String(repeating: "\u{2007}", count: words(count).count + 2) }
+    let show: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        Text(Self.words(count))
-            .font(.system(size: 10, weight: .bold).monospacedDigit())
-            // Tinted, not filled: as Find Cameras' count is (a solid capsule of the accent shouted).
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 16, minHeight: 15)
-            .background(Color.accentColor.opacity(0.2), in: Capsule())
-            .contentTransition(.numericText())
+        Button(action: show) {
+            HStack(spacing: 10) {
+                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(count == 1 ? "1 new event" : "\(count) new events")
+                        .font(.callout.weight(.semibold))
+                        .contentTransition(.numericText(value: Double(count)))
+                    Text("Show only the new ones").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            // Under the pointer, lit: it's clickable. Inset evenly from the card's edge, its corners the card's less
+            // that inset, so the two curves run alongside each other.
+            .background(Color.primary.opacity(hovering ? 0.1 : 0),
+                        in: RoundedRectangle(cornerRadius: Callout.cornerRadius - Self.inset, style: .continuous))
+            .padding(Self.inset)
+            // (Clear of the arrow, over the card's top.)
+            .padding(.top, Callout.arrowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .animation(.snappy(duration: 0.3), value: count)
     }
 }

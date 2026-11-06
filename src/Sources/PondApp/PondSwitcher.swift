@@ -20,39 +20,36 @@ struct PondSwitcher: View {
         return state + (model.otherPonds.isEmpty ? "" : " Showing \(model.shownName).") + " Click for an overview."
     }
 
+    /// Its words: with only this Mac, its state ("Recording", "Side Gate not recorded", "3 need attention"); with
+    /// other Ponds, the one shown.
+    func words(switches: Bool) -> String { switches ? model.shownName : model.statusWords }
+
     var body: some View {
         let switches = !model.otherPonds.isEmpty
         let count = model.attentionCount
         Button {
             // Where the button is now (it moves as the views' toolbars differ), for the overview to centre on.
-            if !model.showingOverview, let middle = probe.middleFromLeading { model.overviewButtonFromLeading = middle }
+            // (None: chosen from the toolbar's overflow menu, and pointed at its button.)
+            if !model.showingOverview {
+                let middle = probe.middleFromLeading
+                model.overviewFromOverflow = middle == nil
+                if let middle { model.overviewButtonFromLeading = middle }
+            }
             withAnimation(.snappy(duration: 0.3)) {
                 model.showingFoundCameras = false
                 model.showingOverview.toggle()
             }
         } label: {
-            HStack(spacing: 6) {
+            // A label of words and a mark: what the toolbar's overflow menu makes its item from (a view of its own,
+            // it was left out there at first, and dimmed). Drawn in the toolbar by StatusLabelStyle: with the count
+            // beside the Pond shown, and the chevron.
+            Label {
+                Text(words(switches: switches))
+            } icon: {
                 PondMark()
                     .symbolEffect(.bounce, value: model.shownPondsNudge)
-                // With other Ponds, how many things need attention (any Pond's), beside the one shown.
-                if switches, count > 0 {
-                    Text("\(count)")
-                        .monospacedDigit()
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(.orange.opacity(0.18), in: Capsule())
-                }
-                Text(switches ? model.shownName : model.statusWords)
-                    // Changed by something else (a camera of a Pond not shown chosen in Events): lit a moment. (The
-                    // toolbar's glass can't be tinted or outlined, and what's drawn past the label is cut off: the
-                    // label's own words are what can say so.)
-                    .foregroundStyle(nudged ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
+            .labelStyle(StatusLabelStyle(count: switches ? count : 0, nudged: nudged))
             .padding(.horizontal, 4)
             // Changed by something else: the button glows a moment, the whole of it, then fades.
             .task(id: model.shownPondsNudge) {
@@ -64,8 +61,13 @@ struct PondSwitcher: View {
         }
         // Its words changed at once, not morphed from the middle (which nudged the mark and the chevron about), and
         // the toolbar's glass takes the new width at once too, as Find Cameras' does.
-        .transaction(value: "\(switches) \(count) \(model.shownName) \(model.statusWords)") { $0.animation = nil }
-        .reportingMiddleFromLeading(probe: probe) { if model.overviewButtonFromLeading != $0 { model.overviewButtonFromLeading = $0 } }
+        .transaction(value: "\(switches) \(count) \(words(switches: switches))") { $0.animation = nil }
+        // Moved into the toolbar's overflow menu (or back), the card pointing at it goes: what it pointed at has gone.
+        .reportingMiddleFromLeading(probe: probe, inToolbar: { shown in
+            if model.showingOverview, shown == model.overviewFromOverflow {
+                withAnimation(.snappy(duration: 0.3)) { model.showingOverview = false }
+            }
+        }) { if model.overviewButtonFromLeading != $0 { model.overviewButtonFromLeading = $0 } }
         .fixedSize()
         .help(meaning)
         .accessibilityLabel(switches ? "\(model.shownName), \(count) need attention" : model.statusWords)
@@ -259,5 +261,38 @@ struct RecordingRipple: View {
                 .opacity(t < 0.66 ? 0.6 * (1 - p) : 0)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// The toolbar state's label as the toolbar shows it: its mark, how many things need attention (with other Ponds,
+/// beside the one shown), its words, and a chevron (it opens the overview). Menus (the toolbar's overflow) show the
+/// label as menus do, its mark and words.
+struct StatusLabelStyle: LabelStyle {
+    /// Shown beside the words (0: none).
+    let count: Int
+    /// Lit a moment (the Pond shown changed by something else).
+    let nudged: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon
+            if count > 0 {
+                Text("\(count)")
+                    .monospacedDigit()
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.orange.opacity(0.18), in: Capsule())
+            }
+            configuration.title
+                // Changed by something else (a camera of a Pond not shown chosen in Events): lit a moment. (The
+                // toolbar's glass can't be tinted or outlined, and what's drawn past the label is cut off: the
+                // label's own words are what can say so.)
+                .foregroundStyle(nudged ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
     }
 }

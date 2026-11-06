@@ -202,10 +202,20 @@ final class AppModel {
     /// is (its middle) from the window's trailing edge.
     var showingFoundCameras = false
     var findCamerasButtonFromTrailing: CGFloat = 64
+    /// Find Cameras' card opened from the toolbar's overflow menu.
+    var foundCamerasFromOverflow = false
     /// The overview of what needs attention (the toolbar's state, clicked), and where its button's middle is.
-    var showingOverview = CommandLine.arguments.contains("--overview")   // (open from the start: for pictures of it)
+    var showingOverview = CommandLine.arguments.contains("--overview")
+    /// Opened from the toolbar's overflow menu (its button there, not in the toolbar): points at the overflow button.
+    var overviewFromOverflow = false   // (open from the start: for pictures of it)
     /// (Nil until the button has said.)
     var overviewButtonFromLeading: CGFloat?
+    /// Where the view picker is (for the card under its Events tab).
+    var viewPickerFrame: CGRect?
+    /// The pointer over the Events tab, or over the card that opens from it (how many are new), and the card shown.
+    var hoveringEventsTab = false
+    var hoveringNewCard = false
+    var showingNewCard = false
     /// The camera rail showing only the cameras that need attention.
     var railNeedsAttention = false
     /// Asked (from the overview) to put the cameras that need attention on the stage, alone: Live does, when it changes.
@@ -729,4 +739,7 @@ struct EventsState: Equatable {
     /// One camera's, or all.
     var camera: String?
     var hidden: Set<TimelineEvent.Kind> = []
+    /// Only the new ones: those new as it was turned on (kept, though they're seen as they're looked at), and any come
+    /// in since. Nil: every event.
+    var newOnly: Set<String>?
 }

@@ -41,8 +41,14 @@ final class EventsSeen {
 
     func isNew(_ event: TimelineEvent) -> Bool { event.start > before && seen[event.id] == nil }
 
-    /// How many came in and haven't been seen.
-    var count: Int { here.merging(elsewhere) { a, _ in a }.keys.count { seen[$0] == nil } }
+    /// How many came in and haven't been seen (or, for trying the count's look, a made-up number: `--fake-new-events`).
+    var count: Int { fake ?? here.merging(elsewhere) { a, _ in a }.keys.count { seen[$0] == nil } }
+
+    /// A made-up count, for development: set at launch, one more every few seconds, gone once Events is shown.
+    var fake: Int?
+
+    /// The new ones' ids (those read lately and not seen).
+    var newIDs: Set<String> { Set(here.merging(elsewhere) { a, _ in a }.keys.filter { seen[$0] == nil }) }
 
     /// What's been read lately: this Mac's, or other Ponds'.
     func found(_ events: [TimelineEvent], elsewhere: Bool) {
@@ -73,6 +79,12 @@ final class EventsSeen {
 }
 
 extension AppModel {
+    /// Events, showing only the new ones (from the Events tab's hover card).
+    func showNewEvents() {
+        eventsState.newOnly = seenEvents.newIDs
+        mode = .events
+    }
+
     /// This Mac's events since the last seen, read again (for the count on Events and the menu bar item).
     func refreshNewEvents() async {
         guard let source = EventSource(config: config) else { return }
