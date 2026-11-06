@@ -137,7 +137,7 @@ public struct CLI {
       homekit snapshot ID FILE.jpg                 the snapshot the Home app would be sent
       homekit                                      serve the cameras in the foreground (not while the service runs)
 
-    Moving from nvr
+    Testing tools (models, test scenes): see pond advanced
 
     The settings file is ~/Library/Application Support/Pond/config.json unless POND_CONFIG or --config names another.
     Camera passwords are kept in the login Keychain (service pond, account = camera ID).

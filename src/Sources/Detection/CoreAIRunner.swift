@@ -150,7 +150,7 @@ final class CoreAIRunner: ModelRunner, @unchecked Sendable {
     }
 }
 
-/// Async work waited for from a plain thread (detection runs on the recorder's and pond detect's own threads).
+/// Async work waited for from a plain thread (detection runs on the recorder's and pond advanced detect's own threads).
 func blocking<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
     let done = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var result: Result<T, any Error>?

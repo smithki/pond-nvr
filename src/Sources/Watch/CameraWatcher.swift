@@ -32,14 +32,8 @@ public final class CameraWatcher: @unchecked Sendable {
     /// The kinds of thing whose sightings are kept.
     public static let kept: Set<DetectedCategory> = [.person, .vehicle, .bike, .animal, .package, .item]
 
-    /// Motion looked for this often.
-    static let lookEvery: TimeInterval = 0.2
-    /// The model run at most this often, while something moves.
-    public static let detectEvery: TimeInterval = 0.25
-    /// And for this long after it stops.
-    static let detectAfterMotion: TimeInterval = 2
-    /// While something is followed but nothing moves, the model looks this often (to know it's still there).
-    static let presenceLookEvery: TimeInterval = 2
+    /// The model run at most this often, while something moves (WatchPipeline's).
+    public static let detectEvery = WatchPipeline.detectEvery
 
     private let lock = NSLock()
     private var stopped = false
@@ -116,16 +110,14 @@ public final class CameraWatcher: @unchecked Sendable {
 
     // MARK: Watching
 
-    private var gate = MotionGate()
-    private var tracker = Tracker()
-    private lazy var builder = EventBuilder(camera: camera)
-    private lazy var leftItems = LeftItems(camera: camera)
+    /// What's decided picture by picture (looking, motion, the model, following, events): the same for test scenes.
+    private lazy var pipeline = WatchPipeline(camera: camera, rules: rules)
 
     private func run() {
         var pause = 2.0
         while !isStopped {
             if PrivacyState.shared.isPrivate(camera) {
-                apply(builder.finish())
+                apply(pipeline.finish())
                 Thread.sleep(forTimeInterval: 1)
                 continue
             }
@@ -136,7 +128,7 @@ public final class CameraWatcher: @unchecked Sendable {
                 if !isStopped { Thread.sleep(forTimeInterval: pause) }
                 pause = min(pause * 2, 30)
             }
-            apply(builder.finish())
+            apply(pipeline.finish())
         }
     }
 
@@ -166,9 +158,7 @@ public final class CameraWatcher: @unchecked Sendable {
         var skipping = false
         let decoder = FrameDecoder()
         defer { decoder.close() }
-        gate = MotionGate()
-        gate.ignored = rules.ignoredCells(columns: gate.columns, rows: gate.rows)
-        var lastLook = Date.distantPast, lastDetect = Date.distantPast, lastMotion = Date.distantPast
+        pipeline.restart()
         var told = false
         // Each picture's time is when the camera took it (its RTP time, by the camera's sender reports), as the
         // recorder places the recording: so a box drawn over the recording is on the picture it was found in, not
@@ -178,7 +168,7 @@ public final class CameraWatcher: @unchecked Sendable {
         var arrivalLag: Double?
         while !isStopped, !PrivacyState.shared.isPrivate(camera) {
             guard let packet = try source.next(timeout: 1) else {
-                apply(builder.quiet(at: Date()))
+                apply(pipeline.quiet(at: Date()))
                 continue
             }
             if packet.channel == CameraSession.videoChannel + 1 {
@@ -220,61 +210,41 @@ public final class CameraWatcher: @unchecked Sendable {
                         say(String(format: "on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
                         toldDelay = true
                     }
-                    guard now.timeIntervalSince(lastLook) >= Self.lookEvery else { return }
-                    lastLook = now
-                    let mask = motion(in: picture)
-                    if mask.isMoving { lastMotion = now }
-                    let moving = now.timeIntervalSince(lastMotion) <= Self.detectAfterMotion
-                    // While something is followed (a dog lying down), or put down and waiting to be seen again, the model
-                    // looks now and then though nothing moves: so it's known to be still there.
-                    let present = tracker.following(EventBuilder.important) || builder.current != nil
-                    let checking = (present && now.timeIntervalSince(lastDetect) >= Self.presenceLookEvery)
-                        || (leftItems.isWaiting && now.timeIntervalSince(lastDetect) >= leftItems.lookEvery)
-                    guard moving || checking else {
-                        apply(builder.quiet(at: now))
-                        return
-                    }
-                    guard checking || now.timeIntervalSince(lastDetect) >= Self.detectEvery else { return }
-                    lastDetect = now
                     // The whole picture, and a closer look at what moves (at the main stream's resolution, once it's
                     // decoding: it starts with the motion).
-                    let closer = mask.isMoving
-                        ? tap?.picture(priority: tracker.following(EventBuilder.important) ? .following : .motion) : nil
-                    if closer != nil { CloserLook.Count.looked() }
-                    guard let found = detector.standIn.map({ $0(camera, now) })
-                        ?? CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
-                    else { return }
-                    // What counts by the zones, with the zones it's in.
-                    let counted = found.compactMap { d in rules.zones(for: d).map { (d, $0) } }
-                    let sightings = tracker.update(counted.map(\.0), mask: mask, at: now) { d in
-                        counted.first { $0.0 == d }?.1 ?? []
-                    }
-                    apply(builder.update(sightings, at: now), picture: picture)
+                    let priority: TapSlots.Priority = pipeline.following ? .following : .motion
+                    let detector = detector, camera = camera, tap = tap
+                    guard let out = pipeline.look(at: now, cells: { motionCells(in: picture) }, detect: { mask in
+                        let closer = mask.isMoving ? tap?.picture(priority: priority) : nil
+                        if closer != nil { CloserLook.Count.looked() }
+                        return detector.standIn.map { $0(camera, now) }
+                            ?? CloserLook.look(detector.detect, whole: picture, closer: closer, mask: mask)
+                    }) else { return }
+                    // (The picture with what changed, when the model looked at it: a new event's, or a better one.)
+                    apply(out.changes, picture: out.looked ? picture : nil)
+                    guard out.looked else { return }
                     // Kept, for drawing over the recording when it's played back: what matters, counted or not (an
                     // ignored one shows the zones at work), each with the track it was followed as.
-                    store?.save(found.filter { Self.kept.contains($0.category) }.map { d in
+                    store?.save(out.found.filter { Self.kept.contains($0.category) }.map { d in
                         Sighting(camera: camera, time: now, label: d.label, category: d.category, confidence: d.confidence, box: d.box,
-                                 track: sightings.first { $0.track.box == d.box }?.track.id,
-                                 counted: counted.contains { $0.0 == d })
+                                 track: out.sightings.first { $0.track.box == d.box }?.track.id,
+                                 counted: out.counted.contains { $0.detection == d })
                     })
-                    let items = counted.filter { $0.0.category == .item }
-                        .map { (detection: $0.0, zones: $0.1, moved: mask.overlaps(($0.0.box.x, $0.0.box.y, $0.0.box.width, $0.0.box.height))) }
-                    for event in leftItems.update(items, people: found.filter { $0.category == .person }, at: now) {
-                        left(event, picture: picture)
-                    }
+                    for event in out.left { left(event, picture: picture) }
                 }
             }
         }
     }
 
-    private func motion(in picture: CVPixelBuffer) -> MotionMask {
+    /// A picture's motion grid (MotionGate.cells), at the pipeline's gate's size.
+    private func motionCells(in picture: CVPixelBuffer) -> [Float] {
         CVPixelBufferLockBaseAddress(picture, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(picture, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(picture) else { return MotionMask(columns: gate.columns, rows: gate.rows, cells: []) }
-        let cells = MotionGate.cells(bgra: base.assumingMemoryBound(to: UInt8.self), width: CVPixelBufferGetWidth(picture),
-                                     height: CVPixelBufferGetHeight(picture), stride: CVPixelBufferGetBytesPerRow(picture),
-                                     columns: gate.columns, rows: gate.rows)
-        return gate.moving(cells)
+        let gate = pipeline.gate
+        guard let base = CVPixelBufferGetBaseAddress(picture) else { return [] }
+        return MotionGate.cells(bgra: base.assumingMemoryBound(to: UInt8.self), width: CVPixelBufferGetWidth(picture),
+                                height: CVPixelBufferGetHeight(picture), stride: CVPixelBufferGetBytesPerRow(picture),
+                                columns: gate.columns, rows: gate.rows)
     }
 
     // MARK: Events

@@ -15,6 +15,9 @@ public struct Config: Codable, Equatable, Sendable {
     public var cameras: [Camera]
     /// Reaching this Mac from outside (remote access); left out, it's off.
     public var remote: Remote?
+    /// Beta and test features (Settings › General › Advanced): what's being tried before everyone has it, and what
+    /// checking a new version needs (test scenes kept from this Pond's events). Left out, off.
+    public var testFeatures: Bool?
 
     /// Whether the service has anything to do: cameras to record, or remote access to keep (a Mac that only watches
     /// another Pond's cameras has none of its own).
@@ -36,6 +39,7 @@ public struct Config: Codable, Equatable, Sendable {
         retention = try c.decodeIfPresent(Retention.self, forKey: .retention) ?? Retention()
         cameras = try c.decodeIfPresent([Camera].self, forKey: .cameras) ?? []
         remote = try c.decodeIfPresent(Remote.self, forKey: .remote)
+        testFeatures = try c.decodeIfPresent(Bool.self, forKey: .testFeatures)
     }
 
     /// Remote access: whether this Mac can be reached from outside, and the signaling service its devices find it

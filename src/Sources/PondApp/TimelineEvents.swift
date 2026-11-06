@@ -195,11 +195,41 @@ struct EventSource: Sendable {
         }
     }
 
-    /// Said of an event: "this wasn't anything", or "it was something" (kept, to learn from).
-    func say(_ verdict: EventFeedback.Verdict, of event: TimelineEvent) {
+    /// Its owner's own test scenes: beside the database (SceneLibrary).
+    var library: SceneLibrary { SceneLibrary(beside: database) }
+
+    /// Said of an event: "this wasn't anything", or "it was something" (kept, to learn from); with `keepScene` (beta and
+    /// test features on), its clip kept as one of its owner's own test scenes (SceneLibrary), on this Mac.
+    func say(_ verdict: EventFeedback.Verdict, of event: TimelineEvent, keepScene: Bool) {
         guard let store = EventStore(path: database) else { return }
         store.record(EventFeedback(id: event.id, camera: event.camera, category: event.category, start: event.start,
                                    box: event.box, verdict: verdict))
+        if keepScene, let kept = store.events(ids: [event.id]).first {
+            let u = store.understanding(of: event.id)
+            library.add(kept, label: verdict == .nothing ? .nothing : .real, embedding: u?.subject ?? u?.scene, eventsFolder: eventsFolder)
+        }
+    }
+
+    /// A few of the events their owner saw and kept (shown in Events, seen over a day ago, never dismissed), kept as
+    /// real test scenes: a handful a camera, by day and by night, to the library's limit (SceneLibrary).
+    func keepSeen(seen: (TimelineEvent) -> Bool, now: Date = Date()) {
+        guard let store = EventStore(path: database) else { return }
+        let said = Set(store.feedback().map(\.id))
+        let recent = events(from: now.addingTimeInterval(-7 * 86400), to: now.addingTimeInterval(-86400), now: now)
+            .filter { $0.clip != nil && $0.quieted == nil && !$0.ongoing && ![.ring, .privacy, .motion].contains($0.kind)
+                && !said.contains($0.id) && !library.has($0.id) && seen($0) }
+        let have = library.scenes().filter { $0.scene.source?.label == .real }
+        for (camera, theirs) in Dictionary(grouping: recent, by: \.camera) {
+            let room = SceneLibrary.perKind - have.count { $0.scene.source?.camera == camera }
+            guard room > 0 else { continue }
+            // A couple by night and a couple by day, each run (spread over the week's).
+            let night = theirs.filter { EventJudge.isNight($0.start) }, day = theirs.filter { !EventJudge.isNight($0.start) }
+            for event in (night.shuffled().prefix(2) + day.shuffled().prefix(2)).prefix(room) {
+                guard let kept = store.events(ids: [event.id]).first else { continue }
+                let u = store.understanding(of: event.id)
+                library.add(kept, label: .real, embedding: u?.subject ?? u?.scene, eventsFolder: eventsFolder)
+            }
+        }
     }
 
     /// What's been said of a camera's events, and what it's learnt from that.
@@ -208,9 +238,10 @@ struct EventSource: Sendable {
         return store.feedback(camera: camera)
     }
 
-    /// Forgotten: everything said of a camera's events.
+    /// Forgotten: everything said of a camera's events (and the test scenes made of them).
     func forgetFeedback(camera: String) {
         guard let store = EventStore(path: database) else { return }
+        library.remove(store.feedback(camera: camera).map(\.id))
         store.forgetFeedback(camera: camera)
     }
 

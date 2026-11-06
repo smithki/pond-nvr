@@ -1,7 +1,7 @@
-// `pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--compute all|ane|gpu|cpu]`: runs a detection
+// `pond advanced detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--compute all|ane|gpu|cpu]`: runs a detection
 // model over recordings, a frame every S seconds (1), and says how fast it ran and what it found (in Pond's terms,
 // and the model's own); with --pictures, a few of the frames it found something in, boxes drawn. For trying a model
-// (the one built in, or one added to the Models folder) on a camera's own footage. `pond detect models` lists them.
+// (the one built in, or one added to the Models folder) on a camera's own footage. `pond advanced detect models` lists them.
 // With --camera ID, that camera's zones are applied as the service applies them: only people, vehicles, animals,
 // packages and items are listed, each with where it stands and whether it counts (its zones) or is ignored; and
 // as the service looks (motion first, and a closer look at what moves), `--closer` adds the closer looks.
@@ -54,11 +54,11 @@ enum DetectCommand {
         default: .all
         }
         guard !args.isEmpty else {
-            FileHandle.standardError.write(Data("✗ pond detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--camera ID [--closer]] [--compute all|ane|gpu|cpu]; pond detect models\n".utf8))
+            FileHandle.standardError.write(Data("✗ pond advanced detect FILE.mp4 … [--model ID] [--every S] [--pictures DIR] [--camera ID [--closer]] [--compute all|ane|gpu|cpu]; pond advanced detect models\n".utf8))
             return 2
         }
         guard let model = ModelStore.choose(modelID) else {
-            FileHandle.standardError.write(Data("✗ No model\(modelID.map { " \($0)" } ?? ""). See: pond detect models\n".utf8))
+            FileHandle.standardError.write(Data("✗ No model\(modelID.map { " \($0)" } ?? ""). See: pond advanced detect models\n".utf8))
             return 1
         }
         let detector = Detector()

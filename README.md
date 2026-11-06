@@ -93,7 +93,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in the Doctor window's Recorder 
 
 - [docs/cameras](docs/cameras/README.md): which cameras work, and what to set on them: [Reolink](docs/cameras/reolink.md), [ONVIF and other RTSP cameras](docs/cameras/onvif.md).
 - [docs/controls.md](docs/controls.md): camera controls, and how each goes through the best way Pond has for a camera.
-- [docs/detection.md](docs/detection.md): detection models: the one built in, adding another, `pond detect`.
+- [docs/detection.md](docs/detection.md): detection models: the one built in, adding another, `pond advanced detect`.
 - [docs/search.md](docs/search.md): searching events in plain words, the sentences and the picture model behind it.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check Now.
 - [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.

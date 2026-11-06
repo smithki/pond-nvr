@@ -441,6 +441,9 @@ struct ContentView: View {
                 if tick % 3 == 0 { await model.reportLiveViews() }
                 // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
                 if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
+                // Events seen and kept, as test scenes of this Mac's own: a few each day (an hour after opening, then
+                // daily).
+                if tick % 43_200 == 1_800 { await model.keepSeenEvents() }
                 // New events, for the count on Events and the menu bar item, every 30 s.
                 if tick % 15 == 0 { await model.refreshNewEvents() }
                 // The drive's room, for the overview (whether it holds the days kept), every half hour.

@@ -77,7 +77,7 @@ A camera's motion sensor in the Home app follows its events: on when one begins 
 
 ### A closer look
 
-The model sees the whole picture squeezed to 640×640, so something small in it (a cat across the room, someone at the end of the drive) is a few dozen pixels. Where something moves, the watcher also gives the model a close-up: the moving area with room around it, at least 640 pixels square, cut from the main stream at full resolution. The main stream is decoded only while something moves (through the recorder's own connection, from its latest keyframe, so a picture is at hand at once) and let go a few seconds after. What the close-up finds is put back in the whole picture's terms and merged with the rest. One more run of the model (about 10 ms) for each of up to two moving areas, only while something moves. `pond detect FILE --camera ID --closer` replays a recording this way.
+The model sees the whole picture squeezed to 640×640, so something small in it (a cat across the room, someone at the end of the drive) is a few dozen pixels. Where something moves, the watcher also gives the model a close-up: the moving area with room around it, at least 640 pixels square, cut from the main stream at full resolution. The main stream is decoded only while something moves (through the recorder's own connection, from its latest keyframe, so a picture is at hand at once) and let go a few seconds after. What the close-up finds is put back in the whole picture's terms and merged with the rest. One more run of the model (about 10 ms) for each of up to two moving areas, only while something moves. `pond advanced detect FILE --camera ID --closer` replays a recording this way.
 
 The watchers share one model, and the camera connection that recording and live view already use. Decoding is done by the media engine, so watching costs little until something moves.
 
@@ -91,15 +91,21 @@ The watchers share one model, and the camera connection that recording and live 
 
 What's said is kept in Pond's database (its `feedback` table: the event's camera, kind, box and time, the verdict, and a copy of its embedding, so it outlasts the event). A camera's settings say what it's learnt (Detection › Learnt from your feedback), and **Forget…** clears it.
 
+## Your own test scenes
+
+With beta and test features on (Settings › General › Advanced: off by default, as the scenes take room and keep clips past event retention), a Pond keeps scenes of its own, to check a new build against what its owner said (beside its database, in `Scenes`; never anywhere else): each one an event's clip and what it was. **Nothing**: said not to be anything. **Real**: said to be something, or (a few a day, a day after) seen in Events and kept without being dismissed. At most 40 of each per camera, the oldest let go; Forget… in a camera's settings removes those its feedback made.
+
+`pond advanced scenes` replays them through the build (motion, the model, the tracker, events, as the recorder runs them) and says, by camera, how many of the dismissed it keeps out of sight (not made, or quieted) and how many of the real it shows (made, and not quieted): any real one missed or hidden is a failure. Each is judged by what was learnt from everything else said, never from itself. With fewer than 20 of each kind for a camera, it says there are too few to go by. `pond advanced scenes --json` gives only the counts: what a tester shares (development.md: How detection changes are judged). What the detector never noticed at all can't be in these scenes: they show false alarms and quieting, not its blind spots.
+
 ## Trying a model
 
-`pond detect` runs a model over recordings, a frame every second (or `--every S`), and says how fast it ran and what it found; `--pictures DIR` keeps some of the frames, boxes drawn:
+`pond advanced detect` runs a model over recordings, a frame every second (or `--every S`), and says how fast it ran and what it found; `--pictures DIR` keeps some of the frames, boxes drawn:
 
 ```sh
-pond detect models                                   # the models there are
-pond detect /Volumes/NVR/recordings/continuous/doorbell/2026-10-18/18-55-38.mp4 --pictures ~/Desktop/found
-pond detect clip.mp4 --model my-model --compute ane  # all (default), ane, gpu or cpu
-pond detect clip.mp4 --camera living-room           # with that camera's zones: where each thing stands, and whether it counts
+pond advanced detect models                                   # the models there are
+pond advanced detect /Volumes/NVR/recordings/continuous/doorbell/2026-10-18/18-55-38.mp4 --pictures ~/Desktop/found
+pond advanced detect clip.mp4 --model my-model --compute ane  # all (default), ane, gpu or cpu
+pond advanced detect clip.mp4 --camera living-room           # with that camera's zones: where each thing stands, and whether it counts
 ```
 
 On an M-series Mac the built-in model takes 5–11 ms a frame, so a few frames a second from every camera costs little.

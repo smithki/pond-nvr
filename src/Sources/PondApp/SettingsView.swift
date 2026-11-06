@@ -92,11 +92,54 @@ struct GeneralSettings: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            AdvancedSection()
             Section {
                 LabeledContent("Version", value: Brand.version)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Advanced: beta and test features (off by default): what's tried before everyone has it, and test scenes kept from
+/// this Pond's events for checking a new version (`pond advanced scenes`), with the room they take and their deleting.
+struct AdvancedSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var size: (scenes: Int, bytes: Int64)?
+    @State private var confirmDelete = false
+
+    var library: SceneLibrary? { model.config.map { SceneLibrary(beside: $0.storage.databasePath) } }
+
+    var body: some View {
+        Section {
+            Toggle(isOn: Binding(get: { model.config?.testFeatures == true },
+                                 set: { on in _ = model.update(affectsRecorder: false) { $0.testFeatures = on ? true : nil } })) {
+                Text("Beta and test features")
+                Text("Features still being tried, and test scenes for checking a new version against your own events: the clips of events you say weren\u{2019}t anything or were, and a few you keep, beside Pond\u{2019}s database (on this Mac only, and kept past event retention).")
+            }
+            if let size, size.scenes > 0 {
+                LabeledContent {
+                    Button("Delete Test Scenes\u{2026}") { confirmDelete = true }
+                } label: {
+                    Text("Test scenes")
+                    Text("\(size.scenes) kept, \(ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)). Checked with pond advanced scenes.")
+                }
+            }
+        } header: {
+            Text("Advanced")
+        }
+        .task(id: model.config?.testFeatures) {
+            guard let library else { return }
+            size = await Task.detached { library.size() }.value
+        }
+        .confirmationDialog("Delete the test scenes?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) {
+                library?.removeAll()
+                size = nil
+            }
+        } message: {
+            Text("Their clips are deleted. What Pond learnt from what you said of events is kept.")
+        }
     }
 }
 

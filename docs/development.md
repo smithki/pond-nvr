@@ -61,8 +61,8 @@ What a Pond learns from its owner (events said to be nothing or something, the r
 
 Everything every Pond starts with (detection's thresholds, the tracker's rules, what quiets an event) changes only on evidence anyone can see and run again, so no one home's cameras decide what all homes get:
 
-- **Shared scenes:** the demo's made-up scenes (in the repository, the same on any Mac) and public datasets whose terms allow it (downloaded to the Mac that runs them, not kept here). A change must not make them worse, misses above all.
-- **Many homes, numbers only:** testers run the same scenes harness on their own private scenes, on their own Macs, and report only the scores (misses and false events, per kind of scene); their footage never leaves them. A change has to hold up across homes, not in one.
+- **Many homes, numbers only:** each Pond keeps test scenes of its own (beside its database, on its Mac: the events its owner said weren't anything or were something, and some they saw and kept), and `pond advanced scenes --json` replays them through a build and reports only the scores; testers send those, never footage. A change has to hold up across homes, not in one, and above all not hide what anyone said mattered.
+- **Public footage, later:** datasets whose terms allow it, downloaded to the Mac that runs them, never kept here: for what no home's scenes can show (a detector's blind spots: what it never noticed doesn't become an event, so isn't in anyone's scenes).
 - **One home finds, it doesn't decide:** a problem seen on one's own cameras (a parked car that kept an event going all night, say) says what to look into; the fix is made general, and its numbers are chosen and checked on shared scenes before it ships.
 
 Learning from one's own feedback is a Pond's own business, tuned for its own cameras and checked against examples held back from what it learned from (so it's never graded on what it was taught, and never hides what its owner said mattered).

@@ -493,9 +493,22 @@ if args.count >= 3, args[0] == "camera", args[1] == "onvif" {
 /// `pond camera privacy ID [on|off]`: whether Pond keeps the camera private (not recorded, shown live or served to
 /// HomeKit), or makes it so. Through the service, which applies it at once (and has the camera itself follow,
 /// where its provider can); without the service running, kept for when it starts.
-/// `pond detect …`: a detection model run over recordings (see DetectCommand).
 #if canImport(PondMac)
-if args.first == "detect" { exit(DetectCommand.run(Array(args.dropFirst()), configPath: configPath)) }
+/// `pond advanced …`: testing tools, kept out of the everyday commands (and their help): `detect`, a detection model
+/// run over recordings (DetectCommand); `scenes`, test scenes replayed through what the recorder runs and scored
+/// (ScenesCommand).
+if args.first == "advanced" {
+    switch args.dropFirst().first {
+    case "detect": exit(DetectCommand.run(Array(args.dropFirst(2)), configPath: configPath))
+    case "scenes": exit(ScenesCommand.run(Array(args.dropFirst(2)), configPath: configPath))
+    case nil, "help":
+        print(AdvancedHelp.text)
+        exit(0)
+    case let other?:
+        FileHandle.standardError.write(Data("✗ Unknown advanced command \(other). See: pond advanced help\n".utf8))
+        exit(2)
+    }
+}
 /// `pond describe [EVENT-ID | PICTURE …] [--last N]`: the sentence the Mac's own model writes for an event.
 if args.first == "describe" { exit(DescribeCommand.run(Array(args.dropFirst()), configPath: configPath)) }
 /// `pond search QUESTION [--plain] [--top N]`: events that answer a question in plain words, best first.
