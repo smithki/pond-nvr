@@ -4,6 +4,10 @@ What's left to do: goals under way, next, and later. What's finished is in [done
 
 Status: **in progress**, **next**, **later**. A goal moves to done.md when it's finished.
 
+What comes first: that people can trust what Pond tells them, and that it's plainly working when it is (and says
+so when it isn't), before more for it to do. An event that wasn't anything, or a night not recorded without a
+word, costs more than any feature earns; each new surface is one more thing that can quietly break.
+
 ## Release
 
 What it takes for anyone to use Pond without building it, find out what it does, and support it.
@@ -18,7 +22,8 @@ What it takes for anyone to use Pond without building it, find out what it does,
 | Open books | later | What Pond has cost to make, published and kept up to date: development (from the repository: commits, lines, and time spent, kept in a ledger beside it), AI assistance (from the providers' usage exports), the services it runs on (the signaling server, the domain, the Developer Program), and what donations brought in. A page on the website, built from those files, so supporters see where money goes. |
 | Ready for others | later | What a public project needs beside the code: `SECURITY.md` (how to report a vulnerability privately, and what's in scope), a code of conduct, issue templates (a bug report names a demo scenario, or attaches the doctor's report), CI on macOS for every pull request (tests and the release build, not only the Linux part), the camera compatibility list open to additions, and the trademark question settled (whether the name and logo, `assets/Logo.af`, are free to use with the code or kept). |
 | Signing the CLA | next | The contributor agreement process CLA.md's section 14 names, run by CI on every pull request: each commit's author is checked against the signatures kept in the repository (a GitHub Action, such as CLA Assistant Lite's); one who hasn't signed is asked, in a comment, to read the CLA and reply with the statement that signs it (a comment of its own, not a review or approval), and the check stays red (required before merging) until they have. Each signature records the GitHub account, the CLA's version and the SHA-256 of the exact text shown (each version kept unchanged, tagged in the repository), the date and the pull request; a materially revised CLA is signed again for later contributions. A contributor's earlier commits, made before signing, are named in the pull request where they sign, so they're covered too. A company's contributions go through a corporate agreement, by email. Comes before the repository takes outside pull requests; the CLA reviewed by a lawyer first, as its own note asks. |
-| First run without a guide | later | Someone who downloads Pond finds their way alone: a first window that says what's needed and does it (a drive, Local Network access, the first camera found on the network and added, the recorder started), with demo mode offered for those with no camera yet. |
+| A beta beyond one home | next | Before a public release, a small beta of people with other homes: other makes of camera (ONVIF ones of several brands, H.265 ones, battery and Wi-Fi ones), other Macs (a base Mac mini to a Studio), other HomeKit hubs, remote access over real tailnets and real home routers, and someone who isn't technical. Reports come with the doctor's report or a demo scenario; what's learnt goes into the camera compatibility list and the fixes before the release. |
+| First run without a guide | later | Someone who downloads Pond finds their way alone: a first window that says what's needed and does it (a drive, Local Network access, the first camera found on the network and added, the recorder started), with demo mode offered for those with no camera yet. Judged by watching: a fresh install timed with someone who isn't technical, each place they stall a fix. |
 | Moving to a new Mac | later | Settings, passwords, HomeKit identities (so cameras stay in the Home app), remote access's keys and pairings, and the index, carried over: an export and an import, or a guide. Recordings stay on their drive. |
 
 ## ONVIF
@@ -52,10 +57,19 @@ Pond stays open source; what's paid for is convenience, as with Home Assistant C
 | Camera groups | later | Groups of cameras within a Pond (Front of house, Garage), named and ordered, for the grid, the lanes and the filters (distinct from zones). |
 | One-way sites | later | A Pond seen from another without seeing back (a cabin seen from home, not home from the cabin): pairing that grants one direction only. Other Ponds as sites in Live, Events and the Timeline are done (remote access, in [done.md](done.md)). |
 
+## Staying up
+
+Pond is a server that looks like an app: it's only as good as the nights it doesn't miss.
+
+| Goal | Status | Notes |
+|---|---|---|
+| Knowing when it isn't working | next | What stops recording said plainly, as it happens and wherever one is: the Mac asleep or restarted for an update, the recordings drive full, missing or slow, the service stopped, a camera gone for long; and after the fact ("not recorded 03:12–06:40: the drive was full"), on the timeline and in the doctor. On this Mac, notifications (done); away, on one's phone: through the Home app (Pond's own HomeKit sensor going off, which the Home app can notify about, with no server of Pond's), and later push alerts through the hosted service. A quiet daily "all well" check one can glance at, rather than silence that could mean either. |
+
 ## Detection, events, search
 
 | Goal | Status | Notes |
 |---|---|---|
+| Events worth trusting | next | Fewer events that weren't anything, and none missed. A set of recorded scenes Pond is measured against with every change to detection: a parked car through a night (noise, infrared, passing headlights), rain and snow, swaying trees, insects at an infrared lamp, birds, a person standing still, a delivery; what each should and shouldn't make. Labels that don't fit a home camera (the model's "train" or "boat" for a car in the street) read as what they likely are, or not counted. Each camera's sensitivity in plain words, with what it would have caught yesterday at each setting. And "this wasn't anything" on an event, which teaches its camera to leave that alone (that spot, that kind, at that time of day), shown and undone in the camera's settings. |
 | Package detection | later | The built-in model (COCO) has no package class. Fine-tune YOLO26 with a `package` class: an open parcel dataset (Roboflow's parcel-detect, CC BY 4.0) plus doorbell footage of real deliveries, trained on a Mac; shipped built in, or as the first model of the Pond model marketplace. Pond already reads a model's `package` label into its Packages category, so no other change is needed. |
 
 ## Small fixes
