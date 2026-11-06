@@ -11,6 +11,8 @@ struct EventCard: View, Equatable {
     let selected: Bool
     /// Just come in: glows a moment.
     var fresh = false
+    /// Not seen yet: a dot by when it was.
+    var isNew = false
     let choose: () -> Void
     let open: () -> Void
     let delete: () -> Void
@@ -20,7 +22,7 @@ struct EventCard: View, Equatable {
 
     /// The same if it shows the same (its actions, made anew with each of the grid's, aren't compared).
     nonisolated static func == (a: EventCard, b: EventCard) -> Bool {
-        a.event == b.event && a.camera == b.camera && a.selected == b.selected && a.fresh == b.fresh
+        a.event == b.event && a.camera == b.camera && a.selected == b.selected && a.fresh == b.fresh && a.isNew == b.isNew
     }
 
     var body: some View {
@@ -31,10 +33,19 @@ struct EventCard: View, Equatable {
                     .font(.callout)
                     .lineLimit(2, reservesSpace: true)
                     .multilineTextAlignment(.leading)
-                Text("\(camera) \u{00B7} \(event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(EventCallout.length(event.seconds))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    // Not seen yet.
+                    if isNew {
+                        Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                            .help("New: not seen yet")
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    Text("\(camera) \u{00B7} \(event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(EventCallout.length(event.seconds))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .animation(.easeOut(duration: 0.3), value: isNew)
             }
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, minHeight: EventGridLayout.textHeight, maxHeight: EventGridLayout.textHeight, alignment: .topLeading)

@@ -183,6 +183,8 @@ struct EventGrid: View {
     let focus: String?
     let selected: String?
     let fresh: Set<String>
+    /// Not seen yet (marked).
+    var unseen: Set<String> = []
     @Binding var request: GridScroll?
     let name: (String) -> String
     /// A section's title, by its day (a day's own; or, for a search's best matches, theirs).
@@ -299,7 +301,7 @@ struct EventGrid: View {
                                     .transition(.opacity)
                             } else {
                                 EventCard(event: event, camera: name(event.camera), selected: selected == item.id,
-                                          fresh: fresh.contains(item.id),
+                                          fresh: fresh.contains(item.id), isNew: unseen.contains(item.id),
                                           choose: { choose(event) }, open: { open(event) }, delete: { delete(event) })
                                     // (Drawn again only when it changes: its actions, new each time, otherwise made
                                     // every card's body run again with every frame the grid scrolled.)

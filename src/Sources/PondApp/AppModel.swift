@@ -86,6 +86,8 @@ final class AppModel {
     /// How each camera is doing (the doctor), and what its window shows (DoctorWindow).
     let doctor = CameraDoctor()
     var doctorPage: DoctorPage = .cameras
+    /// Which events are new (seen once on screen in Events).
+    let seenEvents = EventsSeen(demo: DemoSession.scenario?.name)
     /// Opens a window by its id (SwiftUI's, kept by the views that have it), for what opens one from outside a view:
     /// the doctor's, from a notification or the model.
     static var openWindow: ((String) -> Void)?

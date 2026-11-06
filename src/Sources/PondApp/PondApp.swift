@@ -232,11 +232,25 @@ struct ContentView: View {
                 // Animated, so the toolbar's glass morphs as items come and go with the view.
                 Picker("View", selection: $model.mode.animation(.snappy(duration: 0.3))) {
                     ForEach(Mode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        // (Events with room after its name for its count, drawn over it: below.)
+                        let new = mode == .events ? model.seenEvents.count : 0
+                        Text(new > 0 ? mode.title + CountBadge.room(new) : mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
+                // How many events are new, in a capsule of colour at the end of Events' segment (the last): a segmented
+                // control takes only words in its segments, so it's drawn over, in the room left for it.
+                .overlay(alignment: .trailing) {
+                    let new = model.seenEvents.count
+                    if new > 0 {
+                        CountBadge(count: new)
+                            .padding(.trailing, 9)
+                            .allowsHitTesting(false)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy(duration: 0.25), value: model.seenEvents.count > 0)
                 .disabled(model.config == nil)
             }
             // In a demo, which one, always in sight (nothing here is the real setup), in glass of its own; its menu
@@ -345,6 +359,8 @@ struct ContentView: View {
                 if tick % 3 == 0 { await model.reportLiveViews() }
                 // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
                 if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
+                // New events, for the count on Events and the menu bar item, every 30 s.
+                if tick % 15 == 0 { await model.refreshNewEvents() }
                 // The drive's room, for the overview (whether it holds the days kept), every half hour.
                 if tick % 900 == 0 { await model.refreshStorageOutlook() }
                 tick += 1
@@ -623,5 +639,26 @@ struct FoundCamerasPanel: View {
         .background {
             Button("Close", action: close).keyboardShortcut(.cancelAction).hidden()
         }
+    }
+}
+
+/// A count in a capsule tinted with the accent colour (the new events, on the Events segment).
+struct CountBadge: View {
+    let count: Int
+
+    static func words(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
+
+    /// Room for it after a segment's name: figure spaces, as many as it has digits and a little more.
+    static func room(_ count: Int) -> String { String(repeating: "\u{2007}", count: words(count).count + 2) }
+
+    var body: some View {
+        Text(Self.words(count))
+            .font(.system(size: 10, weight: .bold).monospacedDigit())
+            // Tinted, not filled: as Find Cameras' count is (a solid capsule of the accent shouted).
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 16, minHeight: 15)
+            .background(Color.accentColor.opacity(0.2), in: Capsule())
+            .contentTransition(.numericText())
     }
 }

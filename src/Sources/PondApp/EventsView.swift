@@ -53,6 +53,10 @@ struct EventsView: View {
     /// It's taking a while (the models still being readied: the first search after an install or update).
     @State private var slow = false
     @Environment(\.openSettings) private var openSettingsWindow
+    /// Whether the window's in front: a card on screen counts as seen only then.
+    @Environment(\.controlActiveState) private var windowState
+    /// On screen this long, a new card's seen (not just scrolled past).
+    static let seenAfter = 1.0
 
     /// The cameras whose events are shown: this Mac's, and other Ponds' as chosen (as Live's).
     var cameras: [Config.Camera] { model.liveCameras }
@@ -60,6 +64,17 @@ struct EventsView: View {
     var keptDays: Int { model.config?.retention.events.days ?? 30 }
 
     /// The camera's, newest first.
+    /// New cards on screen now.
+    var newOnScreen: Set<String> {
+        onScreen.cards.intersection(shown.lazy.filter(model.seenEvents.isNew).map(\.id))
+    }
+
+    /// What's being looked at: which new cards, and whether the window's in front.
+    struct Looking: Equatable {
+        var cards: Set<String>
+        var front: Bool
+    }
+
     var forCamera: [TimelineEvent] { events.filter { camera == nil || $0.camera == camera } }
     /// Shown: the camera's, of the kinds on; of a search, those it found (best first, when it ranks them).
     var shown: [TimelineEvent] {
@@ -168,6 +183,16 @@ struct EventsView: View {
         // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
         // out.png --inactive` without this, and look under the toolbar.)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        // New cards on screen a moment, the window in front and the cards not under the panel: seen.
+        .task(id: Looking(cards: newOnScreen, front: windowState == .key && !cardsHidden)) {
+            let ids = newOnScreen
+            guard !ids.isEmpty, windowState == .key, !cardsHidden else { return }
+            try? await Task.sleep(for: .seconds(Self.seenAfter))
+            guard !Task.isCancelled else { return }
+            model.seenEvents.saw(shown.filter { ids.contains($0.id) })
+        }
+        // And one opened.
+        .onChange(of: selected?.id) { if let selected { model.seenEvents.saw([selected]) } }
         .onGeometryChange(for: Double.self) { $0.size.width } action: { new in
             // Into another size class: the rail and the panel move to their new places, animated.
             let next = SizeClass(new)
@@ -458,6 +483,9 @@ struct EventsView: View {
         // This Mac's (unless another Pond alone is shown), and other Ponds' as chosen.
         let own = model.shownPonds.includes(nil) ? await Task.detached { source.events(from: from, to: to) }.value : []
         let others = await model.remoteEvents(since: from)
+        // What's new among them, for the counts (another Pond's are known only as Events reads them).
+        if model.shownPonds.includes(nil) { model.seenEvents.found(own, elsewhere: false) }
+        model.seenEvents.found(others, elsewhere: true)
         let found = (own + others)
             .filter { $0.kind != .privacy && !deleted.contains($0.id) }
             .sorted { $0.start > $1.start }
@@ -504,7 +532,8 @@ struct EventsView: View {
                          width: max(200, geo.size.width),
                          columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
                          panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
-                         focus: focus, selected: selected?.id, fresh: fresh, request: $request,
+                         focus: focus, selected: selected?.id, fresh: fresh,
+                         unseen: Set(shown.lazy.filter(model.seenEvents.isNew).map(\.id)), request: $request,
                          name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },

@@ -30,6 +30,7 @@ struct OnScreenRail: View {
 /// wrapping from the end of one day's row to the start of the next. Laid out from fixed measures (no layout's
 /// guess), so the outline sits exactly on its cells.
 struct ActivityRail: View {
+    @Environment(AppModel.self) private var model
     let events: [TimelineEvent]
     let days: Int
     let onScreen: Set<Date>
@@ -106,6 +107,25 @@ struct ActivityRail: View {
             .frame(width: Self.width, alignment: .topLeading)
             .padding(.vertical, Self.top)
             // Why it goes back as far as it does, and where that's changed.
+            // How many of these are new, and their being seen, all at once.
+            let new = events.count(where: model.seenEvents.isNew)
+            if new > 0 {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                        Text(new == 1 ? "1 new event" : "\(new) new events")
+                    }
+                    Button("Mark All Seen") { withAnimation(.easeOut(duration: 0.3)) { model.seenEvents.sawAll() } }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                }
+                .font(.caption2)
+                .frame(width: Self.rowWidth - Self.cellsX + Self.pad, alignment: .leading)
+                .padding(.leading, Self.cellsX - Self.pad)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Events are kept \(days == 1 ? "1 day" : "\(days) days").")
                     .foregroundStyle(.secondary)

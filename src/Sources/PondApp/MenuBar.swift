@@ -106,7 +106,8 @@ struct MenuBarMenu: View {
         }
         Divider()
         Button("Open Live") { open(.live) }
-        Button("Open Events") { open(.events) }
+        let new = model.seenEvents.count
+        Button(new == 0 ? "Open Events" : "Open Events (\(new) new)") { open(.events) }
         Button("Open the Doctor\u{2026}") { model.showDoctor() }
             .keyboardShortcut("d", modifiers: [.command, .option])
         Button("Settings\u{2026}") { show(model.settingsTab) }
