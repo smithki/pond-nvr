@@ -1,20 +1,16 @@
-// How long recordings are kept, and how much of the drive they may take, as one picture: days chosen from
-// a menu (each showing the space it needs), and the drive as a bar of what is on it, with sliders for the
-// most continuous recording may use and the space kept free, each with a field for an exact number. The
-// numbers follow the cameras' real rates (see StorageOutlook), and say when the days kept do not fit.
+// Settings › Storage, how long and how much: days kept chosen from a menu (each showing the space it needs), and the
+// drive as a bar of what is on it, with sliders for the most continuous recording may use and the space kept free,
+// each with a field for an exact number. The numbers follow the cameras' real rates (see StorageOutlook), and say
+// when the days kept do not fit.
 import PondCore
 import SwiftUI
 
-struct RetentionView: View {
-    @Environment(AppModel.self) private var model
-    /// The last measurement, shown at once (see AppModel.lastStorageOutlook).
-    var outlook: StorageOutlook? { model.lastStorageOutlook }
-    /// While a slider is dragged: its value, shown live and saved when it is let go.
-    @State private var draftLimit: Double?
-    @State private var draftReserve: Double?
-
+extension StorageView {
     static let continuousPresets = [1, 3, 7, 14, 30, 60, 90, 180, 365]
     static let eventPresets = [7, 14, 30, 90, 180, 365, 730]
+    /// The space rows' names and numbers, as wide on each so their sliders line up.
+    static let spaceLabelWidth = 170.0
+    static let spaceValueWidth = 130.0
 
     var retention: Config.Retention { model.config?.retention ?? Config.Retention() }
     var limitGB: Double? { draftLimit.map { $0 >= limitRange.upperBound ? nil : $0 } ?? retention.continuous.maxSizeGB }
@@ -25,46 +21,32 @@ struct RetentionView: View {
         outlook?.estimate(eventDays: retention.events.days, maxContinuousGB: limitGB, minFreeGB: reserveGB)
     }
 
-    var body: some View {
-        Form {
-            Section {
-                DaysPicker(title: "Keep continuous recording", days: retention.continuous.days, presets: Self.continuousPresets,
-                           range: 1 ... 3650, detail: continuousDetail) { days in
-                    model.update { $0.retention.continuous.days = days }
-                }
-                DaysPicker(title: "Keep event clips and snapshots", days: retention.events.days, presets: Self.eventPresets,
-                           range: 1 ... 3650, detail: eventsDetail) { days in
-                    model.update { $0.retention.events.days = days }
-                }
-            } header: {
-                Text("How long").restartRecorderButton()
-            } footer: {
-                Text("Older recording is deleted. Event clips are never deleted to make space: they stay for their days, whatever happens to continuous recording.")
-                    .foregroundStyle(.secondary)
-            }
-
-            if let outlook, let drive = outlook.drive, let estimate {
-                Section {
-                    StorageBar(segments: segments(drive: drive, outlook: outlook, estimate: estimate))
-                        .padding(.vertical, 4)
-                    limitRow(drive: drive, estimate: estimate)
-                    reserveRow(drive: drive)
-                } header: {
-                    Text("Space on \(drive.name)")
-                } footer: {
-                    Text("Recording stops growing at whichever comes first: the days kept, the most it may use, or the drive reaching the space kept free. Then the oldest continuous recording makes way for the newest.")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Section("Space") {
-                    LabeledContent("Keep free", value: "\(Int(retention.minFreeGB)) GB")
-                    Text("The drive\u{2019}s space shows here when the recordings folder is ready (Storage).")
-                        .foregroundStyle(.secondary)
-                }
-            }
+    /// How long each is kept, under the folder they're kept in.
+    @ViewBuilder var keepRows: some View {
+        DaysPicker(title: "Keep continuous recording", days: retention.continuous.days, presets: Self.continuousPresets,
+                   range: 1 ... 3650, detail: continuousDetail) { days in
+            model.update { $0.retention.continuous.days = days }
         }
-        .formStyle(.grouped)
-        .task(id: model.config) { await model.refreshStorageOutlook() }
+        DaysPicker(title: "Keep event clips and snapshots", days: retention.events.days, presets: Self.eventPresets,
+                   range: 1 ... 3650, detail: eventsDetail) { days in
+            model.update { $0.retention.events.days = days }
+        }
+    }
+
+    /// The drive as a bar of what's on it, with the most continuous recording may use and the space kept free.
+    @ViewBuilder var spaceSection: some View {
+        if let outlook, let drive = outlook.drive, let estimate {
+            Section {
+                StorageBar(segments: StorageBar.segments(drive: drive, used: outlook.used, estimate: estimate,
+                                                         keepDays: retention.continuous.days, reserveGB: reserveGB))
+                    .padding(.vertical, 4)
+                limitRow(estimate: estimate)
+                reserveRow
+            } header: {
+                Text("Space on \(drive.name)")
+            }
+            .help("Recording stops growing at the days kept, the most it may use, or the space kept free; then the oldest makes way.")
+        }
     }
 
     // MARK: - Days
@@ -98,13 +80,21 @@ struct RetentionView: View {
         return 0 ... max(50, min(500, (Double(drive.total) / 1e9 * 0.2).rounded()))
     }
 
+    /// One line: its swatch and name, the slider, and its number (its top end is no limit).
     @ViewBuilder
-    func limitRow(drive: DriveFacts, estimate: StorageEstimate) -> some View {
+    func limitRow(estimate: StorageEstimate) -> some View {
         let value = limitGB
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("Continuous recording may use", systemImage: "square.fill").labelStyle(Swatch(color: .accentColor))
-                Spacer()
+        HStack(spacing: 12) {
+            Label("Continuous may use", systemImage: "square.fill").labelStyle(Swatch(color: .accentColor))
+                .frame(width: Self.spaceLabelWidth, alignment: .leading)
+            Slider(value: Binding(get: { draftLimit ?? value ?? limitRange.upperBound }, set: { draftLimit = $0.rounded() }),
+                   in: limitRange) { editing in
+                if !editing, let draft = draftLimit {
+                    model.update { $0.retention.continuous.maxSizeGB = draft >= limitRange.upperBound ? nil : draft }
+                    draftLimit = nil
+                }
+            }
+            HStack(spacing: 6) {
                 if value != nil {
                     GBField(value: value ?? limitRange.upperBound, range: limitRange) { gb in
                         model.update { $0.retention.continuous.maxSizeGB = gb >= limitRange.upperBound ? nil : gb }
@@ -113,45 +103,31 @@ struct RetentionView: View {
                 Text(value == nil ? "No limit" : "GB")
                     .foregroundStyle(value == nil ? .primary : .secondary)
             }
-            Slider(value: Binding(get: { draftLimit ?? value ?? limitRange.upperBound }, set: { draftLimit = $0.rounded() }),
-                   in: limitRange) { editing in
-                if !editing, let draft = draftLimit {
-                    model.update { $0.retention.continuous.maxSizeGB = draft >= limitRange.upperBound ? nil : draft }
-                    draftLimit = nil
-                }
-            }
-            Text(value == nil
-                 ? "As much as the drive has, keeping the space below free: about \(StorageEstimate.duration(days: estimate.continuousDays))."
-                 : "Up to \(StorageEstimate.size(value! * 1e9)): about \(StorageEstimate.duration(days: estimate.continuousDays)).")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            .frame(width: Self.spaceValueWidth, alignment: .trailing)
         }
+        .help(value == nil
+              ? "As much as the drive has: about \(StorageEstimate.duration(days: estimate.continuousDays))."
+              : "Up to \(StorageEstimate.size(value! * 1e9)): about \(StorageEstimate.duration(days: estimate.continuousDays)).")
     }
 
     @ViewBuilder
-    func reserveRow(drive: DriveFacts) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("Keep free", systemImage: "square.fill").labelStyle(Swatch(color: .yellow))
-                Spacer()
-                GBField(value: reserveGB, range: reserveRange) { gb in model.update { $0.retention.minFreeGB = gb } }
-                Text("GB").foregroundStyle(.secondary)
-            }
+    var reserveRow: some View {
+        HStack(spacing: 12) {
+            Label("Keep free", systemImage: "square.fill").labelStyle(Swatch(color: .yellow))
+                .frame(width: Self.spaceLabelWidth, alignment: .leading)
             Slider(value: Binding(get: { reserveGB }, set: { draftReserve = ($0 / 5).rounded() * 5 }), in: reserveRange) { editing in
                 if !editing, let draft = draftReserve {
                     model.update { $0.retention.minFreeGB = draft }
                     draftReserve = nil
                 }
             }
-            Text("Room for the drive to breathe, and for anything else on it. When free space falls below this, the oldest continuous recording goes.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                GBField(value: reserveGB, range: reserveRange) { gb in model.update { $0.retention.minFreeGB = gb } }
+                Text("GB").foregroundStyle(.secondary)
+            }
+            .frame(width: Self.spaceValueWidth, alignment: .trailing)
         }
-    }
-
-    func segments(drive: DriveFacts, outlook: StorageOutlook, estimate: StorageEstimate) -> [StorageBar.Segment] {
-        StorageBar.segments(drive: drive, used: outlook.used, estimate: estimate, keepDays: retention.continuous.days,
-                            reserveGB: reserveGB)
+        .help("For anything else on the drive. Below it, the oldest continuous recording goes.")
     }
 }
 

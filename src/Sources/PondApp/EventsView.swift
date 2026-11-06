@@ -164,7 +164,7 @@ struct EventsView: View {
         HStack(alignment: .top, spacing: 14) {
             if railShown {
                 OnScreenRail(events: shown, days: keptDays, onScreen: onScreen, retention: {
-                    model.settingsTab = .retention
+                    model.settingsTab = .storage
                     openSettingsWindow()
                 }) { hour in
                     // The first card at or after that hour (newest first: the last one before the next hour).

@@ -57,7 +57,7 @@ pond service install                               # record whenever you are log
 
 The toolbar's state says whether all's well (or what needs attention, with an overview of it and the fixes), and the **Doctor** window (⌥⌘D) is for working out why: the recorder (whether it runs, its log) and each camera's findings, day and record.
 
-Settings (⌘,) has **General**, **Cameras**, **Storage**, **Retention** and **Remote Access**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
+Settings (⌘,) has **General**, **Cameras**, **Storage** (where recordings go, how long they're kept, and the room they take), **Remote Access** and **Advanced**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
 
 ## HomeKit
 

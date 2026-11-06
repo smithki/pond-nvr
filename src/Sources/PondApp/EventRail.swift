@@ -109,7 +109,7 @@ struct ActivityRail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Events are kept \(days == 1 ? "1 day" : "\(days) days").")
                     .foregroundStyle(.secondary)
-                Button("Retention Settings\u{2026}", action: retention)
+                Button("Storage Settings\u{2026}", action: retention)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .padding(.top, 4)

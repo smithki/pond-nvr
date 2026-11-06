@@ -6,7 +6,7 @@ import Understanding
 import Watch
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, cameras, storage, retention, remote, advanced
+    case general, cameras, storage, remote, advanced
 
     var id: String { rawValue }
 }
@@ -20,16 +20,13 @@ struct SettingsView: View {
             Tab("General", systemImage: "gearshape", value: SettingsTab.general) { GeneralSettings() }
             Tab("Cameras", systemImage: "video", value: SettingsTab.cameras) { needsSettings { CamerasView() } }
             Tab("Storage", systemImage: "externaldrive", value: SettingsTab.storage) { needsSettings { StorageView() } }
-            Tab("Retention", systemImage: "clock.arrow.circlepath", value: SettingsTab.retention) {
-                needsSettings { RetentionView() }
-            }
             Tab("Remote Access", systemImage: "network", value: SettingsTab.remote) { needsSettings { RemoteAccessView() } }
             Tab("Advanced", systemImage: "gearshape.2", value: SettingsTab.advanced) { AdvancedSettings() }
         }
         // Tall enough that a camera's settings (a sheet as tall as this) fit unscrolled with their sections
         // closed.
         .frame(width: 640, height: 560)
-        // Measured as Settings opens, so Storage and Retention have it before they are first shown.
+        // Measured as Settings opens, so Storage has it before they are first shown.
         .task { await model.refreshStorageOutlook() }
         .alert("Not saved", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK") { model.alert = nil }

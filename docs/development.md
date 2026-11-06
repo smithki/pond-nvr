@@ -33,7 +33,7 @@ swift scripts/capture-window.swift /tmp/events.png --mode events --appearance li
 swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks behind another app's window
 ```
 
- `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|retention|remote|advanced` also opens Settings on that tab, `--doctor [ID [settings]|recorder]` the camera window (at a camera's doctor or settings, or the recorder); `--camera ID` opens that camera's settings, `--overview` opens the toolbar's overview, `--fake-new-events N` makes up N new events, for their dot on Events and their count in the menu bar item (one more every 4 s, cleared by opening Events), and `--live` starts the timeline live.
+ `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|remote|advanced` also opens Settings on that tab, `--doctor [ID [settings]|recorder]` the camera window (at a camera's doctor or settings, or the recorder); `--camera ID` opens that camera's settings, `--overview` opens the toolbar's overview, `--fake-new-events N` makes up N new events, for their dot on Events and their count in the menu bar item (one more every 4 s, cleared by opening Events), and `--live` starts the timeline live.
 
 **Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
 

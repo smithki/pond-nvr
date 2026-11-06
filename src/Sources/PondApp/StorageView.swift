@@ -1,16 +1,22 @@
-// Settings › Storage: where recordings and the index go, how long the drive holds them at the cameras' real
-// rates, and a checklist for the drive (not the startup disk, Spotlight off, a format that keeps a journal).
+// Settings › Storage, on one page: where recordings go and how long they're kept (StorageSpace), the space on their
+// drive, a checklist for the drive folded into one row (not the startup disk, Spotlight off, a format that keeps a
+// journal; open when something's wrong), and where the index goes.
 import AppKit
 import PondCore
 import SwiftUI
 
 struct StorageView: View {
-    @Environment(AppModel.self) private var model
+    @Environment(AppModel.self) var model
     /// The folder being chosen, kept until the picker answers (its presentation is apart: closing it comes first).
     @State private var choosing: Target?
     @State private var picking = false
     @State private var turningOff = false
     @State private var spotlightProblem: String?
+    /// While a slider is dragged: its value, shown live and saved when it is let go (StorageSpace).
+    @State var draftLimit: Double?
+    @State var draftReserve: Double?
+    /// The checklist opened or closed by hand (nil: open only while something's wrong).
+    @State private var checklistOpen: Bool?
 
     enum Target: Identifiable {
         case recordings, database
@@ -23,31 +29,30 @@ struct StorageView: View {
     var body: some View {
         let storage = model.config?.storage
         let recordings = storage?.recordingsPath ?? ""
+        let drive = outlook?.drive
+        let troubled = drive.map { Self.problems($0) > 0 } ?? false
         Form {
             Section {
+                // What's wrong with the drive first, when something is (open); all well, it waits at the bottom
+                // (closed).
+                if troubled, let drive { checklist(drive) }
                 LocationRow(symbol: "externaldrive", path: recordings, status: .storage(StorageLocation.status(of: recordings)),
                             choose: { choose(.recordings) })
-                if let estimate = outlook?.estimate { lasting(estimate) }
+                    .help("Pond records only while this folder is there, so an unplugged drive never fills this Mac\u{2019}s disk.")
+                keepRows
             } header: {
                 Text("Recordings").restartRecorderButton()
-            } footer: {
-                Text("Continuous recording, and event clips and snapshots in a folder of their own beside it. Pond records only while this folder is there, so an unplugged drive never fills this Mac\u{2019}s disk.")
-                    .foregroundStyle(.secondary)
             }
-
-            if let outlook, let drive = outlook.drive { checklist(drive, outlook: outlook) }
-
+            spaceSection
             Section {
-                LocationRow(symbol: "cylinder.split.1x2", path: storage?.databasePath ?? "", choose: { choose(.database) })
+                if !troubled, let drive { checklist(drive) }
+                LocationRow(symbol: "cylinder.split.1x2", path: storage?.databasePath ?? "",
+                            caption: "The index: what was recorded when. Best on this Mac\u{2019}s own disk.", choose: { choose(.database) })
                 if storage?.databasePath.hasPrefix("/Volumes/") == true {
                     Label("The index is on another drive. A NAS share is unreliable for it; this Mac\u{2019}s disk is safer.",
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
-            } header: {
-                Text("Index")
-            } footer: {
-                Text("What was recorded when, for the timeline. Small; best on this Mac\u{2019}s own disk.").foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -80,57 +85,76 @@ struct StorageView: View {
         await model.refreshStorageOutlook()
     }
 
-    /// How long the folder lasts, and from what.
+    /// How many of the drive's checks fail.
+    static func problems(_ drive: DriveFacts) -> Int {
+        let journalless = ["exfat", "fat", "ms-dos"].contains { drive.format.lowercased().contains($0) }
+        return (drive.isStartupDisk ? 1 : 0) + (!drive.isStartupDisk && drive.spotlightIndexing == true ? 1 : 0) + (journalless ? 1 : 0)
+    }
+
+    /// The drive's checks, folded into one row (as the camera settings' folds: the whole row opens it, and the checks
+    /// come in under it): what's wrong (open), or that all is well (closed).
     @ViewBuilder
-    func lasting(_ e: StorageEstimate) -> some View {
-        let cameras = model.config?.cameras.count ?? 0
-        let measured = switch e.source {
-        case .recorded: "as recorded"
-        case .checked: "as measured when last checked"
-        case .assumed: "assumed until the camera\u{2019}s first check or recording"
-        }
-        LabeledContent {
-            Text(StorageEstimate.duration(days: e.continuousDays)).font(.title3.weight(.semibold))
+    func checklist(_ drive: DriveFacts) -> some View {
+        let startupDisk = drive.isStartupDisk
+        let indexed = startupDisk ? false : drive.spotlightIndexing
+        let journalless = ["exfat", "fat", "ms-dos"].contains { drive.format.lowercased().contains($0) }
+        let problems = Self.problems(drive)
+        let open = checklistOpen ?? (problems > 0)
+        Button {
+            withAnimation(.snappy(duration: 0.3)) { checklistOpen = !open }
         } label: {
-            Text("Holds about")
-            Text("of continuous recording for \(cameras) camera\(cameras == 1 ? "" : "s") at \(StorageEstimate.size(e.continuousPerDay)) a day (\(measured)), with \(StorageEstimate.size(e.eventsReserved)) set aside for \(model.config?.retention.events.days ?? 0) days of event clips and snapshots (estimated, until detection runs).")
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12)
+                CheckRow(ok: problems == 0,
+                         title: problems == 0 ? "The drive suits recording" : problems == 1 ? "1 thing to check on the drive" : "\(problems) things to check on the drive",
+                         detail: problems == 0 && !open ? Self.summary(drive) : nil)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(open ? "open" : "closed")
+        if open {
+            Group {
+                CheckRow(ok: !startupDisk,
+                         title: startupDisk ? "On this Mac\u{2019}s startup disk" : "On \(drive.name), \(drive.isInternal ? "an internal" : "an external") drive",
+                         detail: startupDisk ? "Recordings take space from everything else on this Mac. A drive of their own is better." : nil)
+                if !startupDisk {
+                    switch indexed {
+                    case false?:
+                        CheckRow(ok: true, title: "Spotlight doesn\u{2019}t index it")
+                    case true?:
+                        CheckRow(ok: false, title: "Spotlight indexes it",
+                                 detail: "Spotlight reads every new recording to index it, which adds work for the drive and the Mac and finds nothing useful in video.") {
+                            Button(turningOff ? "Turning Off\u{2026}" : "Turn Off\u{2026}") { turnOffSpotlight(drive.volume) }
+                                .disabled(turningOff)
+                                .help("Turns Spotlight off for \(drive.name). macOS asks for an administrator\u{2019}s password.")
+                        }
+                    case nil:
+                        CheckRow(ok: nil, title: "Spotlight", detail: "Pond couldn\u{2019}t tell whether Spotlight indexes this drive.")
+                    }
+                }
+                if journalless {
+                    CheckRow(ok: false, title: "Formatted as \(drive.format)",
+                             detail: "\(drive.format) keeps no journal, so a drive unplugged without ejecting can lose its latest recordings. APFS is safer for a drive used only for recordings.")
+                } else if !drive.format.isEmpty {
+                    CheckRow(ok: true, title: "Formatted as \(drive.format)")
+                }
+            }
+            .padding(.leading, FoldRow.indent)
         }
     }
 
-    @ViewBuilder
-    func checklist(_ drive: DriveFacts, outlook: StorageOutlook) -> some View {
-        Section("Checklist") {
-            CheckRow(ok: !drive.isStartupDisk,
-                     title: drive.isStartupDisk ? "On this Mac\u{2019}s startup disk" : "On \(drive.name), \(drive.isInternal ? "an internal" : "an external") drive",
-                     detail: drive.isStartupDisk ? "Recordings take space from everything else on this Mac. A drive of their own is better." : nil)
-            if !drive.isStartupDisk {
-                switch drive.spotlightIndexing {
-                case false?:
-                    CheckRow(ok: true, title: "Spotlight doesn\u{2019}t index it")
-                case true?:
-                    CheckRow(ok: false, title: "Spotlight indexes it",
-                             detail: "Spotlight reads every new recording to index it, which adds work for the drive and the Mac and finds nothing useful in video.") {
-                        Button(turningOff ? "Turning Off\u{2026}" : "Turn Off\u{2026}") { turnOffSpotlight(drive.volume) }
-                            .disabled(turningOff)
-                            .help("Turns Spotlight off for \(drive.name). macOS asks for an administrator\u{2019}s password.")
-                    }
-                case nil:
-                    CheckRow(ok: nil, title: "Spotlight", detail: "Pond couldn\u{2019}t tell whether Spotlight indexes this drive.")
-                }
-            }
-            if ["exfat", "fat", "ms-dos"].contains(where: { drive.format.lowercased().contains($0) }) {
-                CheckRow(ok: false, title: "Formatted as \(drive.format)",
-                         detail: "\(drive.format) keeps no journal, so a drive unplugged without ejecting can lose its latest recordings. APFS is safer for a drive used only for recordings.")
-            } else if !drive.format.isEmpty {
-                CheckRow(ok: true, title: "Formatted as \(drive.format)")
-            }
-            if let e = outlook.estimate {
-                let fits = e.continuousDays >= Double(outlook.keepDays)
-                CheckRow(ok: fits,
-                         title: fits ? "Holds the \(outlook.keepDays) days you keep" : "Holds about \(StorageEstimate.duration(days: e.continuousDays)) of the \(outlook.keepDays) days you keep",
-                         detail: fits ? nil : "The oldest recording is deleted sooner to make room. A bigger drive, or fewer days in Retention, would match.")
-            }
-        }
+    /// The drive in a few words, all well.
+    static func summary(_ drive: DriveFacts) -> String {
+        var words = ["\(drive.name), \(drive.isInternal ? "internal" : "external")"]
+        if !drive.format.isEmpty { words.append(drive.format) }
+        if drive.spotlightIndexing == false { words.append("not indexed by Spotlight") }
+        return words.joined(separator: " \u{00B7} ")
     }
 
     func turnOffSpotlight(_ volume: String) {
@@ -180,6 +204,8 @@ struct LocationRow: View {
     let symbol: String
     let path: String
     var status: Status?
+    /// What it is, under its path (when it has no state to show there).
+    var caption: String?
     var choose: (() -> Void)?
 
     enum Status {
@@ -209,7 +235,7 @@ struct LocationRow: View {
                 case let .problem(text)?:
                     Label(text, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
                 case nil:
-                    EmptyView()
+                    if let caption { Text(caption).font(.callout).foregroundStyle(.secondary) }
                 }
             }
             Spacer()

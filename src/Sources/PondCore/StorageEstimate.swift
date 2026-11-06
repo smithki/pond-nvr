@@ -71,7 +71,8 @@ public struct StorageEstimate: Equatable, Sendable {
         let hours = days * 24
         if hours >= 2 { return "\(Int(hours.rounded(.down))) hours" }
         if hours >= 1 { return "1 hour" }
-        return "\(max(1, Int((hours * 60).rounded(.down)))) minutes"
+        let minutes = max(1, Int((hours * 60).rounded(.down)))
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
     }
 
     /// "1.8 TB", "37 GB", "850 MB".
