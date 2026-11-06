@@ -49,6 +49,56 @@ public enum Demo {
         return pond.map { (base as NSString).appendingPathComponent("ponds/\($0)") } ?? base
     }
 
+    /// The processes a demo app left running in a folder (its `pids.json`), stopped: those that are still the demo's,
+    /// and no others. A demo app killed rather than quit leaves the file behind; its services stop by themselves, and
+    /// their pids can be handed to anything after (the real app, the real recorder), so each is checked first. Which
+    /// were stopped (to wait for).
+    @discardableResult
+    public static func stopLeftovers(in folder: String) -> [Int32] {
+        let path = (folder as NSString).appendingPathComponent("pids.json")
+        guard let data = FileManager.default.contents(atPath: path),
+              let pids = try? JSONDecoder().decode([Int32].self, from: data) else { return [] }
+        let stopped = pids.filter { isDemoProcess($0, folder: folder) }
+        for pid in stopped { kill(pid, SIGTERM) }
+        return stopped
+    }
+
+    /// Whether a process is one a demo runs from this folder: a `pond run` whose settings are in it, or the demo's
+    /// signaling service (on its own port).
+    public static func isDemoProcess(_ pid: Int32, folder: String) -> Bool {
+        guard let arguments = arguments(of: pid), let program = arguments.first else { return false }
+        let inside = folder.hasSuffix("/") ? folder : folder + "/"
+        if arguments.contains(where: { $0.hasPrefix(inside) }) { return true }
+        return (program as NSString).lastPathComponent == "pond-signal" && arguments.contains("\(signalingPort)")
+    }
+
+    /// A process's arguments, its program first; nil if it's gone or can't be read.
+    public static func arguments(of pid: Int32) -> [String]? {
+        #if os(macOS)
+        // KERN_PROCARGS2: argc, the executable's path, padding, then argv (and the environment after).
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard pid > 0, sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0, size > 4 else { return nil }
+        let argc = Int(buffer.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) })
+        var i = 4
+        while i < size, buffer[i] != 0 { i += 1 }
+        while i < size, buffer[i] == 0 { i += 1 }
+        var arguments: [String] = []
+        while arguments.count < argc, i < size {
+            let start = i
+            while i < size, buffer[i] != 0 { i += 1 }
+            arguments.append(String(decoding: buffer[start ..< i], as: UTF8.self))
+            i += 1
+        }
+        return arguments
+        #else
+        guard let data = FileManager.default.contents(atPath: "/proc/\(pid)/cmdline"), !data.isEmpty else { return nil }
+        return data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+        #endif
+    }
+
     public static func configPath(_ scenario: String, pond: String? = nil) -> String {
         (folder(scenario, pond: pond) as NSString).appendingPathComponent("config.json")
     }
@@ -64,10 +114,7 @@ public enum Demo {
         let fm = FileManager.default
         if fresh {
             // Its services, if a demo app left them running, stopped first (they'd write into the new world).
-            if let data = fm.contents(atPath: (folder as NSString).appendingPathComponent("pids.json")),
-               let pids = try? JSONDecoder().decode([Int32].self, from: data) {
-                for pid in pids { kill(pid, SIGTERM) }
-            }
+            stopLeftovers(in: folder)
             try? fm.removeItem(atPath: folder)
         }
         let config = (folder as NSString).appendingPathComponent("config.json")
@@ -167,6 +214,9 @@ extension Demo {
         case slowKeyframes
         /// Its clock runs ahead (the timestamp it draws, and its reports).
         case clockDrift
+        /// Gone for the first 7 minutes of every quarter hour (nothing answers), so it's not recorded for a while:
+        /// what the toolbar, the menu bar item and the doctor say then.
+        case goesDark
     }
 
     public struct Camera: Codable, Equatable, Sendable {
@@ -253,13 +303,15 @@ extension Demo.Scenario {
         }, busyness: 4)
 
     public static let trouble = Demo.Scenario(
-        name: "trouble", title: "Trouble", about: "A camera that keeps dropping, keyframes far apart, a clock adrift, a full drive.",
+        name: "trouble", title: "Trouble", about: "A camera that keeps dropping, one that goes dark, keyframes far apart, a clock adrift, one kept private, a full drive.",
         pondName: "Demo Mac",
         cameras: [
             .init("driveway", "Driveway", scene: .driveway, trouble: .drops),
             .init("garage", "Garage", scene: .garage, trouble: .slowKeyframes),
             .init("street", "Street", scene: .street, trouble: .clockDrift),
             .init("backyard", "Backyard", scene: .backyard),
+            .init("side-gate", "Side Gate", scene: .sideGate, trouble: .goesDark),
+            .init("living-room", "Living Room", scene: .livingRoom, startsPrivate: true),
         ], freeGB: 3)
 
     public static let firstRun = Demo.Scenario(

@@ -16,6 +16,7 @@ import Control
 import CoreMedia
 import Ingest
 import Observation
+import PondCore
 import Synchronization
 
 @MainActor
@@ -154,7 +155,7 @@ private struct Reader: Sendable {
                     pause = 0.5
                 }
             } catch {
-                report(.state(.failed(CameraCheck.plain(error, host: URLComponents(string: url)?.host ?? url).text)))
+                report(.state(.failed(CameraCheck.plain(error, host: LiveStream.place(url)).text)))
             }
             if played || soon.isOn { pause = 1 }
             wait(pause)
@@ -383,3 +384,15 @@ extension AppModel {
 
 /// A stream is its own identity: its view stays with it, whichever place it has on the tile.
 extension LiveStream: Identifiable {}
+
+extension LiveStream {
+    /// Where a camera is, for its tile's words when it can't be reached: its address (what one would check), or for
+    /// a demo camera, whose address is only its id and scenario, its name.
+    nonisolated static func place(_ url: String) -> String {
+        if let (id, scenario, _) = Demo.parse(url),
+           let name = (Demo.scenarios + Demo.scenarios.flatMap(\.ponds)).first(where: { $0.name == scenario })?.cameras.first(where: { $0.id == id })?.name {
+            return "\(name)\u{2019}s address"
+        }
+        return URLComponents(string: url)?.host ?? url
+    }
+}

@@ -59,6 +59,8 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
               let camera = world.camera(id) else { throw .notFound(url) }
         // Restarting: nothing answers for now.
         guard !world.isRestarting(id) else { throw .transport(.refused("\(camera.name) is restarting")) }
+        // Gone dark: nothing answers (its past, for the history, is there as usual).
+        guard replay != nil || !world.isDark(id) else { throw .transport(.unreachable("\(camera.name) isn\u{2019}t answering")) }
         self.id = id
         self.world = world
         let size = main && replay == nil ? camera.mainSize : camera.subSize
@@ -134,7 +136,7 @@ public final class DemoStream: PacketSource, @unchecked Sendable {
             queue(frame.nalus, at: frame.time)
             return pending.isEmpty ? nil : pending.removeFirst()
         }
-        if world.isRestarting(id) { throw .transport(.closed) }
+        if world.isRestarting(id) || world.isDark(id) { throw .transport(.closed) }
         if let dropsAt, Date() > dropsAt { throw .transport(.failed("the demo camera dropped its connection")) }
         // Sound and pictures, each as it's due.
         let soundFirst = sound != nil && audioDue < due

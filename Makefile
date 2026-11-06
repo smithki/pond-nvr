@@ -29,7 +29,8 @@ help:
 	@echo "make test-docker    run the tests of the modules that build on Linux, in a throwaway container (needs Docker)"
 	@echo "make install        build, then copy pond to /usr/local/bin (sudo)"
 	@echo "make update         install, then restart the login service if it is installed"
-	@echo "make demo [SCENARIO=home]  a copy of the app in dist/demo, opened in demo mode (made-up cameras; see pond demo list)"
+	@echo "make demo [SCENARIO=home] [FRESH=1]  a copy of the app in dist/demo, opened in demo mode (made-up cameras; see"
+	@echo "                    pond demo list); quits one already open; FRESH=1 starts the scenario over"
 	@echo "make clean          remove dist/ and the Swift build folder"
 	@echo "make signing        once per Mac: a local signing certificate, so Keychain access survives rebuilds"
 
@@ -124,8 +125,15 @@ signing:
 # demo runs its own services, apart from the real ones. (The real app opens one too: Settings › General.)
 SCENARIO ?= home
 demo:
+	@# A demo already open is quit first (its services stop with it), so the new build is the one that opens.
+	@# (A bracket in the pattern, so it doesn't match this shell's own command line, which holds it too.)
+	@pkill -f "dist/demo/Pond NVR.app/Contents/MacOS/PondAp[p]" && sleep 1 || true
 	@$(MAKE) app APP="dist/demo/Pond NVR.app"
-	"dist/demo/Pond NVR.app/Contents/MacOS/PondApp" --demo $(SCENARIO) >/dev/null 2>&1 &
+	@# FRESH=1: the scenario's world started over (its settings, recordings and events), as on its first run.
+	@$(if $(FRESH),"dist/demo/Pond NVR.app/Contents/MacOS/pond" demo prepare $(SCENARIO) --fresh >/dev/null,true)
+	@# Opened as any app is (by Launch Services), so it comes to the front with its window; -n: a copy of its own,
+	@# not the real Pond (the same bundle identifier) brought forward.
+	open -n "dist/demo/Pond NVR.app" --args --demo $(SCENARIO)
 
 clean:
 	rm -rf dist $(PKG)/.build

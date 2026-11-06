@@ -5,7 +5,7 @@ Pond with made-up cameras: to explore it without any, to try what one home doesn
 ## Opening one
 
 - **From the app:** Settings › General › *Open the Demo…*, then a scenario. A second copy of Pond opens in it, beside yours. Its toolbar says *Demo: Home* (or whichever), and its menu switches to another scenario.
-- **From the source:** `make demo` builds a copy of the app in `dist/demo` and opens it (`make demo SCENARIO=trouble` for another). Building it never restarts your real Pond.
+- **From the source:** `make demo` builds a copy of the app in `dist/demo` and opens it (`make demo SCENARIO=trouble` for another, `FRESH=1` to start that scenario over, as after a change to it). A demo already open is quit first. Building it never restarts your real Pond.
 - **From the command line:** `pond demo list` lists the scenarios. `pond demo prepare NAME` makes one's world and prints its settings file, for `pond run --config`. Add `--fresh` to start it over.
 
 A demo never touches your real setup. Each scenario is a world of its own, in `~/Library/Application Support/Pond Demo/NAME/`: its settings, recordings, database, events, log, and its secrets (in a file there, never the Keychain). HomeKit is off for every demo camera, so nothing is advertised on your network. The demo's services (its `pond run`, any other Pond's, and the signaling service between them) are run by the demo's app, in place of the login service. They stop when it quits, or if it's killed.
@@ -16,7 +16,7 @@ A demo never touches your real setup. Each scenario is a world of its own, in `~
 |---|---|
 | `home` | Six cameras: a doorbell, a driveway, a backyard PTZ, a garage, a living room that starts private, a side gate. A busy day, and a second home (the Lake House, four cameras) paired with it, to reach from the first. |
 | `many` | Sixteen cameras, for the layout and the Mac's video work. |
-| `trouble` | A camera that keeps dropping, one with keyframes 12 s apart, one whose clock runs ahead, and a drive nearly full (3 GB free). |
+| `trouble` | A camera that keeps dropping, one that goes dark for the first 7 minutes of every quarter hour (not recorded meanwhile, as the toolbar and the menu bar item then say), one with keyframes 12 s apart, one whose clock runs ahead, a living room that starts private, and a drive nearly full (3 GB free). One Pond alone, so the toolbar says the recorder's state in words. |
 | `first-run` | No cameras yet: setting up, and Add Camera finding the six cameras on the demo's network. |
 | `remote-slow` | The Lake House over a slow, lossy link (300 kB/s, 120 ms there and back, 2% lost). |
 | `remote-unreachable` | The Lake House gone quiet (its Pond isn't running). |

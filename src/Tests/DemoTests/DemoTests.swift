@@ -121,6 +121,37 @@ import Recorder
         #expect(try await asset.load(.duration).seconds > 2)
     }
 
+    @Test func aCameraThatGoesDarkIsGoneForPartOfEachQuarterHour() throws {
+        let trouble = DemoWorld(scenario: .trouble, folder: nil)
+        let quarter = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.truncatingRemainder(dividingBy: 900))
+        #expect(trouble.isDark("side-gate", at: quarter.addingTimeInterval(60)))
+        #expect(trouble.isDark("side-gate", at: quarter.addingTimeInterval(6 * 60 + 59)))
+        #expect(!trouble.isDark("side-gate", at: quarter.addingTimeInterval(7 * 60)))
+        #expect(!trouble.isDark("backyard", at: quarter.addingTimeInterval(60)))
+        // Alone, so the toolbar says the recorder's state in words; with a camera kept private to count.
+        #expect(Demo.Scenario.trouble.ponds.isEmpty)
+        #expect(Demo.Scenario.trouble.cameras.contains { $0.startsPrivate })
+    }
+
+    @Test func onlyTheDemosOwnLeftoversAreStopped() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("demo-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: folder) }
+        // A process of the demo's (its arguments name the folder), and one that isn't: this one, as a pid reused by
+        // something else after the demo's services had gone.
+        let demo = Process()
+        demo.executableURL = URL(fileURLWithPath: "/bin/sh")
+        demo.arguments = ["-c", "sleep 30", folder + "/config.json"]
+        try demo.run()
+        defer { demo.terminate() }
+        let mine = ProcessInfo.processInfo.processIdentifier
+        try JSONEncoder().encode([demo.processIdentifier, mine, 99_999_999]).write(to: URL(fileURLWithPath: folder + "/pids.json"))
+        #expect(Demo.arguments(of: mine)?.isEmpty == false)
+        #expect(Demo.stopLeftovers(in: folder) == [demo.processIdentifier])
+        demo.waitUntilExit()
+        #expect(demo.terminationReason == .uncaughtSignal)
+    }
+
     @Test func anAddressFromAnotherScenarioIsntOpened() {
         #expect(throws: RTSPError.self) { try DemoStream(url: "demo://driveway.trouble/sub", world: world) }
     }

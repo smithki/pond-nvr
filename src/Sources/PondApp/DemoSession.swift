@@ -119,11 +119,9 @@ final class DemoLaunchd: Launchd, @unchecked Sendable {
 
     private static func pidsPath(_ scenario: Demo.Scenario) -> String { Demo.folder(scenario.name) + "/pids.json" }
 
-    /// Processes left by a demo app that didn't quit cleanly, stopped.
+    /// Processes left by a demo app that didn't quit cleanly, stopped (those still the demo's: Demo.stopLeftovers).
     private static func stopLeftovers(_ scenario: Demo.Scenario) {
-        guard let data = FileManager.default.contents(atPath: pidsPath(scenario)),
-              let pids = try? JSONDecoder().decode([Int32].self, from: data) else { return }
-        for pid in pids { kill(pid, SIGTERM) }
+        let pids = Demo.stopLeftovers(in: Demo.folder(scenario.name))
         // Gone before new ones start (10 s at most): one still stopping would take its sockets with it as it went,
         // the new one's by then.
         let deadline = Date().addingTimeInterval(10)

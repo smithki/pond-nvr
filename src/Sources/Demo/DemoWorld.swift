@@ -130,6 +130,12 @@ public final class DemoWorld: @unchecked Sendable {
         return DemoScript.figures(scenario: scenario.name, camera: camera, busyness: scenario.busyness, at: t)
     }
 
+    /// Gone just now (a camera that goes dark): the first 7 minutes of every quarter hour, by the clock, so it's the
+    /// same for anyone at the same time.
+    func isDark(_ id: String, at t: Date = Date()) -> Bool {
+        camera(id)?.trouble == .goesDark && t.timeIntervalSince1970.truncatingRemainder(dividingBy: 15 * 60) < 7 * 60
+    }
+
     func isRestarting(_ id: String, at t: Date = Date()) -> Bool {
         lock.withLock { cameras[id]?.restartingUntil.map { $0 > t } ?? false }
     }
