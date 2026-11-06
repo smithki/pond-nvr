@@ -52,19 +52,27 @@ struct GeneralSettings: View {
         Form {
             Section {
                 PondNameField()
-            } footer: {
-                Text("How this Pond is shown beside others you\u{2019}ve paired with it, and the name devices pairing with it see.")
-                    .foregroundStyle(.secondary)
+                Picker(selection: $appearance) {
+                    ForEach(Appearance.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Text("Appearance")
+                    Text("Dark by default: video is easier to watch on a dark surround.")
+                }
             }
             MenuBarSection()
-            Section {
-                Picker("Appearance", selection: $appearance) {
-                    ForEach(Appearance.allCases) { Text($0.title).tag($0) }
-                }
-            } footer: {
-                Text("Dark by default: video is easier to watch on a dark surround.").foregroundStyle(.secondary)
-            }
             UnderstandingSection()
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Advanced: beta and test features, and the app itself (its version, its settings file).
+struct AdvancedSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Form {
+            if model.config != nil { AdvancedSection() }
             // (In a demo, its toolbar's menu switches between them.)
             if DemoSession.scenario == nil {
                 Section {
@@ -86,18 +94,6 @@ struct GeneralSettings: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .formStyle(.grouped)
-    }
-}
-
-/// Advanced: beta and test features, and the app itself (its version, its settings file).
-struct AdvancedSettings: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Form {
-            if model.config != nil { AdvancedSection() }
             Section {
                 LabeledContent("Version", value: Brand.version)
                 LocationRow(symbol: "doc.text", path: model.store.path)
@@ -121,12 +117,42 @@ struct AdvancedSection: View {
 
     var library: SceneLibrary? { model.config.map { SceneLibrary(beside: $0.storage.databasePath) } }
 
+    static func title(_ feature: Config.TestFeature) -> String {
+        switch feature {
+        case .testScenes: "Keep test scenes"
+        }
+    }
+
+    static func about(_ feature: Config.TestFeature) -> String {
+        switch feature {
+        case .testScenes:
+            "For checking a new version against your own events: the clips of events you say weren\u{2019}t anything or were, and a few you keep, beside Pond\u{2019}s database (on this Mac only, and kept past event retention)."
+        }
+    }
+
     var body: some View {
         Section {
-            Toggle(isOn: Binding(get: { model.config?.testFeatures == true },
+            let unlocked = model.config?.testFeatures == true
+            Toggle(isOn: Binding(get: { unlocked },
                                  set: { on in _ = model.update(affectsRecorder: false) { $0.testFeatures = on ? true : nil } })) {
                 Text("Beta and test features")
-                Text("Features still being tried, and test scenes for checking a new version against your own events: the clips of events you say weren\u{2019}t anything or were, and a few you keep, beside Pond\u{2019}s database (on this Mac only, and kept past event retention).")
+                Text("Try features before they\u{2019}re finished. Turn each one on below.")
+            }
+            // Each feature, dimmed and out of reach while they're all off.
+            ForEach(Config.TestFeature.allCases, id: \.self) { feature in
+                Toggle(isOn: Binding(get: { model.config?.testFeaturesOn?.contains(feature.rawValue) == true },
+                                     set: { on in _ = model.update(affectsRecorder: false) { config in
+                                         var ids = (config.testFeaturesOn ?? []).filter { $0 != feature.rawValue }
+                                         if on { ids.append(feature.rawValue) }
+                                         config.testFeaturesOn = ids.isEmpty ? nil : ids
+                                     } })) {
+                    Text(Self.title(feature))
+                    Text(Self.about(feature))
+                }
+                .padding(.leading, 16)
+                .disabled(!unlocked)
+                .opacity(unlocked ? 1 : 0.45)
+                .animation(.default, value: unlocked)
             }
             if let size, size.scenes > 0 {
                 LabeledContent {
@@ -137,7 +163,7 @@ struct AdvancedSection: View {
                 }
             }
         }
-        .task(id: model.config?.testFeatures) {
+        .task(id: model.config?.has(.testScenes)) {
             guard let library else { return }
             size = await Task.detached { library.size() }.value
         }
@@ -172,7 +198,8 @@ struct UnderstandingSection: View {
                 }
             }
             LabeledContent("Pictures", value: SigLIP.builtIn == nil ? "No picture model in this copy of Pond" : "Matched to words by SigLIP 2")
-            if let progress, progress.events > 0 {
+            // Only while it's catching up (all done, it's nothing to read).
+            if let progress, progress.events > 0, max(progress.described, progress.embedded) < progress.events {
                 LabeledContent("Events understood") {
                     Text("\(max(progress.described, progress.embedded)) of \(progress.events)").monospacedDigit()
                 }
@@ -180,7 +207,7 @@ struct UnderstandingSection: View {
         } header: {
             Text("Descriptions and search")
         } footer: {
-            Text("Each event\u{2019}s picture is described in a sentence and matched to words, for searching events in plain words. On this Mac only: never in the cloud. Events from before are done too, in the background.")
+            Text("Each event\u{2019}s picture described and matched to words, to search events in plain words. On this Mac only, never in the cloud.")
                 .foregroundStyle(.secondary)
         }
         .task {
@@ -212,7 +239,10 @@ struct PondNameField: View {
     @State private var text = ""
 
     var body: some View {
-        TextField("Name", text: $text, prompt: Text(Host.current().localizedName ?? "This Mac"))
+        TextField(text: $text, prompt: Text(Host.current().localizedName ?? "This Mac")) {
+            Text("Name")
+            Text("How this Pond is shown to others paired with it.")
+        }
             .onAppear { text = model.config?.name ?? "" }
             .onSubmit(save)
             .task(id: text) {
@@ -237,15 +267,14 @@ struct MenuBarSection: View {
         Section {
             Toggle(isOn: $menuBarItem) {
                 Text("Show in the menu bar")
-                Text("Whether Pond is recording, and each camera\u{2019}s privacy. Pond keeps running there when its window is closed, and tells you if it stops recording.")
+                Text("Recording and each camera\u{2019}s privacy; it keeps running there with its window closed.")
             }
             Toggle(isOn: Binding(get: { atLogin }, set: { on in
                 problem = OpenAtLogin.set(on)
                 atLogin = OpenAtLogin.isOn
             })) {
                 Text("Open at login")
-                Text(menuBarItem ? "In the menu bar, its window closed: after a restart (a power cut, say), you\u{2019}re told if Pond isn\u{2019}t recording."
-                                 : "So you\u{2019}re told after a restart if Pond isn\u{2019}t recording.")
+                Text("After a restart (a power cut, say), you\u{2019}re told if Pond isn\u{2019}t recording.")
             }
             // (Not the demo's copy of Pond: the real one is what opens at login.)
             .disabled(DemoSession.scenario != nil)

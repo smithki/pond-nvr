@@ -13,6 +13,16 @@ import Testing
     static let good = Config(storage: .init(recordings: "/Volumes/Pond/recordings", database: "~/pond.sqlite"),
                              cameras: [porch])
 
+    @Test func aTestFeatureIsOnOnlyWithTheirSwitchOnToo() throws {
+        let json = #"{"storage": {"recordings": "/r", "database": "/d"}, "testFeaturesOn": ["testScenes"]}"#
+        var config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+        #expect(!config.has(.testScenes))
+        config.testFeatures = true
+        #expect(config.has(.testScenes))
+        config.testFeaturesOn = nil
+        #expect(!config.has(.testScenes))
+    }
+
     @Test func goodConfigHasNoProblems() {
         #expect(Self.good.problems() == [])
     }

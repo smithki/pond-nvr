@@ -18,6 +18,17 @@ public struct Config: Codable, Equatable, Sendable {
     /// Beta and test features (Settings › Advanced): what's being tried before everyone has it, and what
     /// checking a new version needs (test scenes kept from this Pond's events). Left out, off.
     public var testFeatures: Bool?
+    /// Which of them are on, each turned on of its own (only while `testFeatures` is): left out, none.
+    public var testFeaturesOn: [String]?
+
+    /// A beta or test feature, turned on in Settings › Advanced.
+    public enum TestFeature: String, CaseIterable, Sendable {
+        /// Test scenes kept from this Pond's events, for checking a new version (`pond advanced scenes`).
+        case testScenes
+    }
+
+    /// Whether a beta or test feature is on: beta and test features on, and it too.
+    public func has(_ feature: TestFeature) -> Bool { testFeatures == true && testFeaturesOn?.contains(feature.rawValue) == true }
 
     /// Whether the service has anything to do: cameras to record, or remote access to keep (a Mac that only watches
     /// another Pond's cameras has none of its own).
@@ -40,6 +51,7 @@ public struct Config: Codable, Equatable, Sendable {
         cameras = try c.decodeIfPresent([Camera].self, forKey: .cameras) ?? []
         remote = try c.decodeIfPresent(Remote.self, forKey: .remote)
         testFeatures = try c.decodeIfPresent(Bool.self, forKey: .testFeatures)
+        testFeaturesOn = try c.decodeIfPresent([String].self, forKey: .testFeaturesOn)
     }
 
     /// Remote access: whether this Mac can be reached from outside, and the signaling service its devices find it

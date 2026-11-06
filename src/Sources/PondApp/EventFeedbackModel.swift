@@ -8,7 +8,7 @@ extension AppModel {
     /// Said of one of this Mac's events: kept, and the events read again.
     func say(_ verdict: EventFeedback.Verdict, of event: TimelineEvent) {
         guard event.pond == nil, let source = EventSource(config: config) else { return }
-        let keepScene = config?.testFeatures == true
+        let keepScene = config?.has(.testScenes) == true
         Task {
             await Task.detached { source.say(verdict, of: event, keepScene: keepScene) }.value
             feedbackChanged += 1
@@ -17,7 +17,7 @@ extension AppModel {
 
     /// Some of the events seen and kept, as real test scenes (once a day: SceneLibrary).
     func keepSeenEvents() async {
-        guard config?.testFeatures == true, let source = EventSource(config: config) else { return }
+        guard config?.has(.testScenes) == true, let source = EventSource(config: config) else { return }
         // (Seen: not new any more, in Events.)
         let unseen = seenEvents.newIDs
         await Task.detached { source.keepSeen(seen: { !unseen.contains($0.id) }) }.value

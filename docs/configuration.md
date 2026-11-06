@@ -48,7 +48,8 @@ Only `storage` is required; everything else has the defaults shown.
 | Setting | Default | What it is |
 |---|---|---|
 | `name` | this Mac's name | How this Pond is shown beside others paired with it (in the Recording button's menu, the camera rail, the Timeline), and the name devices pairing with it see. In the app: Settings › General. |
-| `testFeatures` | off | Beta and test features: what's being tried before everyone has it, and test scenes kept from this Pond's events (beside its database, on this Mac only, past event retention) for checking a new version with `pond advanced scenes`. In the app: Settings › Advanced. |
+| `testFeatures` | off | Beta and test features: features tried before they're finished, each turned on of its own in `testFeaturesOn`. Off, none is on, whatever `testFeaturesOn` says. In the app: Settings › Advanced. |
+| `testFeaturesOn` | none | The beta and test features turned on: `testScenes`, test scenes kept from this Pond's events (beside its database, on this Mac only, past event retention) for checking a new version with `pond advanced scenes`. |
 
 ## Storage
 
