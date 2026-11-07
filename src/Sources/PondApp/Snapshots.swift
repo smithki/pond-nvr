@@ -1,5 +1,5 @@
 // For development and the docs: with POND_SNAPSHOTS=<folder> set, the app saves a picture of each view of
-// the main window and of each Settings tab, then quits. The app draws its own windows, so no
+// the main window, of each Settings tab and of the Cameras window, then quits. The app draws its own windows, so no
 // screen-recording permission is needed (though translucent glass comes out flatter than on screen).
 import AppKit
 import PondCore
@@ -40,7 +40,28 @@ enum Snapshots {
         for tab in SettingsTab.allCases {
             model.settingsTab = tab
             try? await Task.sleep(for: .seconds(1.2))
-            save(NSApp.keyWindow, to: "\(dir)/settings-\(tab.rawValue).png")
+            save(settingsWindow() ?? NSApp.keyWindow, to: "\(dir)/settings-\(tab.rawValue).png")
+        }
+        // The Cameras window, each kind of page: every camera, the recorder, the first camera's doctor and settings,
+        // and another Pond's camera.
+        model.showDoctor(.cameras)
+        try? await Task.sleep(for: .seconds(2))
+        save(camerasWindow(), to: "\(dir)/cameras.png")
+        model.showDoctor(.recorder)
+        try? await Task.sleep(for: .seconds(1.5))
+        save(camerasWindow(), to: "\(dir)/cameras-recorder.png")
+        if let first = model.config?.cameras.first {
+            model.showCamera(first.id, tab: .doctor)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(camerasWindow(), to: "\(dir)/cameras-doctor.png")
+            model.showCamera(first.id, tab: .settings)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(camerasWindow(), to: "\(dir)/cameras-settings.png")
+        }
+        if let remote = model.remotePonds.lazy.compactMap({ $0.cameras?.first }).first {
+            model.showDoctor(.camera(remote.id))
+            try? await Task.sleep(for: .seconds(1.5))
+            save(camerasWindow(), to: "\(dir)/cameras-remote.png")
         }
         NSApp.terminate(nil)
     }
@@ -54,6 +75,15 @@ enum Snapshots {
     static func mainWindow() -> NSWindow? {
         NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.identifier?.rawValue.contains("main") == true }
             ?? NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.frame.width > 700 }
+    }
+
+    /// The Settings window (not necessarily key: another app may be in front).
+    static func settingsWindow() -> NSWindow? {
+        NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.identifier?.rawValue.localizedCaseInsensitiveContains("settings") == true }
+    }
+
+    static func camerasWindow() -> NSWindow? {
+        NSApp.windows.first { $0.isVisible && $0.identifier?.rawValue.contains(DoctorWindow.id) == true }
     }
 
     static func save(_ window: NSWindow?, to path: String) {

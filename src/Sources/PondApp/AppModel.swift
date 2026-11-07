@@ -197,13 +197,13 @@ final class AppModel {
     }
     /// The Settings window's tab; `--settings TAB` opens Settings on it at launch.
     var settingsTab: SettingsTab = launchArgument("--settings").flatMap(SettingsTab.init(rawValue:)) ?? .general
-    /// A camera whose settings to open (set from the live view), taken by Settings → Cameras.
-    var cameraToEdit: String?
     /// A moment to show on the timeline (set from the live view), taken by the timeline when it appears.
     var timelineJump: TimelineJump?
     /// The Events view as it was left (the event open in its panel, its filters): as it's come back to.
     var eventsState = EventsState()
     var addingCamera = false
+    /// The field a camera's settings page puts the cursor in when it next shows (a check's fix, from its doctor).
+    var cameraSettingsFocus: CameraSettingsPage.Field?
     /// Find Cameras' card, open over the top right of the main window, and how far the button it points at
     /// is (its middle) from the window's trailing edge.
     var showingFoundCameras = false

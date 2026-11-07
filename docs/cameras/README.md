@@ -36,7 +36,7 @@ It looks each time Pond opens, once a day while it stays open, and each time Add
 - **H.264 or H.265** on each stream. H.265 is recorded as it is; the Home app takes only H.264, so its live view and HomeKit Secure Video are re-encoded from an H.265 camera (on the Mac's video hardware). A camera that offers both is happiest on H.264 for the sub-stream.
 - **A keyframe every 2 seconds** or so (often called the I-frame or keyframe interval; set it to twice the frame rate). Live views start at a keyframe, recordings are cut at them, and HomeKit Secure Video wants one at the start of every fragment.
 
-`pond camera add` and `pond camera test` (or Add Camera and Check Connection in the app) log in, read both streams and watch the video for a few seconds, then say what they found and what to change:
+`pond camera add` and `pond camera test` (or Add Camera, and Run Check… on a camera's Doctor tab, in the app) log in, read both streams and watch the video for a few seconds, then say what they found and what to change:
 
 ```
 ✓ main stream: H.264 High 5.1, 2560×1440, AAC-LC 16 kHz mono

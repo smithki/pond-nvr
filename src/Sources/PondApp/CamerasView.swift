@@ -1,146 +1,11 @@
-// Settings › Cameras: every camera, in the order they're shown everywhere (dragged to reorder), each with its
-// state; a camera's own settings (its address and login, streams, HomeKit, recording, detection and zones, and
-// how Pond talks to it); and Add Camera, which finds cameras on the network, logs in, checks them and saves.
+// A camera's sheets and its page: Add Camera, which finds cameras on the network, logs in, checks them and saves;
+// the check of a saved camera; and a camera's own settings (its address and login, streams, HomeKit, recording,
+// detection and zones, and how Pond talks to it), its Settings tab in the camera window, the one place they're changed.
 import Control
 import Devices
 import PondCore
 import SwiftUI
 import Watch
-
-struct CamerasView: View {
-    @Environment(AppModel.self) private var model
-    @State private var editing: Config.Camera?
-    @State private var checking: Config.Camera?
-    @State private var adding = false
-    /// The field to put the cursor in when the camera's settings open (from a failed check).
-    @State private var focusField: EditCameraSheet.Field?
-    /// The tab's height, which the sheets take theirs from: a sheet taller than its window runs past it.
-    @State private var tabHeight = 560.0
-
-    /// As tall as the window allows (a little less, so the window frames it), within reason.
-    var sheetHeight: Double { min(680, max(420, tabHeight - 20)) }
-
-    var body: some View {
-        let cameras = model.config?.cameras ?? []
-        Group {
-            if cameras.isEmpty {
-                ContentUnavailableView {
-                    Label("No cameras", systemImage: "video.slash")
-                } description: {
-                    Text("Add a camera by its address. Pond logs in, checks what it sends, and keeps the password in your Keychain.")
-                } actions: {
-                    Button("Add Camera…") { adding = true }.buttonStyle(.borderedProminent)
-                }
-            } else {
-                // A grouped form like the other tabs (a plain list here was laid out under the tab bar twice
-                // after switching tabs). Its rows reorder as the live view's tiles do (the form doesn't start
-                // the Mac's own list drag): the others move out of the way while a camera is dragged.
-                Form {
-                    Section {
-                        ForEach(Array(cameras.enumerated()), id: \.element.id) { index, camera in
-                            CameraRow(camera: camera, hasPassword: model.hasPassword(camera.id),
-                                      check: { checking = camera }, edit: { editing = camera })
-                                .contextMenu {
-                                    Button("Move to Top") { model.moveCamera(camera.id, to: 0) }.disabled(index == 0)
-                                    Button("Move Up") { model.moveCamera(camera.id, to: index - 1) }.disabled(index == 0)
-                                    Button("Move Down") { model.moveCamera(camera.id, to: index + 1) }
-                                        .disabled(index == cameras.count - 1)
-                                    Button("Move to Bottom") { model.moveCamera(camera.id, to: cameras.count - 1) }
-                                        .disabled(index == cameras.count - 1)
-                                }
-                                // The whole row picks it up, not only its text and icons.
-                                .contentShape(Rectangle())
-                                .reorderable(camera.id, name: camera.name, drag: model.reorderDrag, from: .settings,
-                                             label: false) { id, target in
-                                    withAnimation(.snappy(duration: 0.3)) { model.moveCamera(id, onto: target) }
-                                }
-                        }
-                    } footer: {
-                        Text("Drag cameras to put them in order: the app shows them this way, in the live view and the timeline. Passwords are kept in your login Keychain under \u{201C}pond\u{201D}, never in the settings file.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .formStyle(.grouped)
-                // The list's action, in a bar of its own below it rather than in a panel of its own.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    HStack {
-                        Text("\(cameras.count) camera\(cameras.count == 1 ? "" : "s")")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        RestartRecorderButton()
-                        Button { adding = true } label: { Label("Add Camera…", systemImage: "plus") }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(.bar)
-                    .overlay(alignment: .top) { Divider() }
-                }
-            }
-        }
-        .onGeometryChange(for: Double.self) { $0.size.height } action: { tabHeight = $0 }
-        .sheet(isPresented: $adding) { AddCameraSheet(height: sheetHeight) }
-        .sheet(item: $editing, onDismiss: { focusField = nil }) { camera in
-            EditCameraSheet(camera: camera, focus: focusField, height: sheetHeight)
-        }
-        // Asked for from elsewhere (a camera's gear in the live view): open its sheet.
-        .onAppear(perform: editRequested)
-        .onChange(of: model.cameraToEdit) { editRequested() }
-        .sheet(item: $checking) { camera in
-            CheckSheet(camera: camera) { field in
-                // One sheet after the other: the check closes, then the camera's settings open.
-                checking = nil
-                Task {
-                    try? await Task.sleep(for: .seconds(0.35))
-                    focusField = field
-                    editing = camera
-                }
-            }
-        }
-    }
-}
-
-extension CamerasView {
-    func editRequested() {
-        guard let id = model.cameraToEdit else { return }
-        model.cameraToEdit = nil
-        editing = model.config?.cameras.first { $0.id == id }
-    }
-}
-
-struct CameraRow: View {
-    let camera: Config.Camera
-    let hasPassword: Bool
-    let check: () -> Void
-    let edit: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
-                .help("Drag to change the order")
-            Image(systemName: "video.fill")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(width: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(camera.name).font(.headline)
-                Text("\(camera.id) · \(camera.username)@\(camera.host)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                if !hasPassword {
-                    Label("No password in the Keychain", systemImage: "key.slash")
-                        .font(.callout)
-                        .foregroundStyle(.orange)
-                }
-            }
-            Spacer()
-            Button("Check", action: check)
-            Button("Edit…", action: edit)
-        }
-        .padding(.vertical, 4)
-    }
-}
 
 /// Runs a check of a saved camera and shows what it found.
 /// A check of a saved camera: what is wrong in a word, the details, and a button for the fix.
@@ -153,7 +18,7 @@ struct CheckSheet: View {
     /// The check to run, if not the saved camera's (a camera's settings check what they would save).
     var runCheck: (() async -> (lines: [CheckLine], passed: Bool))?
     /// Opens the camera's settings, with the cursor in the field to fix.
-    let edit: (EditCameraSheet.Field) -> Void
+    let edit: (CameraSettingsPage.Field) -> Void
     @State private var result: (lines: [CheckLine], passed: Bool)?
 
     /// The problem to act on: the first error, else the first warning that has a fix.
@@ -665,19 +530,13 @@ struct AddCameraSheet: View {
     }
 }
 
-/// One camera's settings. Everything is applied by Save: the details, a new password (after it has been
-/// checked against the camera), and a new id.
-struct EditCameraSheet: View {
+/// One camera's settings, its Settings tab in the camera window (the one place they're changed). The privacy switch
+/// and HomeKit act at once; everything else is applied by Save: the details, a new password (after it has been
+/// checked against the camera), and a new id. Save says what it's doing, then that it's saved, and why not if not,
+/// here on the page.
+struct CameraSettingsPage: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     let camera: Config.Camera
-    /// Where to put the cursor on opening.
-    var focus: Field?
-    /// As tall as the window allows; the form scrolls inside.
-    var height = 500.0
-    /// On a camera's page in the camera window (its Settings tab), not a sheet: the page's size, Revert for Cancel, and
-    /// Save leaving it open.
-    var embedded = false
     @FocusState private var focused: Field?
     enum Field { case password, address }
     @State private var name = ""
@@ -716,6 +575,12 @@ struct EditCameraSheet: View {
     @State private var identifying = false
     /// The camera's recordings, for the remove prompt.
     @State private var recordingsSize: Int64?
+    /// While Save works (a new password is checked against the camera first, which takes a few seconds).
+    @State private var saving = false
+    /// Saved, until the next change: said beside Save.
+    @State private var justSaved = false
+    /// Why Save didn't save, said here (not in another window).
+    @State private var saveError: String?
 
     /// The camera as it would be saved, for checking.
     var edited: Config.Camera {
@@ -739,7 +604,6 @@ struct EditCameraSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             Form {
                 // Most used first: name and address, HomeKit, then the login (rarely changed after
                 // setup), what the camera is, and the advanced.
@@ -756,6 +620,8 @@ struct EditCameraSheet: View {
                              : "Not recorded, shown live or in the Home app until you turn this off. The Home app shows it as off meanwhile.")
                     }
                     .disabled(model.isPrivateOnCameraOnly(camera.id))
+                } header: {
+                    header
                 }
 
                 homeKitSection
@@ -766,12 +632,11 @@ struct EditCameraSheet: View {
 
                 moreSection
             }
-            .formStyle(.grouped)
+            .pageForm()
 
             footer
         }
-        .frame(width: embedded ? nil : 560, height: embedded ? nil : height)
-        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // A new address for the camera moves the stream addresses with it (those on its old address).
         .onChange(of: host) { old, new in
             func moved(_ url: String) -> String {
@@ -784,8 +649,16 @@ struct EditCameraSheet: View {
         }
         .onAppear {
             load()
-            // Opened to fix the password: show the login.
-            if focus == .password { showLogin = true }
+            takeFocus()
+        }
+        // Sent here to fix something (a check's Enter Password… on the Doctor tab): the cursor where the fix goes.
+        .onChange(of: model.cameraSettingsFocus) { takeFocus() }
+        // A change after saving: no longer just saved.
+        .onChange(of: changed) { if changed { justSaved = false } }
+        .alert("Not saved", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("OK") { saveError = nil }
+        } message: {
+            Text(saveError ?? "")
         }
         .confirmationDialog("Remove \(camera.name) from the Home app?", isPresented: $confirmForget) {
             Button("Remove from HomeKit", role: .destructive) {
@@ -794,11 +667,6 @@ struct EditCameraSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Pond forgets this camera\u{2019}s HomeKit pairing. Remove it in the Home app as well (the accessory\u{2019}s settings › Remove Accessory). Added again later, it gets a new setup code.")
-        }
-        .task {
-            // Opened to fix a check: put the cursor where the fix goes.
-            try? await Task.sleep(for: .seconds(0.3))
-            focused = focus
         }
         .sheet(isPresented: $editingZones) {
             ZoneEditorSheet(camera: saved, zones: $zones)
@@ -853,13 +721,31 @@ struct EditCameraSheet: View {
         zones = camera.zones
     }
 
-    /// Done with it: a sheet closes; on a camera's page, it stays, as saved (or, removed, the page goes to all cameras).
-    func finish(removed: Bool = false) {
-        if embedded {
-            if removed { model.doctorPage = .cameras } else { load() }
-        } else {
-            dismiss()
+    /// The field asked for (model.cameraSettingsFocus), with the cursor in it: the login opened for the password.
+    func takeFocus() {
+        guard let field = model.cameraSettingsFocus else { return }
+        model.cameraSettingsFocus = nil
+        if field == .password { showLogin = true }
+        Task {
+            try? await Task.sleep(for: .seconds(0.35))
+            focused = field
         }
+    }
+
+    /// Done with it: the page stays, as saved (or, removed, goes to all cameras).
+    func finish(removed: Bool = false) {
+        if removed { model.doctorPage = .cameras } else { load() }
+    }
+
+    /// Whether anything Save applies differs from what's saved.
+    var changed: Bool {
+        let c = saved
+        return name != c.name || host != c.host || mainURL != c.main || subURL != c.sub || username != c.username
+            || !password.isEmpty || newID != c.id || provider != (c.device?.provider ?? "") || kind != c.kind
+            || homeKitViewers != c.homeKitViewerSlots || instantLive != c.keepsLiveReady
+            || homeKitVideo != (c.homekitVideo ?? .camera) || homeKitRecording != (c.homekitRecording == true)
+            || detection != c.watches || recordsSub != (c.recordsSub == true)
+            || homeKitMotion != (c.homekitMotion ?? .detection) || zones != c.zones
     }
 
     /// The camera as saved now (HomeKit changes apply on Save).
@@ -1237,32 +1123,21 @@ struct EditCameraSheet: View {
         return "Its settings and password are removed. Its recordings, events and their pictures (\(size)) can stay until retention deletes them, or be deleted now, which cannot be undone."
     }
 
+    /// The first section's heading, in line with the form's headings as the Doctor tab's is (DoctorView.header): who
+    /// it logs in as, and where (the window's title names it). Checking it is the Doctor tab's (Run Check…); Save
+    /// checks a new password itself.
     var header: some View {
-        HStack(spacing: 12) {
-            // (On its page, the window's title names it: only who it logs in as, and where.)
-            if !embedded {
-                Image(systemName: "video.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                    .frame(width: 44, height: 44)
-                    .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                if !embedded { Text(name.isEmpty ? camera.name : name).font(.title2.bold()).lineLimit(1) }
-                Text("\(camera.id) · \(camera.username)@\(camera.host)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+        HStack {
+            Text("\(camera.id) · \(camera.username)@\(camera.host)")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             Spacer()
-            Button("Check Connection") {
-                checkResult = nil
-                showingCheck = true
-            }
-            .disabled(problem != nil)
+            // Held but unseen, as the Doctor tab's buttons are tall: the first card starts where it does there, so
+            // switching tabs nothing moves.
+            Button("Run Check\u{2026}") {}.font(.body).hidden().accessibilityHidden(true)
         }
-        .padding([.top, .horizontal], 20)
-        .padding(.bottom, 4)
+        .controlSize(.small)
+        .textCase(nil)
     }
 
     var footer: some View {
@@ -1271,19 +1146,25 @@ struct EditCameraSheet: View {
             Button("Remove Camera…", role: .destructive) { confirmRemove = true }
                 .foregroundStyle(.red)
             Spacer()
-            if let problem {
+            if saving {
+                ProgressView().controlSize(.small)
+                Text(password.isEmpty ? "Saving\u{2026}" : "Checking the password\u{2026}")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            } else if let problem {
                 Text(problem).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            } else if justSaved {
+                Label("Saved", systemImage: "checkmark.circle.fill")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
-            if embedded {
-                Button("Revert") { load() }
-            } else {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
+            Button("Revert") { load() }
+                .disabled(!changed || saving)
             Button("Save") { Task { await save() } }
                 .keyboardShortcut(.defaultAction)
-                .disabled(problem != nil)
+                .disabled(problem != nil || !changed || saving)
         }
-        .padding(16)
+        // Its buttons' edges in line with the cards' above.
+        .besideForm()
+        .padding(.vertical, 16)
     }
 
     /// Logs in with the new password if one is typed, the saved one otherwise, at the address and username as
@@ -1299,20 +1180,35 @@ struct EditCameraSheet: View {
         return result
     }
 
+    /// Applies the changes, then says it's saved, or why not (what the model would have said in the main window,
+    /// said here instead).
     func save() async {
+        saving = true
+        let ok = await apply()
+        saving = false
+        if let alert = model.alert {
+            model.alert = nil
+            saveError = alert
+        } else if ok {
+            justSaved = true
+        }
+    }
+
+    /// Applies the changes; false where one couldn't be (the model's alert says why, or the check sheet).
+    func apply() async -> Bool {
         if !password.isEmpty {
             // A new password is tried before it is kept; if it doesn't work, the check says why.
             let result = await check()
             guard result.passed else {
                 checkResult = result
                 showingCheck = true
-                return
+                return false
             }
         }
         guard model.edit(camera.id, name: name.trimmingCharacters(in: .whitespaces),
                          host: host.trimmingCharacters(in: .whitespaces), username: username,
-                         main: edited.main, sub: edited.sub) else { return }
-        if !password.isEmpty, !model.setPassword(password, for: camera.id) { return }
+                         main: edited.main, sub: edited.sub) else { return false }
+        if !password.isEmpty, !model.setPassword(password, for: camera.id) { return false }
         if kind != saved.kind { model.setKind(camera.id, kind) }
         if homeKitViewers != saved.homeKitViewerSlots { model.setHomeKitViewers(camera.id, homeKitViewers) }
         if instantLive != saved.keepsLiveReady { model.setInstantLive(camera.id, instantLive) }
@@ -1329,15 +1225,16 @@ struct EditCameraSheet: View {
                 let current = CameraProviders.provider(saved.device?.provider)?.name ?? "its current way"
                 model.alert = "\(camera.name) didn\u{2019}t answer through \(chosen.name), so Pond still talks to it through \(current)."
                 provider = saved.device?.provider ?? ""
-                return
+                return false
             }
         }
         if newID != camera.id {
-            guard model.rename(camera.id, to: newID) else { return }
+            guard model.rename(camera.id, to: newID) else { return false }
             // Renamed on its page: the page follows it.
-            if embedded { model.doctorPage = .camera(newID) }
+            model.doctorPage = .camera(newID)
         }
         finish()
+        return true
     }
 }
 

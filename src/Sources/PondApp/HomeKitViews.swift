@@ -15,7 +15,6 @@ struct HomeKitBadge: View {
     var compact = false
     var height: Double
     @State private var open = false
-    @Environment(\.openSettings) private var openSettingsWindow
 
     var body: some View {
         let text = HomeKitText(state, camera: camera)
@@ -56,10 +55,7 @@ struct HomeKitBadge: View {
     func perform(_ action: HomeKitText.Action) {
         switch action {
         case .startService: model.applyHomeKitChange()
-        case .cameraSettings:
-            model.settingsTab = .cameras
-            model.cameraToEdit = camera.id
-            openSettingsWindow()
+        case .cameraSettings: model.showCameraSettings(camera.id)
         case .showLog: HomeKitText.openLog()
         }
     }

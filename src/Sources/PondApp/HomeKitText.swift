@@ -116,7 +116,7 @@ struct HomeKitText: Equatable {
                                detail: "\(name) doesn\u{2019}t report button presses in a way Pond can read, so the Home app shows its video but won\u{2019}t ring.")
         case .unknownModel:
             return HomeKitText(title: "The Home app won\u{2019}t ring",
-                               detail: "Pond doesn\u{2019}t know what model \(name) is, so it can\u{2019}t watch the button. \(place == .settings ? "Check Connection, above, lets Pond ask the camera." : "Check the connection in its settings to let Pond ask the camera.")",
+                               detail: "Pond doesn\u{2019}t know what model \(name) is, so it can\u{2019}t watch the button. Run Check\u{2026} on its Doctor tab lets Pond ask the camera.",
                                actions: [.cameraSettings])
         case .cameraUnreachable:
             return HomeKitText(title: "The Home app won\u{2019}t ring",

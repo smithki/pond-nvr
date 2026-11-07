@@ -75,7 +75,10 @@ extension AppModel {
     }
 
     /// The camera's settings, on its page in the camera window.
-    func showCameraSettings(_ camera: String) { showCamera(camera, tab: .settings) }
+    func showCameraSettings(_ camera: String, focus: CameraSettingsPage.Field? = nil) {
+        cameraSettingsFocus = focus
+        showCamera(camera, tab: .settings)
+    }
 
     /// A camera's zones, kept as the editor's Done gives them.
     func saveZones(_ zones: [Config.Zone], for camera: String) {

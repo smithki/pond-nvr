@@ -20,7 +20,7 @@ make test-docker   # the modules that build on Linux, in a throwaway container
 make app           # dist/Pond NVR.app
 ```
 
-**Pictures of the app.** `POND_SNAPSHOTS=<folder>` makes the app save each view of the main window and each Settings tab as PNGs and quit; it draws its own window, so no screen-recording permission is needed. With `POND_CONFIG` it can show any settings file:
+**Pictures of the app.** `POND_SNAPSHOTS=<folder>` makes the app save each view of the main window, each Settings tab and the Cameras window (every camera, then the first camera's settings) as PNGs and quit; it draws its own window, so no screen-recording permission is needed. With `POND_CONFIG` it can show any settings file:
 
 ```sh
 open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots "dist/Pond NVR.app"
@@ -33,7 +33,7 @@ swift scripts/capture-window.swift /tmp/events.png --mode events --appearance li
 swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks behind another app's window
 ```
 
- `--mode live|timeline|events` opens a view first, and `--settings general|cameras|storage|remote|advanced` also opens Settings on that tab, `--doctor [ID [settings]|recorder]` the camera window (at a camera's doctor or settings, or the recorder); `--camera ID` opens that camera's settings, `--overview` opens the toolbar's overview, `--fake-new-events N` makes up N new events, for their dot on Events and their count in the menu bar item (one more every 4 s, cleared by opening Events), and `--live` starts the timeline live.
+ `--mode live|timeline|events` opens a view first, and `--settings general|storage|remote|advanced` also opens Settings on that tab, `--doctor [ID [settings]|recorder]` the camera window (at a camera's doctor or settings, or the recorder); `--camera ID` opens that camera's settings (in the camera window), `--overview` opens the toolbar's overview, `--fake-new-events N` makes up N new events, for their dot on Events and their count in the menu bar item (one more every 4 s, cleared by opening Events), and `--live` starts the timeline live.
 
 **Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
 

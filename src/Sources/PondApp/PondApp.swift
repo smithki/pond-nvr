@@ -29,6 +29,13 @@ struct PondApp: App {
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Pond") { AppDelegate.quit() }.keyboardShortcut("q")
             }
+            // Beside Settings…, where one goes looking for a camera's: the Cameras window (its shortcut here, not on
+            // the window's own item in the Window menu, so it's said once). ⇧⌘C, C for Cameras: not ⌥⌘D, which macOS
+            // keeps for hiding the Dock, so the app never sees it.
+            CommandGroup(after: .appSettings) {
+                Button("Cameras\u{2026}") { model.showDoctor() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+            }
         }
 
         // The doctor, a window of its own (one): for working out why, beside the view it's about. One size: its pages
@@ -41,7 +48,6 @@ struct PondApp: App {
                 .frame(width: DoctorWindow.size.width, height: DoctorWindow.size.height)
         }
         .windowResizability(.contentSize)
-        .keyboardShortcut("d", modifiers: [.command, .option])
 
         Settings {
             SettingsView()
@@ -327,6 +333,13 @@ struct ContentView: View {
                 ToolbarItem(placement: .primaryAction) { DemoMenu(current: demo) }
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
+            // The Cameras window, where each camera is set up and looked after: always in sight, in glass of its own.
+            ToolbarItem(placement: .primaryAction) {
+                Button { model.showDoctor() } label: { Label("Cameras", systemImage: "video") }
+                    .help("Each camera\u{2019}s settings, health and order, in the Cameras window (\u{21E7}\u{2318}C)")
+                    .disabled(model.config == nil)
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
             // Find Cameras, just before Add Camera and in its glass: always there (an item that came and went
             // would rebuild Add Camera's glass each time), showing the cameras found when there are some.
             ToolbarItem(placement: .primaryAction) { FindCamerasButton() }
@@ -334,7 +347,6 @@ struct ContentView: View {
                 Button {
                     // Find Cameras' card closed: Add Camera lists the cameras on the network too.
                     withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false }
-                    model.settingsTab = .cameras
                     model.addingCamera = true
                 } label: {
                     Label("Add Camera", systemImage: "plus")
@@ -416,11 +428,7 @@ struct ContentView: View {
                 }
             }
             // --camera ID: that camera's settings, open (for trying them out, and pictures of them).
-            if let id = launchArgument("--camera") {
-                model.settingsTab = .cameras
-                model.cameraToEdit = id
-                openSettings()
-            }
+            if let id = launchArgument("--camera") { model.showCameraSettings(id) }
             // --doctor [ID [settings]|recorder]: the camera window, open (at that camera's doctor or settings, or the
             // recorder).
             if let at = CommandLine.arguments.firstIndex(of: "--doctor") {

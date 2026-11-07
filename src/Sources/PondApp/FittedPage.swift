@@ -5,13 +5,41 @@
 // loop of measuring and resizing to settle (or not).
 import SwiftUI
 
+/// Where a page's cards stand in the Cameras window, its forms' sections and what's laid out beside a form (a page's
+/// last card, a bar of buttons under it) alike, so nothing on a page, or from one page to the next, steps in or out,
+/// whatever the page's width. A grouped form's sections are never wider than `readable`, centred (measured: the
+/// form says neither), and at least `side` from the page's sides (pageForm); what's beside a form does the same
+/// (besideForm).
+enum PageMargin {
+    /// The least margin at a page's sides.
+    static let side = 30.0
+    /// The widest a grouped form's sections go; past it, the margins grow.
+    static let readable = 704.0
+    /// A grouped form's own inset of its sections, inside its content margins.
+    static let formInset = 20.0
+}
+
+extension View {
+    /// A page's form in the Cameras window: grouped, its sections PageMargin.side from the page's sides whatever the
+    /// page's width (left to itself, a grouped form widens its margins as it widens, and they'd part from the card's).
+    func pageForm() -> some View {
+        formStyle(.grouped)
+            .contentMargins(.horizontal, PageMargin.side - PageMargin.formInset, for: .scrollContent)
+    }
+
+    /// Something laid out beside a page's form (under it), in line with its sections: as wide as they are, centred.
+    func besideForm() -> some View {
+        frame(maxWidth: PageMargin.readable)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, PageMargin.side)
+    }
+}
+
 struct FittedPage<Above: View, Card: View>: View {
     /// The card's least height.
     let shortest: Double
     @ViewBuilder let above: Above
     @ViewBuilder let card: Card
-    /// The form's margin at its sides, kept under the card too.
-    static var margin: Double { 20 }
     /// Between the form's last section and the card's heading, as between the form's own.
     static var headingGap: Double { 10 }
     /// The sections' height, as their form lays them out.
@@ -27,7 +55,7 @@ struct FittedPage<Above: View, Card: View>: View {
     func page(fills: Bool) -> some View {
         VStack(spacing: 0) {
             Form { above }
-                .formStyle(.grouped)
+                .pageForm()
                 .scrollDisabled(true)
                 .scrollIndicators(.never)
                 // Its content's height. (Not with the inset a window's toolbar gives it at the top: the form is under the
@@ -42,8 +70,8 @@ struct FittedPage<Above: View, Card: View>: View {
                 .frame(minHeight: shortest, idealHeight: shortest, maxHeight: fills ? .infinity : shortest)
                 // As far under the sections as the form keeps its sections apart.
                 .padding(.top, Self.headingGap)
-                .padding(.horizontal, Self.margin)
-                .padding(.bottom, Self.margin)
+                .besideForm()
+                .padding(.bottom, PageMargin.side)
         }
     }
 }

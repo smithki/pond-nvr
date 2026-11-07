@@ -36,7 +36,7 @@ final class CameraDoctor {
         UserDefaults.standard.data(forKey: "doctorThresholds").flatMap { try? JSONDecoder().decode(HealthThresholds.self, from: $0) } ?? .standard
     }
 
-    /// Each camera's last check (Run Check Now): what it found, and when.
+    /// Each camera's last check (Run Check…, or Check All Cameras): what it found, and when.
     private(set) var checks: [String: (lines: [CheckLine], time: Date)] = [:]
     /// Being checked now.
     private(set) var checking: Set<String> = []
@@ -82,20 +82,30 @@ final class CameraDoctor {
         self.findings = findings
     }
 
-    /// Checks a camera now, only when asked: its streams and 6 s of its video (as Settings › Cameras' check, through
-    /// pond), then a read of its controls through the service, timed. Not a private or waking camera: there's
-    /// nothing to see, and it can't be asked.
-    func check(_ camera: Config.Camera, model: AppModel) async {
-        guard !checking.contains(camera.id) else { return }
+    /// Checks a camera now, only when asked: its streams and 6 s of its video (through pond), then a read of its
+    /// controls through the service, timed. Not a private or waking camera: there's nothing to see, and it can't be
+    /// asked. Kept as its last check, and given back (for the check's sheet): passed if nothing was an error.
+    @discardableResult
+    func check(_ camera: Config.Camera, model: AppModel) async -> (lines: [CheckLine], passed: Bool) {
+        if checking.contains(camera.id) {
+            // (Already being checked, by Check All Cameras: its result, when it comes.)
+            while checking.contains(camera.id) { try? await Task.sleep(for: .milliseconds(200)) }
+            let lines = checks[camera.id]?.lines ?? []
+            return (lines, !lines.contains { $0.kind == .error })
+        }
         if model.isAsleep(camera.id) {
-            checks[camera.id] = ([CheckLine(.warning, model.isWaking(camera.id)
+            let lines = [CheckLine(.warning, model.isWaking(camera.id)
                 ? "It\u{2019}s waking up from privacy mode: check again once its video is back."
-                : "It\u{2019}s private: turn privacy off to check it.")], Date())
-            return
+                : "It\u{2019}s private: turn privacy off to check it.")]
+            checks[camera.id] = (lines, Date())
+            return (lines, false)
         }
         checking.insert(camera.id)
         defer { checking.remove(camera.id) }
-        var lines = await model.check(camera, seconds: 6).lines
+        let watched = await model.check(camera, seconds: 6)
+        var lines = watched.lines
+        // Reached, and not yet said what it is: asked now (what its controls and a doorbell's button need).
+        if watched.passed, camera.device == nil { await model.identify(camera.id) }
         if model.controls(for: camera) != nil {
             let started = Date()
             let reply = await model.controlClient.ask(.init(camera: camera.id, action: "items.values"))
@@ -109,6 +119,7 @@ final class CameraDoctor {
             }
         }
         checks[camera.id] = (lines, Date())
+        return (lines, !lines.contains { $0.kind == .error })
     }
 
     func isIgnored(_ camera: String, _ finding: HealthFinding) -> Bool { ignored.contains("\(camera)|\(finding.id)") }

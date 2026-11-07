@@ -42,16 +42,18 @@ The figures above are the defaults. **Thresholds**, under the overview's cameras
 ## Where findings show
 
 - **The toolbar's state** says when anything needs attention, and its overview lists it with the fix (Doctor, for a camera, opens it here).
-- **The Doctor window** (⌥⌘D, Window › Doctor, or *Open the Doctor…* in the overview and the menu bar) lists the recorder and every camera with its state, down its side, to keep open beside the live view or the timeline while working something out. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
+- **The Cameras window** (⇧⌘C: Pond › Cameras…, the main window's Cameras button, the top of Settings › General, or *Cameras…* in the overview and *Open Cameras…* in the menu bar) lists the recorder and every camera with its state, down its side (drag cameras to put them in order; Add Camera… under the list), to keep open beside the live view or the timeline while working something out. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
 - **A camera's tile and its row in the camera list** carry a mark (a stethoscope, red for a problem, orange for a warning). Hovering says what's wrong, and clicking opens the doctor at the camera. Notices don't get a mark, and neither do findings you've ignored.
 - **Ignore** on a finding keeps it in the doctor, dimmed, but takes it off the camera's tile and row. It's per camera, for findings you know about and can't fix.
 
-## Run Check Now
+## Run Check
 
-On a camera's page, **Run Check Now** checks it once, only when asked:
+On a camera's Doctor tab, **Run Check…** checks it once, only when asked, in a sheet: its progress, then what it found in a word, the details, and the fix (**Enter Password…** or **Change Address…** opens its Settings tab with the cursor in that field). It's the one check of a camera in the app (its Settings tab has none; Save checks a new password itself):
 
-1. It logs in to both streams and watches 6 s of video. This is the same check as Settings › Cameras, done by `pond`, which holds the passwords.
+1. It logs in to both streams and watches 6 s of video, done by `pond`, which holds the passwords. A camera reached that hasn't said what it is yet is asked.
 2. It reads the camera's controls through the service, timed.
+
+The last check stays on the page as one line (how it went, and when), with **Details…** for the sheet again; **Check All Cameras** on the All Cameras page checks each in turn, each one's line on its page.
 
 A private or waking camera isn't checked, because there's nothing to watch and it may not answer.
 
@@ -61,7 +63,7 @@ For a camera that records to HomeKit Secure Video, a camera's page also says whe
 
 If clips are sent but never appear in the Home app, while another camera's do, the home hub's recording setup for that camera may be stuck. It happened with a doorbell: the hub took valid clips, notified about them, and kept none. The fix is to give the camera a fresh HomeKit identity:
 
-1. In Pond, Settings › Cameras › the camera › **Remove from HomeKit…** (or `pond homekit reset ID`).
+1. In Pond, the camera's Settings in the Cameras window (⇧⌘C, or **Camera Settings…** on its tile) › **Remove from HomeKit…** (or `pond homekit reset ID`).
 2. In the Home app, remove the accessory too.
 3. In Pond, **Add to the Home App…**, and add it with its new setup code. Its Home app settings (room, notifications, Recording Options, automations) are set up again.
 

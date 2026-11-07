@@ -5,6 +5,7 @@
 // it all as text, without its address or password.
 import AppKit
 import Charts
+import Control
 import PondCore
 import SwiftUI
 
@@ -13,6 +14,15 @@ struct DoctorView: View {
     @State private var everything = false
     /// Ignored findings shown: they're folded away under the others until asked for.
     @State private var showIgnored = false
+    /// The check's sheet, over the page: a check running (Run Check…), or the last one's details (Details…).
+    @State private var checkSheet: CheckRequest?
+
+    struct CheckRequest: Identifiable {
+        let camera: Config.Camera
+        /// The last check's result, shown rather than a new check run.
+        var shown: (lines: [CheckLine], passed: Bool)?
+        var id: String { camera.id }
+    }
 
     static let shortestList = 96.0
 
@@ -28,6 +38,14 @@ struct DoctorView: View {
             } card: {
                 whatHappened(camera)
             }
+            .sheet(item: $checkSheet) { request in
+                CheckSheet(camera: request.camera, initial: request.shown,
+                           runCheck: { await doctor.check(request.camera, model: model) }) { field in
+                    // The fix, on its settings: the sheet closes, and the Settings tab opens at the field.
+                    checkSheet = nil
+                    model.showCameraSettings(request.camera.id, focus: field)
+                }
+            }
         } else {
             Form {
                 if !doctor.hasRecords {
@@ -40,7 +58,7 @@ struct DoctorView: View {
                     overview
                 }
             }
-            .formStyle(.grouped)
+            .pageForm()
         }
     }
 
@@ -55,17 +73,10 @@ struct DoctorView: View {
             // Its buttons as any others (not in the heading's type).
             Group {
                 if let camera {
-                    // Only when asked: the doctor otherwise asks nothing of the camera.
-                    Button {
-                        Task { await doctor.check(camera, model: model) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if doctor.checking.contains(camera.id) { ProgressView().controlSize(.mini) }
-                            Text(doctor.checking.contains(camera.id) ? "Checking\u{2026}" : "Run Check Now")
-                        }
-                    }
-                    .disabled(doctor.checking.contains(camera.id))
-                    .help("Watch \(camera.name)\u{2019}s video for a few seconds and read its controls, now")
+                    // Only when asked: the doctor otherwise asks nothing of the camera. In a sheet of its own, as it
+                    // runs and then with what it found, and the fix.
+                    Button("Run Check\u{2026}") { checkSheet = CheckRequest(camera: camera) }
+                        .help("Log in to \(camera.name), watch its video for a few seconds and read its controls, now")
                     Button("Copy Report") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(doctor.report(camera), forType: .string)
@@ -126,6 +137,8 @@ struct DoctorView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    // (The first camera's row would wear the focus ring as the page opens.)
+                    .focusEffectDisabled()
                 }
             } header: {
                 header(nil)
@@ -161,12 +174,10 @@ struct DoctorView: View {
             }
             homeKitRecordingRow(camera)
             if let check = doctor.checks[camera.id] {
-                // The last check, under the findings it may explain.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Checked at " + check.time.formatted(date: .omitted, time: .shortened))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    CheckLinesView(lines: check.lines)
+                // The last check in a line, under the findings it may explain (one row, so the page doesn't move and
+                // what happened keeps its room); its details in the check's sheet.
+                LastCheckRow(check: check) {
+                    checkSheet = CheckRequest(camera: camera, shown: (check.lines, !check.lines.contains { $0.kind == .error }))
                 }
             }
         } header: {
@@ -636,13 +647,40 @@ struct HomeKitClipsTip: View {
                         Spacer()
                         Button("Camera Settings\u{2026}") {
                             shown = false
-                            model.settingsTab = .cameras
-                            model.cameraToEdit = camera.id
+                            model.showCameraSettings(camera.id)
                         }
                     }
                 }
                 .padding(16)
                 .frame(width: 320)
             }
+    }
+}
+
+
+/// A camera's last check in one row: how it went, in a word and its first line that matters, when, and its details.
+struct LastCheckRow: View {
+    let check: (lines: [CheckLine], time: Date)
+    let details: () -> Void
+
+    /// The line that says most: the first error, else the first warning, else the first line.
+    var lead: CheckLine? {
+        check.lines.first { $0.kind == .error } ?? check.lines.first { $0.kind == .warning } ?? check.lines.first
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            let kind = lead?.kind ?? .ok
+            Image(systemName: kind == .error ? "xmark.octagon.fill" : kind == .warning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(kind == .error ? .red : kind == .warning ? .orange : .green)
+            Text("Last check at \(check.time.formatted(date: .omitted, time: .shortened)):")
+                .foregroundStyle(.secondary)
+            Text(kind == .ok ? "it answered and its video came" : lead?.text ?? "")
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            Button("Details\u{2026}", action: details)
+                .controlSize(.small)
+        }
     }
 }

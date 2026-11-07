@@ -269,7 +269,7 @@ extension CLI {
             return s
         } ?? 8
         let json = args.flag("--json")
-        // Settings not saved yet, tried with the saved password (the app's Check Connection while editing).
+        // Settings not saved yet, tried with the saved password (the app's checks: Run Check… on a camera's Doctor tab).
         let main = try args.option("--main"), sub = try args.option("--sub"), username = try args.option("--username")
         try args.done()
         let credentials = try requireCredentials()

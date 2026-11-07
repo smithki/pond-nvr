@@ -933,7 +933,6 @@ struct RailThumbnail: View {
     @State private var pending: Task<Void, Never>?
 
     @Environment(AppModel.self) private var model
-    @Environment(\.openSettings) private var openSettingsWindow
 
     /// The camera's settings, on its page in the camera window.
     func openCameraSettings() { model.showCameraSettings(camera.id) }
@@ -1528,14 +1527,9 @@ struct CameraTile: View {
             }
         }
     }
-    @Environment(\.openSettings) private var openSettingsWindow
 
-    /// Settings → Cameras, with this camera's sheet open.
-    func openSettings() {
-        model.settingsTab = .cameras
-        model.cameraToEdit = camera.id
-        openSettingsWindow()
-    }
+    /// This camera's settings, on its page in the camera window.
+    func openSettings() { model.showCameraSettings(camera.id) }
 
     /// Longer than the stage's moves (its tiles growing and shrinking), so a new stream's picture shows once its
     /// tile has stopped moving.

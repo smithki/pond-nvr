@@ -114,7 +114,10 @@ struct OverviewPanel: View {
                 }
                 if multi { Button("Remote Access\u{2026}") { open(.remote) } }
                 Spacer(minLength: 0)
-                Button("Open the Doctor\u{2026}") { close(); model.showDoctor() }
+                // Where things are set up: Settings for the app's, the Cameras window for each camera's.
+                Button("Settings\u{2026}") { open(.general) }
+                Button("Cameras\u{2026}") { close(); model.showDoctor() }
+                    .help("Each camera\u{2019}s settings and health, in the Cameras window (\u{21E7}\u{2318}C)")
             }
             .controlSize(.small)
         }

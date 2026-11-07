@@ -1,8 +1,9 @@
-// The camera window (⌥⌘D, Window › Cameras): a camera's health and its settings in one place, beside the live view
-// or the timeline it's about, where the toolbar's overview is for noticing and the quick fix. A list down its side
-// (this Mac's recorder, then each camera with its state), and the page for what's chosen: the recorder (whether it
-// runs, the media engine, its log), every camera at a glance, or one camera: its Doctor (findings, day and record)
-// or its Settings (what Settings › Cameras opens for it, here on its page).
+// The Cameras window (⇧⌘C; Pond › Cameras…, Window › Cameras, General's first section, the toolbar's overview): where
+// cameras are set up and looked after, beside the live view or the timeline they're about, where the toolbar's
+// overview is for noticing and the quick fix. A list down its side (this Mac's recorder, then each camera with its
+// state, dragged to put them in order, and Add Camera under it), and the page for what's chosen: the recorder
+// (whether it runs, the media engine, its log), every camera at a glance, or one camera: its Doctor (findings, day
+// and record) or its Settings (the only place they're changed).
 import Devices
 import PondCore
 import SwiftUI
@@ -54,6 +55,7 @@ struct DoctorWindow: View {
     static let sidebarWidth = 230.0
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @State private var adding = false
 
     var body: some View {
         @Bindable var model = model
@@ -69,10 +71,18 @@ struct DoctorWindow: View {
                 Section("Cameras") {
                     ForEach(cameras) { camera in
                         let worst = model.doctor.worst(camera.id)
+                        // No password first: nothing else can be known of it until it has one.
+                        let noPassword = !model.hasPassword(camera.id)
                         DoctorRow(title: camera.name,
-                                  subtitle: worst?.headline ?? (model.isPrivate(camera.id) ? "Private" : "No problems"),
-                                  dot: StatusDot(finding: worst, isPrivate: model.isPrivate(camera.id)).color)
+                                  subtitle: noPassword ? "No password"
+                                      : worst?.headline ?? (model.isPrivate(camera.id) ? "Private" : "No problems"),
+                                  dot: noPassword ? .orange : StatusDot(finding: worst, isPrivate: model.isPrivate(camera.id)).color)
                             .tag(DoctorPage.camera(camera.id))
+                    }
+                    // Dragged into order: the order they're shown in everywhere (Live, the timeline, Events).
+                    .onMove { from, to in
+                        guard let first = from.first else { return }
+                        model.moveCamera(cameras[first].id, to: to > first ? to - 1 : to)
                     }
                 }
                 // Other Ponds' cameras, with what this Mac knows of them (their doctor is on their own Mac).
@@ -86,8 +96,22 @@ struct DoctorWindow: View {
                     }
                 }
             }
-            // The list always shown, at one width: hidden, the page would widen past what it's laid out for.
-            .navigationSplitViewColumnWidth(Self.sidebarWidth)
+            // Add Camera, under the list: a plain capsule (the system's bordered button, flat, not glass), centred, so
+            // it's seen at once and is an ordinary button to the keyboard.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button { adding = true } label: { Label("Add Camera\u{2026}", systemImage: "plus") }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
+                    .help("Add a camera by its address, or one found on your network")
+                    .disabled(model.config == nil)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            // The list always shown, at one width, not dragged wider, narrower or closed: the window is one size, so
+            // the page is too, and its margins stay as laid out (a grouped form widens its own margins as it widens,
+            // while what's laid out beside it, a page's last card and the settings' buttons, keeps PageMargin's).
+            .navigationSplitViewColumnWidth(min: Self.sidebarWidth, ideal: Self.sidebarWidth, max: Self.sidebarWidth)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             Group {
@@ -99,7 +123,7 @@ struct DoctorWindow: View {
                 } else if model.cameraTab == .settings, case let .camera(id) = model.doctorPage,
                           let camera = cameras.first(where: { $0.id == id }) {
                     // Its settings, here on its page (a page of their own for each camera: its fields its own).
-                    EditCameraSheet(camera: camera, embedded: true).id(camera.id)
+                    CameraSettingsPage(camera: camera).id(camera.id)
                 } else if case let .camera(id) = model.doctorPage, let (pond, camera) = remoteCamera(id) {
                     RemoteCameraPage(pond: pond, camera: camera)
                 } else {
@@ -133,6 +157,7 @@ struct DoctorWindow: View {
             }
         }
         .onAppear { AppModel.openWindow = { openWindow(id: $0) } }
+        .sheet(isPresented: $adding) { AddCameraSheet() }
     }
 
     func title(_ cameras: [Config.Camera]) -> String {
@@ -239,7 +264,7 @@ struct RemoteCameraPage: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .pageForm()
     }
 }
 

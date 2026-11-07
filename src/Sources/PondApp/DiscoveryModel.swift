@@ -72,7 +72,6 @@ extension AppModel {
     /// Add Camera, starting from a camera found on the network.
     func add(_ camera: FoundCamera) {
         addingFrom = camera
-        settingsTab = .cameras
         addingCamera = true
     }
 }
