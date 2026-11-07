@@ -52,7 +52,6 @@ struct EventsView: View {
     @State private var searching = false
     /// It's taking a while (the models still being readied: the first search after an install or update).
     @State private var slow = false
-    @Environment(\.openSettings) private var openSettingsWindow
     /// Whether the window's in front: a card on screen counts as seen only then.
     @Environment(\.controlActiveState) private var windowState
     /// On screen this long, a new card's seen (not just scrolled past).
@@ -164,8 +163,7 @@ struct EventsView: View {
         HStack(alignment: .top, spacing: 14) {
             if railShown {
                 OnScreenRail(events: shown, days: keptDays, onScreen: onScreen, retention: {
-                    model.settingsTab = .storage
-                    openSettingsWindow()
+                    model.showSettings(.storage)
                 }) { hour in
                     // The first card at or after that hour (newest first: the last one before the next hour).
                     let next = hour.addingTimeInterval(3600)

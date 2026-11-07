@@ -1,4 +1,4 @@
-// The doctor's page (in its window, DoctorWindow): how each camera is doing, from what the recorder sees of it. All
+// The doctor's page (in its window, SettingsWindow): how each camera is doing, from what the recorder sees of it. All
 // cameras at a glance, or one:
 // its findings (what's wrong, since when, the evidence, what to try; ignored per camera), its day in charts, and
 // what happened to it, in the log's manner (a day's heading, times, marks; problems by default). Copy Report gives

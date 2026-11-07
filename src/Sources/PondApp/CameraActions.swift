@@ -75,6 +75,14 @@ extension AppModel {
     }
 
     /// The camera's settings, on its page in the camera window.
+    /// A camera's everyday settings in a panel over the main window, from wherever the camera is (its tile, an event,
+    /// its HomeKit badge); All Settings… there goes on to the Settings window.
+    func editCameraSettings(_ camera: String) {
+        guard ownCamera(camera) != nil else { return }
+        cameraSettingsPanel = CameraPanel(camera: camera)
+    }
+
+    /// A camera's Settings tab in the Settings window (its login, streams and the rest, beside its doctor).
     func showCameraSettings(_ camera: String, focus: CameraSettingsPage.Field? = nil) {
         cameraSettingsFocus = focus
         showCamera(camera, tab: .settings)
@@ -84,6 +92,24 @@ extension AppModel {
     func saveZones(_ zones: [Config.Zone], for camera: String) {
         _ = update { config in
             if let i = config.cameras.firstIndex(where: { $0.id == camera }) { config.cameras[i].zones = zones }
+        }
+    }
+}
+
+/// The camera whose settings panel is open over the main window.
+struct CameraPanel: Identifiable {
+    let camera: String
+    var id: String { camera }
+}
+
+/// A camera's settings panel as the main window's sheet (ContentView): as it's saved now, its everyday settings.
+struct CameraSettingsPanel: View {
+    @Environment(AppModel.self) private var model
+    let panel: CameraPanel
+
+    var body: some View {
+        if let camera = model.ownCamera(panel.camera) {
+            CameraSettingsPage(camera: camera, panel: true)
         }
     }
 }

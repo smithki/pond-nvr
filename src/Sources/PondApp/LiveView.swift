@@ -1529,7 +1529,7 @@ struct CameraTile: View {
     }
 
     /// This camera's settings, on its page in the camera window.
-    func openSettings() { model.showCameraSettings(camera.id) }
+    func openSettings() { model.editCameraSettings(camera.id) }
 
     /// Longer than the stage's moves (its tiles growing and shrinking), so a new stream's picture shows once its
     /// tile has stopped moving.
@@ -2288,7 +2288,6 @@ extension Array {
 /// A stage tile's menu: its camera from here (its settings, its zones, its doctor; another Pond's, only watched).
 struct CameraMenu: ViewModifier {
     @Environment(AppModel.self) private var model
-    @Environment(\.openSettings) private var openSettings
     let camera: String
     let solo: () -> Void
 
@@ -2297,7 +2296,7 @@ struct CameraMenu: ViewModifier {
         content.contextMenu {
             Button("Watch Only This", action: solo)
             Divider()
-            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.showCameraSettings(camera) }
+            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.editCameraSettings(camera) }
                 .disabled(!own)
             Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(camera) }
                 .disabled(!model.canEditZones(camera))

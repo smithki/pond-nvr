@@ -30,7 +30,7 @@ make signing                # once per Mac, if you have no Apple Development cer
 make app && open "dist/Pond NVR.app"
 ```
 
-In the app, **Settings › Storage** chooses the recordings folder, **Add Camera** in the toolbar (or in the **Cameras** window, ⇧⌘C) adds a camera by its address (it logs in, checks the streams and keeps the password in your Keychain), and **Start** in the toolbar's overview (it says *Not recording* until then) starts the background recorder. Closing the app does not stop recording.
+In the app, **Settings › Storage** chooses the recordings folder, **Add Camera** in the toolbar (or in **Settings › Cameras**, ⇧⌘C) adds a camera by its address (it logs in, checks the streams and keeps the password in your Keychain), and **Start** in the toolbar's overview (it says *Not recording* until then) starts the background recorder. Closing the app does not stop recording.
 
 The same from a terminal:
 
@@ -55,7 +55,7 @@ pond service install                               # record whenever you are log
 - **Timeline**: the recordings of any day, a lane per camera. Click or drag to move, space to play or pause, ← and → for 10 seconds, ½× to 16×, zoom from a whole day to 15 minutes; scroll back across midnight into earlier days. **LIVE** (L) shows the selected camera as it is now.
 - **Events**: what the cameras saw, a card each, by day, beside a rail of every day kept; details in a panel. **Search** in plain words ("a man in a red jacket last night"), on the Mac only ([docs/search.md](docs/search.md)).
 
-The toolbar's state says whether all's well (or what needs attention, with an overview of it and the fixes), and the **Cameras** window (⇧⌘C, the toolbar's Cameras button, Pond › Cameras…, or the top of Settings › General) is where cameras are set up and looked after: the recorder (whether it runs, its log), and for each camera its Doctor (findings, day and record) and its Settings, the only place a camera's settings are changed. Drag cameras in its list to put them in order.
+The toolbar's state says whether all's well (or what needs attention, with an overview of it and the fixes), and **Settings** (⌘,) is where everything is set up and looked into: a sidebar of this Pond's settings (General, Storage, Remote Access, Cameras, Advanced), and from Cameras (⇧⌘C, or the toolbar's Cameras button) the recorder (whether it runs, its log) and each camera, with its Doctor (findings, day and record) and its Settings as tabs. Drag cameras in its list to put them in order. A camera's everyday settings are also a right-click away wherever it's shown: **Camera Settings…** on its tile or an event opens them in a panel over the main window, with **All Settings…** for the rest.
 
 Settings (⌘,) has **General**, **Cameras**, **Storage** (where recordings go, how long they're kept, and the room they take), **Remote Access** and **Advanced**. They edit the same settings file as `pond`, and the app carries `pond` inside it, so the recorder can be started from the app alone.
 
@@ -87,7 +87,7 @@ pond service restart      # after installing a new pond, or changing the storage
 pond service uninstall    # stop and remove it; recordings and settings stay
 ```
 
-The log is `~/Library/Logs/Pond/pond.log`, also in the Cameras window's Recorder page (⇧⌘C). The first time it runs, macOS asks whether pond may find devices on your local network (Allow) and use the camera passwords in your Keychain (Always Allow).
+The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Recorder (⇧⌘C). The first time it runs, macOS asks whether pond may find devices on your local network (Allow) and use the camera passwords in your Keychain (Always Allow).
 
 ## Documentation
 

@@ -83,15 +83,18 @@ final class AppModel {
     var dockNarrowest: CGFloat = LiveLayout.narrowestDock
     /// No room for the adjustments beside the stage (a narrow window): they're the dock's second frame instead.
     var sidebarFloats = false
-    /// How each camera is doing (the doctor), and what its window shows (DoctorWindow).
+    /// How each camera is doing (the doctor), and what its window shows (SettingsWindow).
     let doctor = CameraDoctor()
-    var doctorPage: DoctorPage = .cameras
+    /// What the Settings window shows (General, the first time).
+    var settingsPage: SettingsPage = .general
     /// A camera's page in the camera window: its doctor or its settings.
     var cameraTab: CameraTab = .doctor
     /// Counted up as something's said of an event (read again, for what's quieted).
     var feedbackChanged = 0
     /// The zone editor asked for from the main window (a tile's or an event's menu).
     var zoneEditing: ZoneEditing?
+    /// A camera's settings panel, open over the main window.
+    var cameraSettingsPanel: CameraPanel?
     /// Which events are new (seen once on screen in Events).
     let seenEvents = EventsSeen(demo: DemoSession.scenario?.name)
     /// Opens a window by its id (SwiftUI's, kept by the views that have it), for what opens one from outside a view:
@@ -195,8 +198,6 @@ final class AppModel {
         mode = next
         movingInHistory = false
     }
-    /// The Settings window's tab; `--settings TAB` opens Settings on it at launch.
-    var settingsTab: SettingsTab = launchArgument("--settings").flatMap(SettingsTab.init(rawValue:)) ?? .general
     /// A moment to show on the timeline (set from the live view), taken by the timeline when it appears.
     var timelineJump: TimelineJump?
     /// The Events view as it was left (the event open in its panel, its filters): as it's come back to.

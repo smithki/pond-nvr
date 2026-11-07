@@ -55,7 +55,7 @@ struct StorageView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .pageForm()
         .task(id: model.config) { await measure() }
         // Back from System Settings (Spotlight's Search Privacy, say): measured again.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

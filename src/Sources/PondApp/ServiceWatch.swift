@@ -40,7 +40,7 @@ final class ServiceWatch {
         }
 
         /// Where it's looked into: the doctor's cameras, or its recorder page.
-        var doctorPage: DoctorPage { if case .notRecording = self { .cameras } else { .recorder } }
+        var settingsPage: SettingsPage { if case .notRecording = self { .cameras } else { .recorder } }
     }
 
     /// What's wrong now, if anything.
@@ -168,7 +168,7 @@ final class ServiceWatch {
         content.title = (DemoSession.scenario == nil ? "" : "Demo: ") + now.title
         content.body = now.detail
         content.sound = .default
-        content.userInfo = ["doctor": now.doctorPage == .recorder ? "recorder" : "cameras"]
+        content.userInfo = ["doctor": now.settingsPage == .recorder ? "recorder" : "cameras"]
         center?.add(UNNotificationRequest(identifier: Self.notification, content: content, trigger: nil))
     }
 }

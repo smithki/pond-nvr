@@ -1,5 +1,5 @@
 // For development and the docs: with POND_SNAPSHOTS=<folder> set, the app saves a picture of each view of
-// the main window, of each Settings tab and of the Cameras window, then quits. The app draws its own windows, so no
+// the main window, of each page of the Settings window, and of a camera's settings panel, then quits. The app draws its own windows, so no
 // screen-recording permission is needed (though translucent glass comes out flatter than on screen).
 import AppKit
 import PondCore
@@ -36,32 +36,58 @@ enum Snapshots {
             save(mainWindow(), to: "\(dir)/\(mode.rawValue).png")
         }
         model.mode = .live
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        for tab in SettingsTab.allCases {
-            model.settingsTab = tab
-            try? await Task.sleep(for: .seconds(1.2))
-            save(settingsWindow() ?? NSApp.keyWindow, to: "\(dir)/settings-\(tab.rawValue).png")
+        // The Settings window, each kind of page: this Pond's settings, the recorder, every camera, the first camera's
+        // doctor and settings, and another Pond's camera.
+        for (page, name) in [(SettingsPage.general, "general"), (.storage, "storage"), (.remote, "remote"), (.advanced, "advanced")] {
+            model.showSettings(page)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(settingsWindow(), to: "\(dir)/settings-\(name).png")
         }
-        // The Cameras window, each kind of page: every camera, the recorder, the first camera's doctor and settings,
-        // and another Pond's camera.
-        model.showDoctor(.cameras)
+        model.showSettings(.cameras)
         try? await Task.sleep(for: .seconds(2))
-        save(camerasWindow(), to: "\(dir)/cameras.png")
-        model.showDoctor(.recorder)
+        save(settingsWindow(), to: "\(dir)/cameras.png")
+        // The sidebar as AppKit has it (SidebarBounds): its bounds, kept after changing pages, and held to as its
+        // divider is moved past each end; and, closed, opened again.
+        if let view = settingsWindow()?.contentView?.superview, let split = firstSplitView(in: view),
+           let item = sidebarItem(in: view) {
+            let frame = settingsWindow()?.frame ?? .zero
+            var report = "window \(Int(frame.width)) x \(Int(frame.height))\n"
+            report += "canCollapse \(item.canCollapse) min \(item.minimumThickness) max \(item.maximumThickness)\n"
+            for (position, name) in [(100.0, "dragged to 100"), (500.0, "dragged to 500"), (SettingsWindow.sidebarWidth.ideal, "back")] {
+                split.setPosition(position, ofDividerAt: 0)
+                try? await Task.sleep(for: .seconds(0.8))
+                report += "\(name): \(Int(item.viewController.view.frame.width)) pt\n"
+            }
+            item.animator().isCollapsed = true
+            try? await Task.sleep(for: .seconds(1.5))
+            report += "closed, 1.5 s later: collapsed \(item.isCollapsed)\n"
+            try? report.write(toFile: "\(dir)/sidebar.txt", atomically: true, encoding: .utf8)
+        }
+        model.showSettings(.recorder)
         try? await Task.sleep(for: .seconds(1.5))
-        save(camerasWindow(), to: "\(dir)/cameras-recorder.png")
+        save(settingsWindow(), to: "\(dir)/cameras-recorder.png")
         if let first = model.config?.cameras.first {
             model.showCamera(first.id, tab: .doctor)
             try? await Task.sleep(for: .seconds(1.5))
-            save(camerasWindow(), to: "\(dir)/cameras-doctor.png")
+            save(settingsWindow(), to: "\(dir)/cameras-doctor.png")
             model.showCamera(first.id, tab: .settings)
             try? await Task.sleep(for: .seconds(1.5))
-            save(camerasWindow(), to: "\(dir)/cameras-settings.png")
+            save(settingsWindow(), to: "\(dir)/cameras-settings.png")
         }
         if let remote = model.remotePonds.lazy.compactMap({ $0.cameras?.first }).first {
-            model.showDoctor(.camera(remote.id))
+            model.showSettings(.camera(remote.id))
             try? await Task.sleep(for: .seconds(1.5))
-            save(camerasWindow(), to: "\(dir)/cameras-remote.png")
+            save(settingsWindow(), to: "\(dir)/cameras-remote.png")
+        }
+        // A camera's settings panel, over the main window.
+        if let first = model.config?.cameras.first {
+            mainWindow()?.makeKeyAndOrderFront(nil)
+            model.editCameraSettings(first.id)
+            try? await Task.sleep(for: .seconds(2))
+            save(NSApp.windows.first { $0.isVisible && $0.sheetParent != nil }, to: "\(dir)/camera-panel.png")
+            // Closed again: an open sheet keeps the app from quitting.
+            model.cameraSettingsPanel = nil
+            try? await Task.sleep(for: .seconds(1))
         }
         NSApp.terminate(nil)
     }
@@ -77,13 +103,24 @@ enum Snapshots {
             ?? NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.frame.width > 700 }
     }
 
-    /// The Settings window (not necessarily key: another app may be in front).
-    static func settingsWindow() -> NSWindow? {
-        NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.identifier?.rawValue.localizedCaseInsensitiveContains("settings") == true }
+    static func firstSplitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for sub in view.subviews { if let split = firstSplitView(in: sub) { return split } }
+        return nil
     }
 
-    static func camerasWindow() -> NSWindow? {
-        NSApp.windows.first { $0.isVisible && $0.identifier?.rawValue.contains(DoctorWindow.id) == true }
+    /// The first split view controller's first item under a view (the Settings window's sidebar).
+    static func sidebarItem(in view: NSView) -> NSSplitViewItem? {
+        if let split = view as? NSSplitView, let controller = split.delegate as? NSSplitViewController {
+            return controller.splitViewItems.first
+        }
+        for sub in view.subviews { if let item = sidebarItem(in: sub) { return item } }
+        return nil
+    }
+
+    /// The Settings window (not necessarily key: another app may be in front).
+    static func settingsWindow() -> NSWindow? {
+        NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.identifier?.rawValue.contains(SettingsWindow.id) == true }
     }
 
     static func save(_ window: NSWindow?, to path: String) {

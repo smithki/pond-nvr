@@ -138,7 +138,7 @@ struct RemoteAccessView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .pageForm()
         .disabled(!serviceRunning)
         .overlay(alignment: .bottom) {
             if !serviceRunning {

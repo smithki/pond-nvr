@@ -1,43 +1,10 @@
-// The Settings window (⌘,): a tab per kind of setting, in the window's toolbar as on any Mac app.
+// The Settings window's pages for this Pond as a whole (SettingsWindow): General and Advanced (Storage and Remote
+// Access have files of their own).
 import AppKit
 import PondCore
 import SwiftUI
 import Understanding
 import Watch
-
-enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, storage, remote, advanced
-
-    var id: String { rawValue }
-}
-
-struct SettingsView: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        @Bindable var model = model
-        TabView(selection: $model.settingsTab) {
-            Tab("General", systemImage: "gearshape", value: SettingsTab.general) { GeneralSettings() }
-            Tab("Storage", systemImage: "externaldrive", value: SettingsTab.storage) { needsSettings { StorageView() } }
-            Tab("Remote Access", systemImage: "network", value: SettingsTab.remote) { needsSettings { RemoteAccessView() } }
-            Tab("Advanced", systemImage: "gearshape.2", value: SettingsTab.advanced) { AdvancedSettings() }
-        }
-        // General fits it unscrolled.
-        .frame(width: 640, height: 560)
-        // Measured as Settings opens, so Storage has it before they are first shown.
-        .task { await model.refreshStorageOutlook() }
-        .alert("Not saved", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
-            Button("OK") { model.alert = nil }
-        } message: {
-            Text(model.alert ?? "")
-        }
-    }
-
-    @ViewBuilder
-    func needsSettings(@ViewBuilder _ content: () -> some View) -> some View {
-        if model.config == nil { SetupView() } else { content() }
-    }
-}
 
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
@@ -45,8 +12,6 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            // Cameras aren't set up here but in the Cameras window: said first, where one looks for them.
-            CamerasShortcut()
             Section {
                 PondNameField()
                 Picker(selection: $appearance) {
@@ -59,43 +24,7 @@ struct GeneralSettings: View {
             MenuBarSection()
             UnderstandingSection()
         }
-        .formStyle(.grouped)
-    }
-}
-
-/// General's first section: the way to the Cameras window, where each camera's settings, health and order are (not
-/// in Settings). Drawn to stand out from the settings under it, since it's where one comes looking for a camera.
-struct CamerasShortcut: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Section {
-            // The row says what it is; only its button acts: a system button, in the keyboard's Tab order with its own
-            // focus ring, as any other control on the page.
-            HStack(spacing: 12) {
-                Image(systemName: "video.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Cameras").font(.headline)
-                    Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 8)
-                Button("Open Cameras\u{2026}") { model.showDoctor(.cameras) }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .help("Open the Cameras window (\u{21E7}\u{2318}C)")
-                    .disabled(model.config == nil)
-            }
-        }
-    }
-
-    var summary: String {
-        let count = model.config?.cameras.count ?? 0
-        return count == 0 ? "Add a camera, then its settings and health" : "Each camera\u{2019}s settings, health and order \u{00B7} \u{21E7}\u{2318}C"
+        .pageForm()
     }
 }
 
@@ -137,7 +66,7 @@ struct AdvancedSettings: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .pageForm()
     }
 }
 

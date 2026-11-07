@@ -80,7 +80,6 @@ struct MenuBarLabel: View {
 struct MenuBarMenu: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         // (So the doctor's window can be opened from here with the main window closed.)
@@ -92,7 +91,7 @@ struct MenuBarMenu: View {
         } else {
             ForEach(items.prefix(5)) { Text($0.title) }
             if items.count > 5 { Text("and \(items.count - 5) more") }
-            if items.contains(where: { $0.fix == .recorder }) { Button("Recorder\u{2026}") { model.showDoctor(.recorder) } }
+            if items.contains(where: { $0.fix == .recorder }) { Button("Recorder\u{2026}") { model.showSettings(.recorder) } }
         }
         let cameras = model.config?.cameras ?? []
         if !cameras.isEmpty {
@@ -108,9 +107,9 @@ struct MenuBarMenu: View {
         Button("Open Live") { open(.live) }
         let new = model.seenEvents.count
         Button(new == 0 ? "Open Events" : "Open Events (\(new) new)") { open(.events) }
-        Button("Open Cameras\u{2026}") { model.showDoctor() }
+        Button("Open Cameras\u{2026}") { model.showSettings(.cameras) }
             .keyboardShortcut("c", modifiers: [.command, .shift])
-        Button("Settings\u{2026}") { show(model.settingsTab) }
+        Button("Settings\u{2026}") { model.showSettings() }
             .keyboardShortcut(",")
         Divider()
         Button("Quit Pond") { AppDelegate.quit() }
@@ -120,12 +119,6 @@ struct MenuBarMenu: View {
     func open(_ mode: Mode) {
         model.mode = mode
         openWindow(id: "main")
-        NSApp.activate()
-    }
-
-    func show(_ tab: SettingsTab) {
-        model.settingsTab = tab
-        openSettings()
         NSApp.activate()
     }
 }

@@ -18,7 +18,6 @@ struct EventCard: View, Equatable {
     let delete: () -> Void
     @State private var hovering = false
     @Environment(AppModel.self) private var model
-    @Environment(\.openSettings) private var openSettings
 
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
 
@@ -87,7 +86,7 @@ struct EventCard: View, Equatable {
                 Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(event.camera) }
                     .disabled(!model.canEditZones(event.camera))
                 Button("Camera Settings\u{2026}", systemImage: "gearshape") {
-                    model.showCameraSettings(event.camera)
+                    model.editCameraSettings(event.camera)
                 }
                 Divider()
                 Button("Delete Event…", role: .destructive, action: delete)

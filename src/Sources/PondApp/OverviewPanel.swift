@@ -14,7 +14,8 @@ struct OverviewPanel: View {
     @State private var unfolded: Set<String> = []
     /// Shown in a section before the rest fold away: the most urgent (the list is worst first).
     static let firstFew = 3
-    let openSettings: (SettingsTab) -> Void
+    /// The Settings window, at a page.
+    let openSettings: (SettingsPage) -> Void
 
     /// A section per Pond: this Mac's first.
     var sections: [(pond: String?, name: String)] {
@@ -98,7 +99,7 @@ struct OverviewPanel: View {
             }
             Divider()
             HStack(spacing: 8) {
-                Button("Recorder\u{2026}") { close(); model.showDoctor(.recorder) }
+                Button("Recorder\u{2026}") { close(); model.showSettings(.recorder) }
                 // The cameras that need attention, alone on the stage in Live, the rail filtered to them.
                 let cameras = model.attentionCameras
                 if !cameras.isEmpty {
@@ -114,10 +115,10 @@ struct OverviewPanel: View {
                 }
                 if multi { Button("Remote Access\u{2026}") { open(.remote) } }
                 Spacer(minLength: 0)
-                // Where things are set up: Settings for the app's, the Cameras window for each camera's.
-                Button("Settings\u{2026}") { open(.general) }
-                Button("Cameras\u{2026}") { close(); model.showDoctor() }
-                    .help("Each camera\u{2019}s settings and health, in the Cameras window (\u{21E7}\u{2318}C)")
+                // Where things are set up: Settings, where it was, or at every camera.
+                Button("Settings\u{2026}") { close(); model.showSettings() }
+                Button("Cameras\u{2026}") { close(); model.showSettings(.cameras) }
+                    .help("Each camera\u{2019}s settings and health, in Settings (\u{21E7}\u{2318}C)")
             }
             .controlSize(.small)
         }
@@ -153,9 +154,9 @@ struct OverviewPanel: View {
                          title: model.connection(device), short: "", detail: nil, fix: nil)
     }
 
-    func open(_ tab: SettingsTab) {
+    func open(_ page: SettingsPage) {
         close()
-        openSettings(tab)
+        openSettings(page)
     }
 
     func act(_ fix: Attention.Fix) {
@@ -165,7 +166,7 @@ struct OverviewPanel: View {
             model.showDoctor(camera: camera)
         case .recorder:
             close()
-            model.showDoctor(.recorder)
+            model.showSettings(.recorder)
         case .startRecorder: _ = model.installService()
         case .restartRecorder: _ = model.restartService()
         case .storageSettings: open(.storage)

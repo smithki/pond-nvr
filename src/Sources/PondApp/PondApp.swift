@@ -29,31 +29,31 @@ struct PondApp: App {
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Pond") { AppDelegate.quit() }.keyboardShortcut("q")
             }
-            // Beside Settings…, where one goes looking for a camera's: the Cameras window (its shortcut here, not on
-            // the window's own item in the Window menu, so it's said once). ⇧⌘C, C for Cameras: not ⌥⌘D, which macOS
-            // keeps for hiding the Dock, so the app never sees it.
-            CommandGroup(after: .appSettings) {
-                Button("Cameras\u{2026}") { model.showDoctor() }
+            // Settings… opens Pond's own Settings window (not the system's Settings scene, too small for it), where it
+            // was; Cameras… opens it at every camera. ⇧⌘C, C for Cameras: not ⌥⌘D, which macOS keeps for hiding the
+            // Dock, so the app never sees it.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings\u{2026}") { model.showSettings() }
+                    .keyboardShortcut(",")
+                Button("Cameras\u{2026}") { model.showSettings(.cameras) }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
             }
         }
 
-        // The doctor, a window of its own (one): for working out why, beside the view it's about. One size: its pages
-        // are laid out to fit it (the form's sections and the card under them line up at this width; wider, the
-        // form's margins grow and the card's don't).
-        Window("Cameras", id: DoctorWindow.id) {
-            DoctorWindow()
+        // Settings, a window of its own (one): every setting and the recorder's and cameras' health, beside the view
+        // they're about. As big as one likes, from a least size its pages are laid out for (their cards keep one
+        // margin at any width: PageMargin).
+        Window("Settings", id: SettingsWindow.id) {
+            SettingsWindow()
                 .environment(model)
                 .preferredColorScheme(appearance.scheme)
-                .frame(width: DoctorWindow.size.width, height: DoctorWindow.size.height)
+                // Its ideal size as well as its least: with the window sized from its content, the pages' forms'
+                // own ideal widths opened it nearly as wide as the screen, past `defaultSize`.
+                .frame(minWidth: SettingsWindow.least.width, idealWidth: SettingsWindow.size.width,
+                       minHeight: SettingsWindow.least.height, idealHeight: SettingsWindow.size.height)
         }
-        .windowResizability(.contentSize)
-
-        Settings {
-            SettingsView()
-                .environment(model)
-                .preferredColorScheme(appearance.scheme)
-        }
+        .defaultSize(SettingsWindow.size)
+        .windowResizability(.contentMinSize)
 
         MenuBarExtra(isInserted: $menuBarItem) {
             MenuBarMenu().environment(model)
@@ -113,7 +113,6 @@ enum Appearance: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @AppStorage(LiveView.railKey) private var showRail = true
     /// Where the overview was centred as it opened (the button's middle then).
@@ -190,10 +189,7 @@ struct ContentView: View {
                 let width: CGFloat = 380, margin: CGFloat = 12
                 let arrowX = width - (Callout.overflowFromTrailing - margin)
                 OverviewPanel(close: { withAnimation(.snappy(duration: 0.3)) { model.showingOverview = false } },
-                              openSettings: { tab in
-                                  model.settingsTab = tab
-                                  openSettings()
-                              })
+                              openSettings: { model.showSettings($0) })
                 .frame(width: width)
                 .glassEffect(.regular, in: Callout(arrowX: arrowX, arrow: false))
                 .padding(.top, Callout.belowToolbar)
@@ -208,10 +204,7 @@ struct ContentView: View {
                 let leading = max(margin, (overviewCentre ?? middle) - width / 2)
                 let arrowX = middle - leading
                 OverviewPanel(close: { withAnimation(.snappy(duration: 0.3)) { model.showingOverview = false } },
-                              openSettings: { tab in
-                                  model.settingsTab = tab
-                                  openSettings()
-                              })
+                              openSettings: { model.showSettings($0) })
                 .frame(width: width)
                 .glassEffect(.regular, in: Callout(arrowX: arrowX))
                 .padding(.top, Callout.belowToolbar)
@@ -335,8 +328,8 @@ struct ContentView: View {
             }
             // The Cameras window, where each camera is set up and looked after: always in sight, in glass of its own.
             ToolbarItem(placement: .primaryAction) {
-                Button { model.showDoctor() } label: { Label("Cameras", systemImage: "video") }
-                    .help("Each camera\u{2019}s settings, health and order, in the Cameras window (\u{21E7}\u{2318}C)")
+                Button { model.showSettings(.cameras) } label: { Label("Cameras", systemImage: "video") }
+                    .help("Each camera\u{2019}s settings, health and order, in Settings (\u{21E7}\u{2318}C)")
                     .disabled(model.config == nil)
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -384,6 +377,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.addingCamera) { AddCameraSheet() }
         // A camera's zones, from a tile's or an event's menu.
         .sheet(item: $model.zoneEditing) { ZoneEditingSheet(editing: $0) }
+        .sheet(item: $model.cameraSettingsPanel) { CameraSettingsPanel(panel: $0) }
         // The Ponds paired with this one, and which are connected, for the switcher: every 10 s (every 2 s until the
         // service first answers).
         .task {
@@ -416,7 +410,8 @@ struct ContentView: View {
             }
         }
         .task {
-            if launchArgument("--settings") != nil { openSettings() }
+            // --settings PAGE: the Settings window, open at that page.
+            if let page = launchArgument("--settings").flatMap(SettingsPage.init(name:)) { model.showSettings(page) }
             // --window WIDTHxHEIGHT: the main window that size (for trying narrow windows, and pictures of them).
             if let size = launchArgument("--window")?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 {
                 try? await Task.sleep(for: .milliseconds(300))
@@ -427,17 +422,18 @@ struct ContentView: View {
                     window.setFrame(frame, display: true)
                 }
             }
-            // --camera ID: that camera's settings, open (for trying them out, and pictures of them).
-            if let id = launchArgument("--camera") { model.showCameraSettings(id) }
+            // --camera ID: that camera's settings panel, open over the main window (for trying it out, and pictures of
+            // it).
+            if let id = launchArgument("--camera") { model.editCameraSettings(id) }
             // --doctor [ID [settings]|recorder]: the camera window, open (at that camera's doctor or settings, or the
             // recorder).
             if let at = CommandLine.arguments.firstIndex(of: "--doctor") {
                 let args = CommandLine.arguments
                 let next = at + 1 < args.count ? args[at + 1] : ""
                 if next == "recorder" {
-                    model.showDoctor(.recorder)
+                    model.showSettings(.recorder)
                 } else if next.hasPrefix("-") || next.isEmpty {
-                    model.showDoctor(.cameras)
+                    model.showSettings(.cameras)
                 } else {
                     model.showCamera(next, tab: at + 2 < args.count && args[at + 2] == "settings" ? .settings : .doctor)
                 }
@@ -606,7 +602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let recorder = response.notification.request.content.userInfo["doctor"] as? String == "recorder"
         await MainActor.run {
-            AppModel.current?.showDoctor(recorder ? .recorder : .cameras)
+            AppModel.current?.showSettings(recorder ? .recorder : .cameras)
         }
     }
 

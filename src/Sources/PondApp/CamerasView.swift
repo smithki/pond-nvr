@@ -536,7 +536,13 @@ struct AddCameraSheet: View {
 /// here on the page.
 struct CameraSettingsPage: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     let camera: Config.Camera
+    /// As the panel over the main window (from wherever the camera is: CameraSettingsPanel), not the Settings window's
+    /// page: its everyday settings only (what it is, HomeKit, recording, detection and zones), its name over them,
+    /// Cancel, and Save closing it; the rest (login, streams, device, what it's learnt, removing it) behind All
+    /// Settings….
+    var panel = false
     @FocusState private var focused: Field?
     enum Field { case password, address }
     @State private var name = ""
@@ -630,13 +636,14 @@ struct CameraSettingsPage: View {
 
                 detectionSection
 
-                moreSection
+                if !panel { moreSection }
             }
             .pageForm()
 
             footer
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: panel ? 600 : nil, height: panel ? 640 : nil)
+        .frame(maxWidth: panel ? nil : .infinity, maxHeight: panel ? nil : .infinity)
         // A new address for the camera moves the stream addresses with it (those on its old address).
         .onChange(of: host) { old, new in
             func moved(_ url: String) -> String {
@@ -734,7 +741,7 @@ struct CameraSettingsPage: View {
 
     /// Done with it: the page stays, as saved (or, removed, goes to all cameras).
     func finish(removed: Bool = false) {
-        if removed { model.doctorPage = .cameras } else { load() }
+        if panel { dismiss() } else if removed { model.settingsPage = .cameras } else { load() }
     }
 
     /// Whether anything Save applies differs from what's saved.
@@ -1128,9 +1135,19 @@ struct CameraSettingsPage: View {
     /// checks a new password itself.
     var header: some View {
         HStack {
-            Text("\(camera.id) · \(camera.username)@\(camera.host)")
-                .foregroundStyle(.secondary)
+            if panel {
+                // (No window's title over the panel: its name here.)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name.isEmpty ? camera.name : name).font(.title2.bold()).foregroundStyle(.primary)
+                    Text("\(camera.id) · \(camera.username)@\(camera.host)").foregroundStyle(.secondary)
+                }
                 .lineLimit(1)
+                .padding(.bottom, 6)
+            } else {
+                Text("\(camera.id) · \(camera.username)@\(camera.host)")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Spacer()
             // Held but unseen, as the Doctor tab's buttons are tall: the first card starts where it does there, so
             // switching tabs nothing moves.
@@ -1142,9 +1159,18 @@ struct CameraSettingsPage: View {
 
     var footer: some View {
         HStack {
-            // Apart from Save and Cancel, so it is not pressed by mistake.
-            Button("Remove Camera…", role: .destructive) { confirmRemove = true }
-                .foregroundStyle(.red)
+            if panel {
+                // The rest of its settings, and its doctor, in the Settings window (what's changed here not kept).
+                Button("All Settings\u{2026}") {
+                    dismiss()
+                    model.showCamera(camera.id, tab: .settings)
+                }
+                .help("All of \(camera.name)\u{2019}s settings, and its doctor, in the Settings window")
+            } else {
+                // Apart from Save and Revert, so it is not pressed by mistake.
+                Button("Remove Camera…", role: .destructive) { confirmRemove = true }
+                    .foregroundStyle(.red)
+            }
             Spacer()
             if saving {
                 ProgressView().controlSize(.small)
@@ -1156,8 +1182,12 @@ struct CameraSettingsPage: View {
                 Label("Saved", systemImage: "checkmark.circle.fill")
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
-            Button("Revert") { load() }
-                .disabled(!changed || saving)
+            if panel {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            } else {
+                Button("Revert") { load() }
+                    .disabled(!changed || saving)
+            }
             Button("Save") { Task { await save() } }
                 .keyboardShortcut(.defaultAction)
                 .disabled(problem != nil || !changed || saving)
@@ -1231,7 +1261,7 @@ struct CameraSettingsPage: View {
         if newID != camera.id {
             guard model.rename(camera.id, to: newID) else { return false }
             // Renamed on its page: the page follows it.
-            model.doctorPage = .camera(newID)
+            model.settingsPage = .camera(newID)
         }
         finish()
         return true

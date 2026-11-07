@@ -55,7 +55,7 @@ struct HomeKitBadge: View {
     func perform(_ action: HomeKitText.Action) {
         switch action {
         case .startService: model.applyHomeKitChange()
-        case .cameraSettings: model.showCameraSettings(camera.id)
+        case .cameraSettings: model.editCameraSettings(camera.id)
         case .showLog: HomeKitText.openLog()
         }
     }

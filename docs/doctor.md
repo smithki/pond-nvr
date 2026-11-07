@@ -1,6 +1,6 @@
 # The camera doctor
 
-Settings › **Doctor** says how each camera is doing: what's going wrong, since when, the evidence, and what to try. It works the same for every make, from what Pond already sees of a camera while recording it. The doctor asks nothing more of a camera unless you run a check.
+In Settings › Cameras, each camera's **Doctor** says how it's doing: what's going wrong, since when, the evidence, and what to try. It works the same for every make, from what Pond already sees of a camera while recording it. The doctor asks nothing more of a camera unless you run a check.
 
 ## What it's built from
 
@@ -42,7 +42,7 @@ The figures above are the defaults. **Thresholds**, under the overview's cameras
 ## Where findings show
 
 - **The toolbar's state** says when anything needs attention, and its overview lists it with the fix (Doctor, for a camera, opens it here).
-- **The Cameras window** (⇧⌘C: Pond › Cameras…, the main window's Cameras button, the top of Settings › General, or *Cameras…* in the overview and *Open Cameras…* in the menu bar) lists the recorder and every camera with its state, down its side (drag cameras to put them in order; Add Camera… under the list), to keep open beside the live view or the timeline while working something out. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
+- **Settings › Cameras** (⇧⌘C: Pond › Cameras…, the main window's Cameras button, *Cameras…* in the overview and *Open Cameras…* in the menu bar; Cameras in Settings' sidebar slides its list over to them) lists the recorder and every camera with its state, down its side (drag cameras to put them in order; Add Camera… under the list), to keep open beside the live view or the timeline while working something out. A camera's own page shows its findings, its last 24 hours as charts (frame rate, and interruptions each hour), and what happened to it. That list shows problems by default and **Everything** on request, as the recorder's log does.
 - **A camera's tile and its row in the camera list** carry a mark (a stethoscope, red for a problem, orange for a warning). Hovering says what's wrong, and clicking opens the doctor at the camera. Notices don't get a mark, and neither do findings you've ignored.
 - **Ignore** on a finding keeps it in the doctor, dimmed, but takes it off the camera's tile and row. It's per camera, for findings you know about and can't fix.
 
@@ -63,7 +63,7 @@ For a camera that records to HomeKit Secure Video, a camera's page also says whe
 
 If clips are sent but never appear in the Home app, while another camera's do, the home hub's recording setup for that camera may be stuck. It happened with a doorbell: the hub took valid clips, notified about them, and kept none. The fix is to give the camera a fresh HomeKit identity:
 
-1. In Pond, the camera's Settings in the Cameras window (⇧⌘C, or **Camera Settings…** on its tile) › **Remove from HomeKit…** (or `pond homekit reset ID`).
+1. In Pond, **Camera Settings…** on its tile (or its Settings tab in Settings › Cameras) › **Remove from HomeKit…** (or `pond homekit reset ID`).
 2. In the Home app, remove the accessory too.
 3. In Pond, **Add to the Home App…**, and add it with its new setup code. Its Home app settings (room, notifications, Recording Options, automations) are set up again.
 
