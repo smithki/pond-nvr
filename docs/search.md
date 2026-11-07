@@ -38,7 +38,7 @@ Sentences come from the on-device Foundation Models only, never Private Cloud Co
 
 ## The picture model
 
-SigLIP 2 base (Google's `google/siglip2-base-patch16-224`, Apache-2.0), converted to Core ML by `scripts/convert-siglip.py`: an image encoder (88 MB, 8-bit) and a text encoder (270 MB, mostly its vocabulary), with Gemma's tokenizer. It's too big for the repository, so it's made locally and built into the app when it's there:
+SigLIP 2 base (Google's `google/siglip2-base-patch16-224`, Apache-2.0), converted to Core ML by `scripts/convert-siglip.py`: an image encoder (88 MB, 8-bit) and a text encoder (270 MB, mostly its vocabulary), with Gemma's tokenizer. It's too big for the repository, so it's made locally: the first `make app` makes it (`scripts/search-model.sh`: once, into a Python environment of its own in `.build/siglip-venv`, downloading SigLIP 2 and the converter's packages, a few GB, for a few minutes) and every `make app` builds it in. Without Python or the network, the app is built without it and says so, and it's tried again next time; `SEARCH_MODEL=0 make app` skips it. By hand:
 
 ```sh
 python3 -m venv /tmp/siglip
@@ -49,6 +49,17 @@ make app                                                             # builds it
 ```
 
 The script records reference values (phrases' tokens and embeddings, a picture's embedding) that the Swift side is tested against when the model is present (`swift test --filter SigLIPTests`). A copy of Pond without it searches by what was found and the sentences.
+
+### For releases and CI (not done yet)
+
+Making the model on each machine suits a developer's first build, not releases: the converter's packages are mostly unpinned (only torch and numpy are), so two machines converting a month apart can make slightly different models, and a release's embeddings must stay comparable with those its users' databases already hold; and a clean CI runner would download a few GB and depend on Hugging Face for every release. What releases need instead:
+
+- **One model, made once, published.** The four files (`siglip2-image.mlpackage`, `siglip2-text.mlpackage`, `siglip2-tokenizer.json`, `siglip2.json`) converted on purpose and published as one archive with a version of its own (a GitHub release used only for it, such as `search-model-siglip2-v1`), never remade by a build.
+- **Pinned in the repository.** A small lock file (such as `models/search.lock`) naming the archive's URL and SHA-256. `make app` downloads it (about 390 MB, seconds), checks the hash and unpacks it into `models/search/`, and refuses one that doesn't match; converting stays as a fallback for a fork without access, or is dropped.
+- **Cached by CI**, keyed by the lock file's hash, so a runner downloads it once.
+- **A new version only on purpose.** `scripts/search-model.sh` (or a `--convert` of it) makes a new one: convert, check with `convert-siglip.py --check`, run `SigLIPTests`, publish, bump the lock file. A change of model, or of its conversion, changes its embeddings. The database already keeps the manifest's name beside each embedding (`embedder`, now `SigLIP 2 base`) and the service embeds an event again when it differs; so the published model's name has to carry its version (`SigLIP 2 base v1`), or a new conversion under the same name would be compared with the old one's embeddings.
+- **Its licence with it.** SigLIP 2 is Apache-2.0: the archive and the app carry its licence and a NOTICE saying it was converted to Core ML and quantized, and by whom.
+- **In the app or on first use**, as the signed release settles (roadmap: A signed, notarized release): built in, a release is about 390 MB bigger; downloaded on first use, the same lock file says what the app fetches and checks.
 
 MobileCLIP, which this was first planned with, is left out: Apple's licence for its weights is for research.
 

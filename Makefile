@@ -23,7 +23,8 @@ SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
-	@echo "make app            build dist/Pond NVR.app (the settings app, with pond inside for the login service)"
+	@echo "make app            build dist/Pond NVR.app (the settings app, with pond inside for the login service);"
+	@echo "                    the first time, it also makes search's picture model (a few minutes; SEARCH_MODEL=0 skips)"
 	@echo "make check          no footage in the repository; compile everything, tests included, with warnings as errors"
 	@echo "make hooks          once per checkout: a commit hook that refuses footage, pictures and databases"
 	@echo "make test           run the tests here (they write only temporary files, so a Mac is fine)"
@@ -74,8 +75,10 @@ app: build
 	  xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Models" >/dev/null && \
 	  cp "$${m%.mlpackage}.json" "$(APP)/Contents/Resources/Models/"; \
 	done
-	@# Search's model (models/search/, made by scripts/convert-siglip.py; not in the repository), when it's there:
-	@# without it, search works on what was found and the descriptions alone.
+	@# Search's model (models/search/, made by scripts/convert-siglip.py; not in the repository): made on the first
+	@# make app (scripts/search-model.sh: once, a few minutes; SEARCH_MODEL=0 skips it), then built in. Without it
+	@# (not made, or skipped), search works on what was found and the descriptions alone.
+	@scripts/search-model.sh
 	@rm -rf "$(APP)/Contents/Resources/Search"
 	@if [ -e models/search/siglip2.json ]; then \
 	  mkdir -p "$(APP)/Contents/Resources/Search" && \
