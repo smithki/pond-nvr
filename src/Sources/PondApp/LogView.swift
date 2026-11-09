@@ -71,7 +71,117 @@ enum LogKindFilter: String, CaseIterable {
     }
 }
 
+/// The recorder's log on its page: a card of its newest lines (events: what the recorder did, not every detail), with
+/// Show All… for the whole log, to read back and filter, in a sheet (FullLogSheet). The card doesn't scroll, so a page
+/// never has a scroll bar inside its own.
 struct LogSection: View {
+    @Environment(AppModel.self) private var model
+    let log: ServiceLog
+    /// More lines than the card shows: its top fades (PeekFade).
+    @State private var overflows = false
+    /// At most this many of the newest lines are made into the card's text: more than it shows, few enough to lay
+    /// out again at once as the page is resized.
+    static let peekLines = 200
+
+    var body: some View {
+        PageCard {
+            CardHeading(title: "Log") {
+                Button("Show All\u{2026}") { model.fullLog = .recorder }
+                    .help("The whole log, to read back and filter")
+                    .disabled(log.lines.isEmpty)
+            }
+        } content: {
+            let rows = log.lines.filter { LogKindFilter.events.includes($0.kind) }.suffix(Self.peekLines)
+            Group {
+                if rows.isEmpty {
+                    Text("Nothing logged yet.").foregroundStyle(.secondary)
+                } else {
+                    LogText(text: { LogFormat.text(Array(rows), source: { LogBrowser.name(of: $0, cameras: model.config?.cameras ?? []) },
+                                                   dayTitle: LogBrowser.dayTitle) },
+                            first: rows.first?.id ?? 0, last: rows.last?.id ?? 0, filter: "peek",
+                            wantsEarlier: false, loadEarlier: {}, peek: true,
+                            overflowed: { overflows = $0 })
+                        .modifier(PeekFade(on: overflows))
+                        .padding(.vertical, 10)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// Which whole log is open in its sheet over the Settings window.
+enum FullLog: Identifiable, Hashable {
+    case recorder
+    /// A camera's What happened.
+    case camera(String)
+
+    var id: String {
+        switch self {
+        case .recorder: "recorder"
+        case let .camera(id): "camera \(id)"
+        }
+    }
+}
+
+/// A whole log, over the Settings window (Show All… on its card): large, the only thing scrolling, with its filters.
+struct FullLogSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let which: FullLog
+    /// The recorder's log, read for the sheet (the page's keeps reading its own while it's open).
+    @State private var log = ServiceLog()
+    @State private var everything = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch which {
+            case .recorder:
+                Text("Recorder Log").font(.title2.bold()).padding([.horizontal, .top], 20)
+                LogBrowser(log: log)
+                    .padding(.horizontal, 20)
+                    .task {
+                        while !Task.isCancelled {
+                            log.refresh()
+                            try? await Task.sleep(for: .seconds(3))
+                        }
+                    }
+            case let .camera(id):
+                let camera = model.config?.cameras.first { $0.id == id }
+                HStack {
+                    Text("What Happened to \(camera?.name ?? id)").font(.title2.bold())
+                    Spacer()
+                    // What went wrong by default, everything on asking (as the log's kinds).
+                    Picker("Show", selection: $everything) {
+                        Text("Problems").tag(false)
+                        Text("Everything").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                .padding(20)
+                Divider()
+                IncidentList(incidents: model.doctor.incidents(of: id), everything: everything)
+                    .padding(.horizontal, 20)
+                    // A list of its own for each filter: each opens at its newest.
+                    .id(everything)
+                    .frame(maxHeight: .infinity)
+                Divider()
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 760, idealWidth: 880, maxWidth: .infinity, minHeight: 480, idealHeight: 600, maxHeight: .infinity)
+    }
+}
+
+/// The whole recorder log: filters for what a line is about, what kind it is and what it says; the lines, reading
+/// earlier ones in when scrolled to the top; and where the log is.
+struct LogBrowser: View {
     @Environment(AppModel.self) private var model
     let log: ServiceLog
     /// The source shown; empty: all of them.
@@ -87,7 +197,9 @@ struct LogSection: View {
         return known + log.sources.subtracting(known).subtracting([""]).sorted()
     }
 
-    func name(of source: String) -> String {
+    func name(of source: String) -> String { Self.name(of: source, cameras: cameras) }
+
+    static func name(of source: String, cameras: [Config.Camera]) -> String {
         switch source {
         case Brand.command: "Recorder"
         case "homekit": "HomeKit"
@@ -104,13 +216,8 @@ struct LogSection: View {
         }
     }
 
-    /// A card of its own (PageCard), at the foot of its page: its filters, the lines taking the card's room, and
-    /// where the log is.
     var body: some View {
-        PageCard {
-            Text("Log")
-        } content: {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Picker("Source", selection: $source) {
                     Text("All sources").tag("")
@@ -129,10 +236,10 @@ struct LogSection: View {
                     .textFieldStyle(.roundedBorder)
                     .labelsHidden()
             }
-            .padding(10)
-            Divider().padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            Divider()
             lines
-            Divider().padding(.horizontal, 10)
+            Divider()
             HStack {
                 Text(LaunchAgent.logPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                     .font(.callout)
@@ -149,8 +256,7 @@ struct LogSection: View {
                 Button("Open Log") { NSWorkspace.shared.open(URL(fileURLWithPath: LaunchAgent.logPath)) }
             }
             .disabled(log.lines.isEmpty)
-            .padding(10)
-            }
+            .padding(.vertical, 10)
         }
     }
 
@@ -166,7 +272,7 @@ struct LogSection: View {
             } else {
                 // Scrolled to the top, earlier lines are read in above. The text is made from the lines only when they
                 // or the filters change (not each time the page is laid out, as it is on every step of a resize).
-                LogText(text: { LogFormat.text(rows, source: name(of:), dayTitle: dayTitle) },
+                LogText(text: { LogFormat.text(rows, source: name(of:), dayTitle: Self.dayTitle) },
                         first: rows.first?.id ?? 0, last: rows.last?.id ?? 0, filter: "\(source)|\(kind)|\(search)",
                         wantsEarlier: log.hasEarlier, loadEarlier: { log.loadEarlier() })
             }
@@ -181,7 +287,7 @@ struct LogSection: View {
         return parse
     }()
 
-    func dayTitle(_ day: Substring) -> String {
+    static func dayTitle(_ day: Substring) -> String {
         guard let date = Self.dayFormat.date(from: String(day)) else { return String(day) }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
@@ -265,8 +371,12 @@ struct LogText: NSViewRepresentable {
     /// Whether there are earlier lines to read, and reading them.
     let wantsEarlier: Bool
     let loadEarlier: () -> Void
+    /// The newest lines only, on a page (LogSection): no scroll bar, and the wheel over them moves the page.
+    var peek = false
+    /// Told whether there are more lines than the view shows.
+    var overflowed: (Bool) -> Void = { _ in }
 
-    /// Space above the first line and (at least) below the last: none, as the form's row has its own.
+    /// Space above the first line and (at least) below the last: none, as the card's separators have room of their own.
     static let top = 0.0, minBottom = 0.0
 
     @MainActor
@@ -282,6 +392,11 @@ struct LogText: NSViewRepresentable {
         /// Following the newest lines: at the end until scrolled away from it, and kept there through
         /// resizes and new lines.
         var pinned = true
+        /// The newest lines only (LogText.peek): the last line at the foot, the top cut where it falls.
+        var peek = false
+        /// Told whether the lines are more than the view shows (so the card fades its top).
+        var overflowed: (Bool) -> Void = { _ in }
+        private var overflows: Bool?
         private var size = NSSize.zero
         weak var scroll: NSScrollView?
 
@@ -312,7 +427,13 @@ struct LogText: NSViewRepresentable {
             let height = clip.bounds.height
             guard height > 0 else { return }
             let lines = view.frame.height - LogText.top - view.bottomSpace
-            if lines + LogText.top + LogText.minBottom > height {
+            let more = lines + LogText.top + LogText.minBottom > height
+            if more != overflows {
+                overflows = more
+                let overflowed = overflowed
+                DispatchQueue.main.async { overflowed(more) }
+            }
+            if more, !peek {
                 // Scrolled to the end, the top is at top + lines + space - height: a whole number of rows down.
                 let row = LogFormat.row
                 var space = (height - lines).truncatingRemainder(dividingBy: row)
@@ -337,9 +458,9 @@ struct LogText: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = peek ? PeekScrollView() : NSScrollView()
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
+        scroll.hasVerticalScroller = !peek
         scroll.autohidesScrollers = true
         // TextKit 1: the whole text laid out, so its height (and where its end is) is known at once.
         let view = LogTextView(usingTextLayoutManager: false)
@@ -352,6 +473,7 @@ struct LogText: NSViewRepresentable {
         view.autoresizingMask = [.width]
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = true
+        view.textContainer?.lineFragmentPadding = 0
         scroll.documentView = view
         scroll.contentView.postsBoundsChangedNotifications = true
         let coordinator = context.coordinator
@@ -370,6 +492,8 @@ struct LogText: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let was = context.coordinator
         was.loadEarlier = loadEarlier
+        was.peek = peek
+        was.overflowed = overflowed
         // Whatever was asked for has come (if it was all filtered out, and the top is still in view, more).
         was.asked = false
         was.wantsEarlier = wantsEarlier
@@ -414,13 +538,19 @@ final class LogTextView: NSTextView {
         didSet {
             // The inset counts above and below; the text is drawn from `top` (textContainerOrigin), so the
             // rest of twice the inset is below it.
-            textContainerInset = NSSize(width: 4, height: (LogText.top + bottomSpace) / 2)
+            textContainerInset = NSSize(width: 0, height: (LogText.top + bottomSpace) / 2)
             sizeToFit()
         }
     }
 
-    override var textContainerOrigin: NSPoint { NSPoint(x: 4, y: LogText.top) }
+    // Its lines start where the form's rows' labels do (the row's inset is the card's margin).
+    override var textContainerOrigin: NSPoint { NSPoint(x: 0, y: LogText.top) }
 }
 
-
-
+/// The scroll view of a log's newest lines on a page (LogText.peek): kept at the newest, never scrolled by the wheel,
+/// which goes on to the page.
+final class PeekScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+}

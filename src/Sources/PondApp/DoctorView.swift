@@ -11,7 +11,6 @@ import SwiftUI
 
 struct DoctorView: View {
     @Environment(AppModel.self) private var model
-    @State private var everything = false
     /// Ignored findings shown: they're folded away under the others until asked for.
     @State private var showIgnored = false
     /// The check's sheet, over the page: a check running (Run Check…), or the last one's details (Details…).
@@ -24,16 +23,14 @@ struct DoctorView: View {
         var id: String { camera.id }
     }
 
-    static let shortestList = 96.0
-
     var cameras: [Config.Camera] { model.config?.cameras ?? [] }
     var doctor: CameraDoctor { model.doctor }
 
     // (Refreshed by its window, every 5 s.)
     var body: some View {
         if doctor.hasRecords, let id = model.doctorCamera, let camera = cameras.first(where: { $0.id == id }) {
-            // A camera's page fits the window: what happened takes the room the rest leaves (only it scrolls).
-            FittedPage(shortest: Self.shortestList) {
+            // How it is, then what happened (a card of one height on every page; the page scrolls).
+            LogPage {
                 cameraSections(camera)
             } card: {
                 whatHappened(camera)
@@ -190,27 +187,19 @@ struct DoctorView: View {
         }
     }
 
-    /// What happened to the camera, in a card taking the rest of the page.
+    /// What went wrong with the camera lately, in a card at the page's foot (its newest problems; Show All… has the
+    /// rest, and everything else that happened, in a sheet: FullLogSheet).
     func whatHappened(_ camera: Config.Camera) -> some View {
         PageCard {
-            HStack {
-                Text("What happened")
-                Spacer()
-                // As the log: what went wrong by default, everything on asking.
-                Picker("Show", selection: $everything) {
-                    Text("Problems").tag(false)
-                    Text("Everything").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .font(.body)
+            CardHeading(title: "What happened") {
+                Button("Show All\u{2026}") { model.fullLog = .camera(camera.id) }
+                    .help("Everything that happened to \(camera.name) this week")
             }
         } content: {
-            IncidentList(incidents: doctor.incidents(of: camera.id), everything: everything)
-                // A list of its own for each camera and each filter: each opens at its newest, as the first did (the
-                // same scroll view, given other lines, kept where it was).
-                .id("\(camera.id) \(everything)")
+            IncidentList(incidents: doctor.incidents(of: camera.id), everything: false, peek: true)
+                // A list of its own for each camera: each opens at its newest (the same scroll view, given other
+                // lines, kept where it was).
+                .id(camera.id)
         }
     }
 }
@@ -438,6 +427,10 @@ struct IncidentStrip: View {
 struct IncidentList: View {
     let incidents: [HealthIncident]
     let everything: Bool
+    /// The newest only, on a page (DoctorView.whatHappened): not scrolling, no scroll bar.
+    var peek = false
+    /// More than it shows (on a page): its top fades (PeekFade).
+    @State private var overflows = false
 
     static let problems: Set<HealthIncident.Kind> = [.stalled, .unreachable, .loginRefused, .failed, .controlFailed, .privacyMode, .wakeFailed,
                                                      .restarted]
@@ -464,12 +457,24 @@ struct IncidentList: View {
                             row(incident).id(index)
                         }
                     }
-                    .padding(10)
+                    .padding(.vertical, 10)
                 }
-                // At the newest, as the log opens, and kept there as the list grows to fill the page (it's measured
-                // after it first appears: grown, it kept its top, and the newest went out of sight).
-                .defaultScrollAnchor(.bottom)
+                // A few lines start at the card's top, the newest last (not at its foot under an empty space). More
+                // than it holds: opened at the newest, and kept there as lines come (scrolled up for earlier ones).
+                .defaultScrollAnchor(.top, for: .alignment)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                // The scroll bar clear of the card's rounded corners and its edge.
+                .contentMargins(.vertical, 10, for: .scrollIndicators)
+                .contentMargins(.trailing, 4, for: .scrollIndicators)
+                .scrollDisabled(peek)
+                .scrollIndicators(peek ? .never : .automatic)
+                .onScrollGeometryChange(for: Bool.self) { $0.contentSize.height > $0.containerSize.height + 1 } action: { _, more in
+                    overflows = more
+                }
+                .modifier(PeekFade(on: peek && overflows))
+                // A few lines don't scroll (or bounce) at all.
+                .scrollBounceBehavior(.basedOnSize)
                 .onAppear { scroller.scrollTo(rows.count - 1, anchor: .bottom) }
                 .onChange(of: rows.count) { scroller.scrollTo(rows.count - 1, anchor: .bottom) }
             }

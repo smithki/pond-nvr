@@ -12,8 +12,8 @@ struct RecorderView: View {
     @State private var media: MediaBudget.Report?
 
     var body: some View {
-        // The page fits the window: the log takes the room the rest leaves (only it scrolls).
-        FittedPage(shortest: 140) {
+        // The recorder, then its log (a card of one height on every page; the page scrolls).
+        LogPage {
             Section {
                 LabeledContent("Status") {
                     switch model.serviceState {

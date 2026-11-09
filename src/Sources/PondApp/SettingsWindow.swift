@@ -80,17 +80,25 @@ extension AppModel {
 
 struct SettingsWindow: View {
     static let id = "settings"
-    /// As it first opens; it can be made bigger, not smaller than `least`.
-    static let size = CGSize(width: 1100, height: 760)
-    static let least = CGSize(width: 960, height: 680)
     /// The sidebar's width: dragged between `least` and `most`, never closed.
     static let sidebarWidth = (least: 220.0, ideal: 250.0, most: 340.0)
+    /// The page's width as the window first opens: the cards at their widest (PageMargin.readable) with room to
+    /// either side.
+    static let pageWidth = 850.0
+    /// As it first opens: the sidebar at its ideal width, the page at `pageWidth`.
+    static let size = CGSize(width: sidebarWidth.ideal + pageWidth, height: 760)
+    static let least = CGSize(width: 960, height: 680)
+    /// The widest it goes: the sidebar at its widest beside the page at `pageWidth`. Wider only ever widened the
+    /// margins (the cards stop at PageMargin.readable).
+    static let mostWidth = sidebarWidth.most + pageWidth
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var adding = false
     /// The sidebar's Cameras layer shown (slid in over its first): on opening at a camera or the recorder, on
     /// choosing Cameras; back with its "Settings" row (the page stays until another is chosen).
     @State private var camerasShown = false
+    /// The first layer's page last shown, gone back to from the Cameras layer.
+    @State private var lastPondPage = SettingsPage.general
     /// Always both columns: set back to it if the split view closes the sidebar all the same (there's no toggle).
     @State private var columns = NavigationSplitViewVisibility.all
 
@@ -144,11 +152,13 @@ struct SettingsWindow: View {
         }
         .onChange(of: columns) { if columns != .all { columns = .all } }
         // Its bounds where a drag keeps to them: AppKit's split view item (SwiftUI's own column width isn't kept to).
-        .background(SidebarBounds(least: Self.sidebarWidth.least, most: Self.sidebarWidth.most))
+        .background(SidebarBounds(least: Self.sidebarWidth.least, ideal: Self.sidebarWidth.ideal, most: Self.sidebarWidth.most))
         // Opened at a camera or the recorder (from Live, the overview, a link): on the Cameras layer.
         .onChange(of: model.settingsPage, initial: true) { _, page in
+            if !page.isCameras { lastPondPage = page }
             if page.isCameras != camerasShown { withAnimation(Self.slide) { camerasShown = page.isCameras } }
         }
+        .onChange(of: camerasShown, initial: true) { SidebarProbe.camerasShown = camerasShown }
         // The doctor's findings for the list's dots: every 5 s while it's open (every 30 s otherwise, from the main
         // window).
         .task {
@@ -161,6 +171,7 @@ struct SettingsWindow: View {
         .task { await model.refreshStorageOutlook() }
         .onAppear { AppModel.openWindow = { openWindow(id: $0) } }
         .sheet(isPresented: $adding) { AddCameraSheet() }
+        .sheet(item: $model.fullLog) { FullLogSheet(which: $0) }
         // What couldn't be saved, said here (where it was changed), as in the main window.
         .alert("Not saved", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK") { model.alert = nil }
@@ -178,12 +189,13 @@ struct SettingsWindow: View {
                                 set: { page in
                                     guard let page else { return }
                                     model.settingsPage = page
-                                    // Cameras chosen again (back from its layer, the page still one of its): in again.
+                                    // Cameras chosen: in to its layer.
                                     if page.isCameras { withAnimation(Self.slide) { camerasShown = true } }
                                 })) {
-            Section(model.thisPondName) {
+            Section {
                 SidebarRow(title: "General", subtitle: "Name, appearance, menu bar, search", symbol: "gearshape")
                     .tag(SettingsPage.general)
+                    .background(SidebarProbe(layer: "settings"))
                 let storage = storageState
                 SidebarRow(title: "Storage", subtitle: storage.words, symbol: "externaldrive", dot: storage.dot)
                     .tag(SettingsPage.storage)
@@ -193,11 +205,21 @@ struct SettingsWindow: View {
                 let all = camerasState(cameras)
                 SidebarRow(title: "Cameras", subtitle: all.words, symbol: "video", dot: all.dot, drills: true)
                     .tag(SettingsPage.cameras)
-            }
-            Section {
+                // In line with the rest (a section of its own stood it apart, with more room above it than between
+                // the others).
                 SidebarRow(title: "Advanced", subtitle: advancedWords, symbol: "gearshape.2")
                     .tag(SettingsPage.advanced)
+            } header: {
+                // As tall as the Cameras layer's back button's heading (headingHeight).
+                Text(model.thisPondName)
+                    .frame(maxWidth: .infinity, minHeight: Self.headingHeight, maxHeight: Self.headingHeight, alignment: .leading)
             }
+        }
+        // → on Cameras goes in, as a click does.
+        .onKeyPress(.rightArrow) {
+            guard model.settingsPage.isCameras else { return .ignored }
+            withAnimation(Self.slide) { camerasShown = true }
+            return .handled
         }
     }
 
@@ -211,15 +233,28 @@ struct SettingsWindow: View {
             Section {
                 SidebarRow(title: "Recorder", subtitle: model.recorderWords, symbol: "record.circle", dot: recorderColour)
                     .tag(SettingsPage.recorder)
+                    .background(SidebarProbe(layer: "cameras"))
                 let all = camerasState(cameras)
                 SidebarRow(title: "All Cameras", subtitle: all.words, symbol: "square.grid.2x2", dot: all.dot)
                     .tag(SettingsPage.cameras)
             } header: {
-                Button { withAnimation(Self.slide) { camerasShown = false } } label: {
+                // A control of its own, as the Add Camera capsule under the list is: flat, small enough to stand in
+                // the heading's place without moving the rows under it.
+                Button { back() } label: {
                     Label(model.thisPondName, systemImage: "chevron.left")
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.borderless)
-                .help("Back to this Pond\u{2019}s settings")
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                // Laid out as tall as the heading it stands in for (the capsule is 1 pt taller, and moved the rows
+                // under it: measured, sidebar.txt).
+                // Clear of the first row's highlight under it (they touched), as tall as the first layer's heading.
+                .frame(maxWidth: .infinity, minHeight: Self.headingHeight, maxHeight: Self.headingHeight, alignment: .leading)
+                .keyboardShortcut("[", modifiers: .command)
+                .help("Back to this Pond\u{2019}s settings (\u{2318}[)")
+                .textCase(nil)
             }
             Section("Cameras") {
                 ForEach(cameras) { camera in
@@ -250,6 +285,11 @@ struct SettingsWindow: View {
                 }
             }
         }
+        // ← goes back, as the heading's button does.
+        .onKeyPress(.leftArrow) {
+            back()
+            return .handled
+        }
         // Add Camera, under the list: a plain capsule (the system's bordered button, flat, not glass), centred.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button { adding = true } label: { Label("Add Camera\u{2026}", systemImage: "plus") }
@@ -260,6 +300,20 @@ struct SettingsWindow: View {
                 .disabled(model.config == nil)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
+        }
+    }
+
+    /// Each layer's first heading's height: the back button's capsule and room under it, clear of a chosen row's
+    /// highlight; the first layer's the same, so both layers' rows start at one place.
+    static let headingHeight = 28.0
+
+    /// Back to the sidebar's first layer, and to the page of it last shown (General if none): Cameras isn't chosen
+    /// there any more, so choosing it, anywhere on its row, goes in again. (Left chosen, a click on it changed
+    /// nothing: the list says nothing of a click on the row already chosen.)
+    func back() {
+        withAnimation(Self.slide) {
+            camerasShown = false
+            model.settingsPage = lastPondPage
         }
     }
 
@@ -411,12 +465,17 @@ struct SidebarRow: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let dot {
-                Circle().fill(dot).frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
-            }
-            if drills {
+            HStack(spacing: 6) {
+                if let dot {
+                    Circle().fill(dot).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                }
+                // A slot for the chevron on every row, empty where the row doesn't open a list: the dots stand in one
+                // column, on rows with a chevron and without.
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    .frame(width: 8)
+                    .opacity(drills ? 1 : 0)
+                    .accessibilityHidden(!drills)
             }
         }
         .padding(.vertical, 3)
@@ -475,6 +534,7 @@ extension AppModel {
 /// happens; and closed all the same (by anything), it's opened again.
 struct SidebarBounds: NSViewRepresentable {
     let least: Double
+    let ideal: Double
     let most: Double
 
     final class Coordinator {
@@ -497,14 +557,20 @@ struct SidebarBounds: NSViewRepresentable {
                 return
             }
             apply(to: item)
+            // At its ideal width the first time (SwiftUI's ideal isn't kept to: it opened at its least), unless it
+            // was left at another (AppKit keeps the width the sidebar was left at, under the split view's name).
+            if coordinator.item == nil, let split = Self.splitView(in: root) {
+                let left = split.autosaveName.map { UserDefaults.standard.object(forKey: "NSSplitView Subview Frames \($0)") != nil } ?? false
+                if AppDefaults.isDemo || !left { split.setPosition(ideal, ofDividerAt: 0) }
+            }
             // A demo doesn't remember its sidebar's width: AppKit keeps it in the app's own preferences, the real
             // Pond's (AppDefaults).
             if AppDefaults.isDemo, let split = Self.splitView(in: root), split.autosaveName != nil { split.autosaveName = nil }
             guard coordinator.item !== item else { return }
             coordinator.item = item
-            let least = least, most = most
+            let least = least, ideal = ideal, most = most
             let again: (NSSplitViewItem) -> Void = { item in
-                DispatchQueue.main.async { SidebarBounds(least: least, most: most).apply(to: item) }
+                DispatchQueue.main.async { SidebarBounds(least: least, ideal: ideal, most: most).apply(to: item) }
             }
             let reopen: (NSSplitViewItem) -> Void = { item in
                 DispatchQueue.main.async { if item.isCollapsed { item.animator().isCollapsed = false } }
@@ -539,5 +605,20 @@ struct SidebarBounds: NSViewRepresentable {
         }
         for sub in view.subviews { if let item = sidebarItem(in: sub) { return item } }
         return nil
+    }
+}
+
+/// Where a sidebar layer's first row stands in the window, kept for the snapshots' check that both layers' rows
+/// start at the same place (Snapshots, sidebar.txt).
+struct SidebarProbe: View {
+    let layer: String
+    @MainActor static var top: [String: Double] = [:]
+    /// The Cameras layer shown.
+    @MainActor static var camerasShown = false
+
+    var body: some View {
+        Color.clear.onGeometryChange(for: Double.self) { $0.frame(in: .global).minY } action: { y in
+            Self.top[layer] = y
+        }
     }
 }

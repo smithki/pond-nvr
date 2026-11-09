@@ -95,6 +95,8 @@ final class AppModel {
     var zoneEditing: ZoneEditing?
     /// A camera's settings panel, open over the main window.
     var cameraSettingsPanel: CameraPanel?
+    /// A whole log in a sheet over the Settings window (its page shows only the newest lines: Show All…).
+    var fullLog: FullLog?
     /// Which events are new (seen once on screen in Events).
     let seenEvents = EventsSeen(demo: DemoSession.scenario?.name)
     /// Opens a window by its id (SwiftUI's, kept by the views that have it), for what opens one from outside a view:

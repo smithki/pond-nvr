@@ -52,12 +52,15 @@ struct PondApp: App {
                 .preferredColorScheme(appearance.scheme)
                 // Its ideal size as well as its least: with the window sized from its content, the pages' forms'
                 // own ideal widths opened it nearly as wide as the screen, past `defaultSize`.
+                // And its most width (the sidebar at its widest beside a page at its first width), as tall as one likes.
                 .frame(minWidth: SettingsWindow.least.width, idealWidth: SettingsWindow.size.width,
-                       minHeight: SettingsWindow.least.height, idealHeight: SettingsWindow.size.height)
+                       maxWidth: SettingsWindow.mostWidth,
+                       minHeight: SettingsWindow.least.height, idealHeight: SettingsWindow.size.height,
+                       maxHeight: .infinity)
         }
         .defaultSize(SettingsWindow.size)
         .restorationBehavior(AppDefaults.isDemo ? .disabled : .automatic)
-        .windowResizability(.contentMinSize)
+        .windowResizability(.contentSize)
 
         MenuBarExtra(isInserted: $menuBarItem) {
             MenuBarMenu().environment(model)
