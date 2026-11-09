@@ -2,6 +2,7 @@
 // the main window, of each page of the Settings window, and of a camera's settings panel, then quits. The app draws its own windows, so no
 // screen-recording permission is needed (though translucent glass comes out flatter than on screen).
 import AppKit
+import QuartzCore
 import PondCore
 import SwiftUI
 
@@ -66,6 +67,42 @@ enum Snapshots {
         model.showSettings(.recorder)
         try? await Task.sleep(for: .seconds(1.5))
         save(settingsWindow(), to: "\(dir)/cameras-recorder.png")
+        // How long pages take to lay out and draw as the window and the sidebar are resized: 20 steps of each, every
+        // step laid out and drawn at once (as a live resize does, frame by frame); each step's time listed.
+        if let window = settingsWindow(), let root = window.contentView?.superview, let split = firstSplitView(in: root) {
+            func step(_ change: () -> Void) -> Double {
+                let start = CACurrentMediaTime()
+                change()
+                window.layoutIfNeeded()
+                window.displayIfNeeded()
+                return (CACurrentMediaTime() - start) * 1000
+            }
+            func words(_ times: [Double]) -> String {
+                let sorted = times.sorted()
+                return String(format: "median %.1f ms, slowest %.1f ms, all %.0f ms  [", sorted[sorted.count / 2], sorted.last ?? 0, times.reduce(0, +))
+                    + times.map { String(format: "%.0f", $0) }.joined(separator: " ") + "]"
+            }
+            var report = ""
+            var pages: [(SettingsPage, String)] = [(.general, "general"), (.recorder, "recorder")]
+            if let first = model.config?.cameras.first { pages.insert((.camera(first.id), "doctor"), at: 1) }
+            for (page, name) in pages {
+                model.cameraTab = .doctor
+                model.showSettings(page)
+                try? await Task.sleep(for: .seconds(1.5))
+                let frame = window.frame
+                let widths = (1...20).map { frame.width + Double($0) * 20 }
+                let windowTimes = widths.map { width in step { window.setFrame(NSRect(x: frame.minX, y: frame.minY, width: width, height: frame.height), display: false) } }
+                window.setFrame(frame, display: true)
+                try? await Task.sleep(for: .seconds(0.5))
+                let positions = (0..<20).map { SettingsWindow.sidebarWidth.least + Double($0) * 6 }
+                let sidebarTimes = positions.map { position in step { split.setPosition(position, ofDividerAt: 0) } }
+                split.setPosition(SettingsWindow.sidebarWidth.ideal, ofDividerAt: 0)
+                try? await Task.sleep(for: .seconds(0.5))
+                report += "\(name) window: \(words(windowTimes))\n\(name) sidebar: \(words(sidebarTimes))\n"
+            }
+            model.showSettings(.recorder)
+            try? report.write(toFile: "\(dir)/resize-timing.txt", atomically: true, encoding: .utf8)
+        }
         if let first = model.config?.cameras.first {
             model.showCamera(first.id, tab: .doctor)
             try? await Task.sleep(for: .seconds(1.5))

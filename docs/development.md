@@ -20,7 +20,7 @@ make test-docker   # the modules that build on Linux, in a throwaway container
 make app           # dist/Pond NVR.app
 ```
 
-**Pictures of the app.** `POND_SNAPSHOTS=<folder>` makes the app save each view of the main window, each page of the Settings window (this Pond's settings, the recorder, every camera, the first camera's Doctor and Settings, another Pond's camera) and a camera's settings panel as PNGs and quit; it draws its own window, so no screen-recording permission is needed. With `POND_CONFIG` it can show any settings file:
+**Pictures of the app.** `POND_SNAPSHOTS=<folder>` makes the app save each view of the main window, each page of the Settings window (this Pond's settings, the recorder, every camera, the first camera's Doctor and Settings, another Pond's camera) and a camera's settings panel as PNGs and quit, with two reports beside them: `sidebar.txt` (the Settings sidebar's bounds, held as its divider is moved past each end, and that it can't be closed) and `resize-timing.txt` (each step's time, laying out and drawing General, a camera's Doctor and the Recorder as the window and the sidebar are resized in 20 steps; under ~16 ms a step is smooth); it draws its own window, so no screen-recording permission is needed. With `POND_CONFIG` it can show any settings file:
 
 ```sh
 open -n -W --env POND_CONFIG=/tmp/pond/config.json --env POND_SNAPSHOTS=/tmp/pond/shots "dist/Pond NVR.app" --args -ApplePersistenceIgnoreState YES

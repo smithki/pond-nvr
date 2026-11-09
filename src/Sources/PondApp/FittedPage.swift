@@ -1,7 +1,7 @@
 // A page that fits its window (the doctor's camera and recorder pages): the form's sections above, at their own
 // height and not scrolling, then one card under them taking the rest of the window by layout alone (a list that
 // grows and shrinks with the window, never under its shortest). Only a window too short for even that scrolls the
-// whole page. Nothing is measured against itself: the sections' height doesn't depend on the card's, so there's no
+// whole page (the same page: its card's views are kept as the window's resized). Nothing is measured against itself: the sections' height doesn't depend on the card's, so there's no
 // loop of measuring and resizing to settle (or not).
 import SwiftUI
 
@@ -46,9 +46,18 @@ struct FittedPage<Above: View, Card: View>: View {
     @State private var aboveHeight = 0.0
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            page(fills: true)
-            ScrollView { page(fills: false) }.scrollIndicators(.never)
+        // One page whatever the window's height, in a scroll view that scrolls only when the window's too short for it
+        // (sections, and the card at its shortest): the card filling the rest otherwise. (Two pages, one to fill and
+        // one to scroll, chosen between by ViewThatFits, made and filled the card's views anew as a resize went from
+        // one to the other: a long log laid out again from scratch, ~175 ms, every few steps.)
+        GeometryReader { proxy in
+            let fits = proxy.size.height >= aboveHeight + Self.headingGap + shortest + PageMargin.side
+            ScrollView {
+                page(fills: fits)
+                    .frame(height: fits ? proxy.size.height : nil)
+            }
+            .scrollDisabled(fits)
+            .scrollIndicators(.never)
         }
     }
 

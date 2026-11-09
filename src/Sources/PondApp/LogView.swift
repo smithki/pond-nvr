@@ -164,8 +164,9 @@ struct LogSection: View {
             } else if rows.isEmpty {
                 Text("No lines match.").foregroundStyle(.secondary)
             } else {
-                // Scrolled to the top, earlier lines are read in above.
-                LogText(text: LogFormat.text(rows, source: name(of:), dayTitle: dayTitle),
+                // Scrolled to the top, earlier lines are read in above. The text is made from the lines only when they
+                // or the filters change (not each time the page is laid out, as it is on every step of a resize).
+                LogText(text: { LogFormat.text(rows, source: name(of:), dayTitle: dayTitle) },
                         first: rows.first?.id ?? 0, last: rows.last?.id ?? 0, filter: "\(source)|\(kind)|\(search)",
                         wantsEarlier: log.hasEarlier, loadEarlier: { log.loadEarlier() })
             }
@@ -173,10 +174,15 @@ struct LogSection: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    func dayTitle(_ day: Substring) -> String {
+    /// Reads a line's day (made once: a formatter is slow to make).
+    static let dayFormat: DateFormatter = {
         let parse = DateFormatter()
         parse.dateFormat = "yyyy-MM-dd"
-        guard let date = parse.date(from: String(day)) else { return String(day) }
+        return parse
+    }()
+
+    func dayTitle(_ day: Substring) -> String {
+        guard let date = Self.dayFormat.date(from: String(day)) else { return String(day) }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(date: .complete, time: .omitted)
@@ -250,7 +256,8 @@ enum LogFormat {
 /// The log text, selectable, in its own scroll view: at the newest lines, kept there as more come; where it
 /// was, if scrolled up; and the same lines in view when earlier ones are added above.
 struct LogText: NSViewRepresentable {
-    let text: NSAttributedString
+    /// The text, made when it's needed (the lines or filters changed).
+    let text: () -> NSAttributedString
     /// The first and last lines' ids, and the filters: what changed.
     let first: Int
     let last: Int
@@ -375,7 +382,7 @@ struct LogText: NSViewRepresentable {
         let fresh = was.filter != filter || was.first == nil
         let addedAbove = !fresh && first < (was.first ?? first)
         if fresh { was.pinned = true }
-        storage.setAttributedString(text)
+        storage.setAttributedString(text())
         if let container = view.textContainer { view.layoutManager?.ensureLayout(for: container) }
         if was.pinned {
             was.scrollToEnd()
