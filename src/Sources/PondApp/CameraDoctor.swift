@@ -26,14 +26,14 @@ final class CameraDoctor {
     var thresholds: HealthThresholds = CameraDoctor.keptThresholds() {
         didSet {
             guard thresholds != oldValue else { return }
-            UserDefaults.standard.set(try? JSONEncoder().encode(thresholds), forKey: "doctorThresholds")
+            AppDefaults.store.set(try? JSONEncoder().encode(thresholds), forKey: "doctorThresholds")
             diagnose()
         }
     }
     @ObservationIgnored private var config: Config?
 
     static func keptThresholds() -> HealthThresholds {
-        UserDefaults.standard.data(forKey: "doctorThresholds").flatMap { try? JSONDecoder().decode(HealthThresholds.self, from: $0) } ?? .standard
+        AppDefaults.store.data(forKey: "doctorThresholds").flatMap { try? JSONDecoder().decode(HealthThresholds.self, from: $0) } ?? .standard
     }
 
     /// Each camera's last check (Run Check…, or Check All Cameras): what it found, and when.
@@ -42,7 +42,7 @@ final class CameraDoctor {
     private(set) var checking: Set<String> = []
 
     /// "camera|finding", ignored.
-    private(set) var ignored: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "doctorIgnored") ?? [])
+    private(set) var ignored: Set<String> = Set(AppDefaults.store.stringArray(forKey: "doctorIgnored") ?? [])
 
     static let incidentsKept: TimeInterval = 7 * 86400
     static let samplesShown: TimeInterval = 86400
@@ -127,7 +127,7 @@ final class CameraDoctor {
     func setIgnored(_ camera: String, _ finding: HealthFinding, _ ignore: Bool) {
         let key = "\(camera)|\(finding.id)"
         if ignore { ignored.insert(key) } else { ignored.remove(key) }
-        UserDefaults.standard.set(Array(ignored).sorted(), forKey: "doctorIgnored")
+        AppDefaults.store.set(Array(ignored).sorted(), forKey: "doctorIgnored")
     }
 
     /// What a camera's tile shows: its worst finding worth a mark (a problem, or a warning with a fix), unless

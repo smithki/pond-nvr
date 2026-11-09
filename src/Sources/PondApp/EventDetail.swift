@@ -29,7 +29,7 @@ struct EventDetail: View {
     /// Shown from this long before it to this long after.
     static let around = 3.0
 
-    @AppStorage("eventBoxes") private var boxes = true
+    @AppStorage("eventBoxes", store: AppDefaults.store) private var boxes = true
     /// Made once the clip's ready (not with each redraw), let go when the panel goes.
     @State private var player: AVQueuePlayer?
     @State private var looper: AVPlayerLooper?

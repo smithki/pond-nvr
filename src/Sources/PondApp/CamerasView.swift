@@ -514,7 +514,7 @@ struct AddCameraSheet: View {
 
     /// The video rate the check measured, in Mbit/s.
     var checkedRate: Double? {
-        let rate = UserDefaults.standard.double(forKey: AppModel.checkedRateKey(camera.id))
+        let rate = AppDefaults.store.double(forKey: AppModel.checkedRateKey(camera.id))
         return rate > 0 ? rate : nil
     }
 

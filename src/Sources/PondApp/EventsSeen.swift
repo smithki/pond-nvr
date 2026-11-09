@@ -24,7 +24,7 @@ final class EventsSeen {
     private var elsewhere: [String: Date] = [:]
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard, demo: String? = nil, now: Date = Date()) {
+    init(defaults: UserDefaults = AppDefaults.store, demo: String? = nil, now: Date = Date()) {
         self.defaults = defaults
         let suffix = demo.map { ".demo.\($0)" } ?? ""
         beforeKey = Self.beforeKey + suffix

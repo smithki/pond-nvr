@@ -8,7 +8,7 @@ import SwiftUI
 enum MenuBarItem {
     static let key = "menuBarItem"
 
-    static var isShown: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    static var isShown: Bool { AppDefaults.store.object(forKey: key) as? Bool ?? true }
 }
 
 /// Pond started at login (quietly, in the menu bar while it's shown), so an unattended Mac that restarts is watched.

@@ -27,24 +27,24 @@ enum StageMotion: Equatable {
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     /// The cameras on the stage, comma-separated ids, kept between launches. Empty: the first four.
-    @AppStorage("liveCameras") private var stagedIDs = ""
+    @AppStorage("liveCameras", store: AppDefaults.store) private var stagedIDs = ""
     /// The same, for this session: what the stage shows. Kept in view state, because a change to stored
     /// preferences can arrive as a separate update, after the animation meant for it.
     @State private var stagedList: [String]?
-    @AppStorage(LiveView.railKey) private var showRail = true
+    @AppStorage(LiveView.railKey, store: AppDefaults.store) private var showRail = true
     /// The rail as drawn: the stored preference, followed (it changes apart from the animation meant for it), or
     /// set here with the stage, so the rail coming back or stepping aside as one camera becomes several (or one)
     /// moves in the same animation as the tiles and the sidebar, not on its own a moment later.
     /// (Started from the preference, not left to fall back on it: falling back, a change of it was drawn at
     /// once, with nothing left for the animated following below to do.)
-    @State private var railShown = UserDefaults.standard.object(forKey: LiveView.railKey) as? Bool ?? true
+    @State private var railShown = AppDefaults.store.object(forKey: LiveView.railKey) as? Bool ?? true
     /// The dock's adjustments shown (its stored preference), to bring their sidebar with the stage's change.
-    @AppStorage(LiveControlsDock.adjustingKey) private var dockAdjusting = false
+    @AppStorage(LiveControlsDock.adjustingKey, store: AppDefaults.store) private var dockAdjusting = false
     private var railDrawn: Bool { railShown }
     /// The live controls dock is open under a camera watched on its own: kept between launches, and in view
     /// state for this session (a stored preference's change can arrive apart from the animation meant for it,
     /// and the dock and stage would then jump).
-    @AppStorage("liveControls") private var controlsKept = false
+    @AppStorage("liveControls", store: AppDefaults.store) private var controlsKept = false
     @State private var controlsShown: Bool?
     private var controlsWanted: Bool { controlsShown ?? controlsKept }
     /// The dock is shown once what's in it is known (a camera's positions, its night mode): opening before, it
@@ -54,7 +54,7 @@ struct LiveView: View {
     @State private var railNote = false
     /// The live view's width (the rail, the stage and the adjustments' column).
     @State private var contentWidth: CGFloat = 0
-    @AppStorage("liveRailWidth") private var railKeptWidth = CameraRail.defaultWidth
+    @AppStorage("liveRailWidth", store: AppDefaults.store) private var railKeptWidth = CameraRail.defaultWidth
     @State private var railNoteTask: Task<Void, Never>?
 
     private var controlsOpen: Bool { controlsWanted && dockReady }
@@ -581,7 +581,7 @@ struct CameraRail: View {
     var openControls: (String) -> Void = { _ in }
     let drag: ReorderDrag
     let reorder: (String, String) -> Void
-    @AppStorage("liveRailWidth") private var width = CameraRail.defaultWidth
+    @AppStorage("liveRailWidth", store: AppDefaults.store) private var width = CameraRail.defaultWidth
     @State private var dragStart: Double?
     @Environment(AppModel.self) private var model
     /// Where the cameras are, and where the header ends and the footer begins, in the rail.
@@ -594,7 +594,7 @@ struct CameraRail: View {
     }
     nonisolated static let railSpace = "rail"
     /// Ponds whose cameras are folded away in the rail (their ids; "" this Mac), kept.
-    @AppStorage("railFoldedPonds") private var foldedText = ""
+    @AppStorage("railFoldedPonds", store: AppDefaults.store) private var foldedText = ""
     /// The same, once changed here (the view's own state: what's kept is read again only when the rail appears).
     @State private var folded: Set<String>?
 

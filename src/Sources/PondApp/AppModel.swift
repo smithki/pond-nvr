@@ -62,8 +62,8 @@ final class AppModel {
     /// The cameras' rail was hidden to make room for the adjustments' sidebar (shown again when it goes).
     /// (Kept between launches with the rail's own showing, so a rail hidden for room comes back when there's
     /// room, after a relaunch too.)
-    var railMadeRoom = UserDefaults.standard.bool(forKey: "liveRailMadeRoom") {
-        didSet { UserDefaults.standard.set(railMadeRoom, forKey: "liveRailMadeRoom") }
+    var railMadeRoom = AppDefaults.store.bool(forKey: "liveRailMadeRoom") {
+        didSet { AppDefaults.store.set(railMadeRoom, forKey: "liveRailMadeRoom") }
     }
     /// The cameras made private in Pond (from privacy.json, which the service keeps).
     var privateCameras: Set<String> = []
@@ -126,8 +126,8 @@ final class AppModel {
     var shownPonds = ShownPonds.all
     /// Other Ponds' cameras in the order chosen here (this Mac's own order is its settings'; another's is its own
     /// business), kept in the app's preferences.
-    var remoteOrder: [String: [String]] = (UserDefaults.standard.dictionary(forKey: "remoteCameraOrder") as? [String: [String]]) ?? [:] {
-        didSet { UserDefaults.standard.set(remoteOrder, forKey: "remoteCameraOrder") }
+    var remoteOrder: [String: [String]] = (AppDefaults.store.dictionary(forKey: "remoteCameraOrder") as? [String: [String]]) ?? [:] {
+        didSet { AppDefaults.store.set(remoteOrder, forKey: "remoteCameraOrder") }
     }
     /// Counted up when another action changes which Ponds are shown (not the button's own menu): the button says so.
     var shownPondsNudge = 0
@@ -233,7 +233,7 @@ final class AppModel {
     /// under way, the ones not to mention again, and the one Add Camera starts from. See DiscoveryModel.
     var foundCameras: [FoundCamera] = DemoSession.scenario == nil ? AppModel.keptFoundCameras() : []
     var findingCameras = false
-    var ignoredCameras: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AppModel.ignoredCamerasKey) ?? [])
+    var ignoredCameras: Set<String> = Set(AppDefaults.store.stringArray(forKey: AppModel.ignoredCamerasKey) ?? [])
     var addingFrom: FoundCamera?
 
     init(store: ConfigStore = ConfigStore(path: DemoSession.configPath ?? ProcessInfo.processInfo.environment[Brand.configVariable]
@@ -395,7 +395,7 @@ final class AppModel {
         let result = await Task.detached { Self.probe(prober, camera, password, seconds) }.value
         // The video's rate, for the storage estimate until the camera has recordings of its own.
         if case let .success(report) = result, case let .flowing(stats)? = report.flow, stats.megabitsPerSecond > 0 {
-            UserDefaults.standard.set(stats.megabitsPerSecond, forKey: Self.checkedRateKey(camera.id))
+            AppDefaults.store.set(stats.megabitsPerSecond, forKey: Self.checkedRateKey(camera.id))
         }
         let host = URLComponents(string: camera.main)?.host ?? camera.main
         return CameraCheck.lines(result, host: host, username: camera.username, watchedSeconds: seconds,
@@ -435,7 +435,7 @@ final class AppModel {
             return ([CheckLine(.error, "Pond couldn\u{2019}t run its check of \(camera.name).")], false)
         }
         if case let .success(report) = result, case let .flowing(stats)? = report.flow, stats.megabitsPerSecond > 0 {
-            UserDefaults.standard.set(stats.megabitsPerSecond, forKey: Self.checkedRateKey(camera.id))
+            AppDefaults.store.set(stats.megabitsPerSecond, forKey: Self.checkedRateKey(camera.id))
         }
         let host = URLComponents(string: camera.main)?.host ?? camera.main
         return CameraCheck.lines(result, host: host, username: camera.username, watchedSeconds: seconds,

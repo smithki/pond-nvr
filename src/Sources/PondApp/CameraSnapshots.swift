@@ -56,12 +56,12 @@ final class CameraSnapshots {
 /// shape before the picture itself has loaded. Kept per Mac (a convenience, not a setting).
 enum CameraAspect {
     static func known(_ camera: String) -> Double? {
-        let value = UserDefaults.standard.double(forKey: "cameraAspect.\(camera)")
+        let value = AppDefaults.store.double(forKey: "cameraAspect.\(camera)")
         return value > 0 ? value : nil
     }
 
     static func remember(_ camera: String, _ image: CGImage) {
         guard image.height > 0 else { return }
-        UserDefaults.standard.set(Double(image.width) / Double(image.height), forKey: "cameraAspect.\(camera)")
+        AppDefaults.store.set(Double(image.width) / Double(image.height), forKey: "cameraAspect.\(camera)")
     }
 }

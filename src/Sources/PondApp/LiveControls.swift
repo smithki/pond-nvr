@@ -788,11 +788,11 @@ struct LiveControlsDock: View {
     @State private var arrangement = Arrangement.full
     @State private var available = LiveControlsDock.width
     /// The adjustments shown (kept between launches; the live view sizes the dock's place by it too).
-    @AppStorage(LiveControlsDock.adjustingKey) private var adjusting = false
+    @AppStorage(LiveControlsDock.adjustingKey, store: AppDefaults.store) private var adjusting = false
     nonisolated static let adjustingKey = "dockAdjusting"
-    @AppStorage(LiveView.railKey) private var showRail = true
+    @AppStorage(LiveView.railKey, store: AppDefaults.store) private var showRail = true
     /// The rail's own width, as kept (what it takes across: LiveLayout.railRoom).
-    @AppStorage("liveRailWidth") private var railKeptWidth = CameraRail.defaultWidth
+    @AppStorage("liveRailWidth", store: AppDefaults.store) private var railKeptWidth = CameraRail.defaultWidth
     /// It has been on screen a moment: until then, arrangements are taken at once as its controls are measured
     /// (not crossfaded, which shifted the dock as it opened).
     @State private var measured = false
@@ -1205,7 +1205,7 @@ struct DockContents: View {
     var measured: (Measure, CGFloat) -> Void = { _, _ in }
 
     enum Measure { case everyday, beside, narrow }
-    @AppStorage(LiveControlsDock.adjustingKey) private var adjusting = false
+    @AppStorage(LiveControlsDock.adjustingKey, store: AppDefaults.store) private var adjusting = false
     @State private var naming = false
     @State private var newName = ""
 

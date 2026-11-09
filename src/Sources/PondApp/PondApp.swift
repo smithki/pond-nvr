@@ -9,8 +9,8 @@ import UserNotifications
 struct PondApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
-    @AppStorage(Appearance.key) private var appearance = Appearance.dark
-    @AppStorage(MenuBarItem.key) private var menuBarItem = true
+    @AppStorage(Appearance.key, store: AppDefaults.store) private var appearance = Appearance.dark
+    @AppStorage(MenuBarItem.key, store: AppDefaults.store) private var menuBarItem = true
 
     var body: some Scene {
         Window("Pond", id: "main") {
@@ -21,6 +21,9 @@ struct PondApp: App {
         }
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
+        // A demo's windows open afresh, at their default size, and aren't remembered: it's the same app as the real
+        // Pond to macOS, so what one remembered of its windows the other opened with (AppDefaults).
+        .restorationBehavior(AppDefaults.isDemo ? .disabled : .automatic)
         // Opened at every launch, even if it was closed when Pond last quit (from the menu bar item); only at login does
         // it stay closed (AppDelegate).
         .defaultLaunchBehavior(.presented)
@@ -53,6 +56,7 @@ struct PondApp: App {
                        minHeight: SettingsWindow.least.height, idealHeight: SettingsWindow.size.height)
         }
         .defaultSize(SettingsWindow.size)
+        .restorationBehavior(AppDefaults.isDemo ? .disabled : .automatic)
         .windowResizability(.contentMinSize)
 
         MenuBarExtra(isInserted: $menuBarItem) {
@@ -114,7 +118,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @AppStorage(LiveView.railKey) private var showRail = true
+    @AppStorage(LiveView.railKey, store: AppDefaults.store) private var showRail = true
     /// Where the overview was centred as it opened (the button's middle then).
     @State private var overviewCentre: CGFloat?
 

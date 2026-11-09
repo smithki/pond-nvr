@@ -99,31 +99,31 @@ extension AppModel {
 
     /// A camera's positions as last asked, kept between launches.
     static func keptPresets(_ camera: String) -> [PTZPreset] {
-        guard let data = UserDefaults.standard.data(forKey: "positions.\(camera)") else { return [] }
+        guard let data = AppDefaults.store.data(forKey: "positions.\(camera)") else { return [] }
         return (try? JSONDecoder().decode([PTZPreset].self, from: data)) ?? []
     }
 
     static func keepPresets(_ camera: String, _ list: [PTZPreset]) {
-        UserDefaults.standard.set(try? JSONEncoder().encode(list), forKey: "positions.\(camera)")
+        AppDefaults.store.set(try? JSONEncoder().encode(list), forKey: "positions.\(camera)")
     }
 
     /// Positions not seen before join the end of the kept order, so a new one comes after the others (a
     /// camera numbers a new one by its first free place, which could put it first, pushing another into More).
     func rememberOrder(_ camera: String, _ list: [PTZPreset]) {
         let ids = list.map(\.id)
-        var order = (UserDefaults.standard.stringArray(forKey: Self.orderKey(camera)) ?? []).filter(ids.contains)
+        var order = (AppDefaults.store.stringArray(forKey: Self.orderKey(camera)) ?? []).filter(ids.contains)
         let unseen = ids.filter { !order.contains($0) }
-        guard !unseen.isEmpty || order.count != (UserDefaults.standard.stringArray(forKey: Self.orderKey(camera)) ?? []).count
+        guard !unseen.isEmpty || order.count != (AppDefaults.store.stringArray(forKey: Self.orderKey(camera)) ?? []).count
         else { return }
         order += unseen
-        UserDefaults.standard.set(order, forKey: Self.orderKey(camera))
+        AppDefaults.store.set(order, forKey: Self.orderKey(camera))
     }
 
     /// A removed position leaves the kept order: a camera reuses its place (and its id) for the next one kept,
     /// which would otherwise take the removed one's place instead of coming last.
     func forgetOrder(_ camera: String, _ preset: String) {
-        let order = UserDefaults.standard.stringArray(forKey: Self.orderKey(camera)) ?? []
-        UserDefaults.standard.set(order.filter { $0 != preset }, forKey: Self.orderKey(camera))
+        let order = AppDefaults.store.stringArray(forKey: Self.orderKey(camera)) ?? []
+        AppDefaults.store.set(order.filter { $0 != preset }, forKey: Self.orderKey(camera))
     }
 
     /// A camera's positions in the order they're shown: the order they were first seen and then dragged into
@@ -131,7 +131,7 @@ extension AppModel {
     func orderedPresets(_ camera: String) -> [PTZPreset] {
         // As last known (kept between launches) until the camera answers, so the dock opens with them in place.
         let list = presets[camera] ?? Self.keptPresets(camera)
-        let order = UserDefaults.standard.stringArray(forKey: Self.orderKey(camera)) ?? []
+        let order = AppDefaults.store.stringArray(forKey: Self.orderKey(camera)) ?? []
         let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
         return list.enumerated().sorted { a, b in
             (rank[a.element.id] ?? order.count + a.offset, a.offset) < (rank[b.element.id] ?? order.count + b.offset, b.offset)
@@ -145,7 +145,7 @@ extension AppModel {
         guard let from = ids.firstIndex(of: moved), let to = ids.firstIndex(of: target) else { return }
         ids.remove(at: from)
         ids.insert(moved, at: to)
-        UserDefaults.standard.set(ids, forKey: Self.orderKey(camera))
+        AppDefaults.store.set(ids, forKey: Self.orderKey(camera))
         // Shown again in the new order.
         withAnimation(.snappy(duration: 0.25)) { presets[camera] = presets[camera] }
     }

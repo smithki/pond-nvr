@@ -13,7 +13,7 @@ extension AppModel {
     static let ignoredCamerasKey = "ignoredCameras"
 
     static func keptFoundCameras() -> [FoundCamera] {
-        guard let data = UserDefaults.standard.data(forKey: foundCamerasKey) else { return [] }
+        guard let data = AppDefaults.store.data(forKey: foundCamerasKey) else { return [] }
         return (try? JSONDecoder().decode([FoundCamera].self, from: data)) ?? []
     }
 
@@ -37,13 +37,13 @@ extension AppModel {
 
     func ignore(_ camera: FoundCamera) {
         withAnimation(.snappy(duration: 0.3)) { _ = ignoredCameras.insert(Self.ignoreKey(camera)) }
-        UserDefaults.standard.set(Array(ignoredCameras), forKey: Self.ignoredCamerasKey)
+        AppDefaults.store.set(Array(ignoredCameras), forKey: Self.ignoredCamerasKey)
     }
 
     /// Ignored no more: offered in the toolbar again.
     func showAgain(_ camera: FoundCamera) {
         withAnimation(.snappy(duration: 0.3)) { _ = ignoredCameras.remove(Self.ignoreKey(camera)) }
-        UserDefaults.standard.set(Array(ignoredCameras), forKey: Self.ignoredCamerasKey)
+        AppDefaults.store.set(Array(ignoredCameras), forKey: Self.ignoredCamerasKey)
     }
 
     /// Looks again (one look at a time), and keeps what it found.
@@ -58,13 +58,13 @@ extension AppModel {
         let found = await CameraFinder.find()
         foundCameras = found
         findingCameras = false
-        UserDefaults.standard.set(Date(), forKey: Self.lastCameraLookKey)
-        UserDefaults.standard.set(try? JSONEncoder().encode(foundCameras), forKey: Self.foundCamerasKey)
+        AppDefaults.store.set(Date(), forKey: Self.lastCameraLookKey)
+        AppDefaults.store.set(try? JSONEncoder().encode(foundCameras), forKey: Self.foundCamerasKey)
     }
 
     /// Looks again if the last look was a day ago or more (or never).
     func findCamerasIfDue() async {
-        let last = UserDefaults.standard.object(forKey: Self.lastCameraLookKey) as? Date
+        let last = AppDefaults.store.object(forKey: Self.lastCameraLookKey) as? Date
         // (A demo's always: it costs nothing, and the real look's time isn't its.)
         if DemoSession.scenario != nil || last.map({ Date().timeIntervalSince($0) > 24 * 3600 }) ?? true { await findCameras() }
     }

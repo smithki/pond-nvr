@@ -57,10 +57,10 @@ final class TimelineModel {
     }
     var camera: String?
     /// How much of the day shows; remembered.
-    var zoom = UserDefaults.standard.object(forKey: "timelineZoom").flatMap { ($0 as? Double).flatMap(Zoom.init) } ?? .day {
+    var zoom = AppDefaults.store.object(forKey: "timelineZoom").flatMap { ($0 as? Double).flatMap(Zoom.init) } ?? .day {
         didSet {
             if zoom != oldValue { panStart = nil }
-            UserDefaults.standard.set(zoom.rawValue, forKey: "timelineZoom")
+            AppDefaults.store.set(zoom.rawValue, forKey: "timelineZoom")
         }
     }
     /// Where the visible part starts when panned by hand; nil follows the playhead.
@@ -100,10 +100,10 @@ final class TimelineModel {
     private(set) var jumps = 0
     private(set) var playing = false
     /// Sound off, for recordings and live alike; off at first, as in the live view, and remembered.
-    var muted = UserDefaults.standard.object(forKey: "timelineMuted") as? Bool ?? true {
+    var muted = AppDefaults.store.object(forKey: "timelineMuted") as? Bool ?? true {
         didSet {
             player.isMuted = muted
-            UserDefaults.standard.set(muted, forKey: "timelineMuted")
+            AppDefaults.store.set(muted, forKey: "timelineMuted")
         }
     }
     /// The recording in the player has sound.
@@ -136,9 +136,9 @@ final class TimelineModel {
     /// The camera chosen is another Pond's.
     var isRemoteCamera: Bool { camera.map { ControlSocket.RemotePond.split($0) != nil } ?? false }
     /// Boxes drawn over the recording round what was found (as the service saw it); remembered.
-    var showBoxes = UserDefaults.standard.bool(forKey: "timelineBoxes") {
+    var showBoxes = AppDefaults.store.bool(forKey: "timelineBoxes") {
         didSet {
-            UserDefaults.standard.set(showBoxes, forKey: "timelineBoxes")
+            AppDefaults.store.set(showBoxes, forKey: "timelineBoxes")
             if showBoxes { Task { await loadSightings(around: playhead ?? Date()) } }
         }
     }

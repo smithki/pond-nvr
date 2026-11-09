@@ -154,7 +154,7 @@ extension AppModel {
     func storageOutlook() async -> StorageOutlook? {
         guard let config else { return nil }
         let rates = Dictionary(uniqueKeysWithValues: config.cameras.compactMap { camera -> (String, Double)? in
-            let rate = UserDefaults.standard.double(forKey: AppModel.checkedRateKey(camera.id))
+            let rate = AppDefaults.store.double(forKey: AppModel.checkedRateKey(camera.id))
             return rate > 0 ? (camera.id, rate) : nil
         })
         return await Task.detached { StorageOutlook.measure(config: config, checkedRates: rates) }.value

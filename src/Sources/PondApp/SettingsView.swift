@@ -8,7 +8,7 @@ import Watch
 
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(Appearance.key) private var appearance = Appearance.dark
+    @AppStorage(Appearance.key, store: AppDefaults.store) private var appearance = Appearance.dark
 
     var body: some View {
         Form {
@@ -221,7 +221,7 @@ struct PondNameField: View {
 
 /// The menu bar item, and opening at login: what keeps Pond watching the recorder with its window closed.
 struct MenuBarSection: View {
-    @AppStorage(MenuBarItem.key) private var menuBarItem = true
+    @AppStorage(MenuBarItem.key, store: AppDefaults.store) private var menuBarItem = true
     @State private var atLogin = OpenAtLogin.isOn
     @State private var problem: String?
 

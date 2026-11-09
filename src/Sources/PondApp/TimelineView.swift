@@ -23,7 +23,7 @@ struct TimelineView: View {
     @State private var calloutPictures = 0
 
     /// The lanes panel's share of the view's height, chosen by dragging the grip; below zero, automatic.
-    @AppStorage("timelineLanesShare") private var lanesShare = -1.0
+    @AppStorage("timelineLanesShare", store: AppDefaults.store) private var lanesShare = -1.0
     @State private var dragStartHeight: Double?
     /// Once the view has opened where the timeline is: until then nothing glides (the view would otherwise
     /// slide from wherever it was when last shown).
@@ -290,7 +290,7 @@ struct TimelineView: View {
     }
 
     /// Other Ponds folded away in the lanes (their ids), kept.
-    @AppStorage("timelineFoldedPonds") private var foldedText = ""
+    @AppStorage("timelineFoldedPonds", store: AppDefaults.store) private var foldedText = ""
     var foldedPonds: Set<String> { Set(foldedText.split(separator: ",").map(String.init)) }
 
     func fold(_ pond: String) {

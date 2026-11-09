@@ -107,7 +107,7 @@ struct OverviewPanel: View {
                         model.mode = .live
                         model.railNeedsAttention = true
                         model.stagingNeedsAttention += 1
-                        UserDefaults.standard.set(true, forKey: LiveView.railKey)
+                        AppDefaults.store.set(true, forKey: LiveView.railKey)
                         close()
                     }
                     .help(cameras.count == 1 ? "Show the camera that needs attention in Live, and only it in the list of cameras"

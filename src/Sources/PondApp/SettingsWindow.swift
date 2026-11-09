@@ -497,6 +497,9 @@ struct SidebarBounds: NSViewRepresentable {
                 return
             }
             apply(to: item)
+            // A demo doesn't remember its sidebar's width: AppKit keeps it in the app's own preferences, the real
+            // Pond's (AppDefaults).
+            if AppDefaults.isDemo, let split = Self.splitView(in: root), split.autosaveName != nil { split.autosaveName = nil }
             guard coordinator.item !== item else { return }
             coordinator.item = item
             let least = least, most = most
@@ -520,6 +523,13 @@ struct SidebarBounds: NSViewRepresentable {
         if item.canCollapse { item.canCollapse = false }
         if item.minimumThickness != least { item.minimumThickness = least }
         if item.maximumThickness != most { item.maximumThickness = most }
+    }
+
+    /// The first split view under `view`.
+    static func splitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for sub in view.subviews { if let split = splitView(in: sub) { return split } }
+        return nil
     }
 
     /// The sidebar's split view item: the sidebar of the first split view's controller under `view`.
