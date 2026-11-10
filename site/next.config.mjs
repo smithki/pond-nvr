@@ -1,9 +1,9 @@
-// A static site: `next build` writes plain files to out/, to be served from anywhere (pond.camera). (JavaScript, not
-// TypeScript: scripts/check-private.sh refuses .ts files, as MPEG transport streams are .ts too.)
+// pond.camera, built and served by Vercel (site/README.md). Every page and pond.camera/api/search-model are made at
+// build time: nothing runs on a server when someone visits. (JavaScript, not TypeScript: scripts/check-private.sh
+// refuses .ts files, as MPEG transport streams are .ts too.)
 
 /** @type {import("next").NextConfig} */
 const config = {
-  output: "export",
   images: { unoptimized: true },
 };
 

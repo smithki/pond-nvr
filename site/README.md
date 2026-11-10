@@ -1,19 +1,25 @@
 # pond.camera
 
-Pond's landing page: a static [Next.js](https://nextjs.org) site. `next build` writes plain files to `out/`, to be
-served from anywhere.
+Pond's website, and the manifest Pond learns of search's model versions from: a [Next.js](https://nextjs.org) site,
+built and served by Vercel from `main` (this folder is the project's root directory). Every page and
+`/api/search-model` are made when it's built, so nothing runs on a server when someone visits; there are no
+analytics.
 
 ```sh
 cd site
 npm install
 npm run dev      # http://localhost:3000, reloading as you edit
-npm run build    # the site, in out/
+npm run build    # the site, as Vercel builds it (npm start serves it)
 npm run lint     # TypeScript's checks
 ```
 
 - `app/page.tsx` is the page; `app/globals.css` its look (dark first, as the app is, and light for a light Mac).
 - `components/` has the three parts that move: the camera wall's ticking timestamps, the example searches, and the
   drive-size sliders (`DriveSize`, from the README's 32 GB per camera per day at 2560×1440).
+- `data/search-models.json` is the search model manifest, served at `/api/search-model` by
+  `app/api/search-model/route.js`. Its entries come from the search model workflow's pull requests, signed: don't
+  edit one by hand, since Pond refuses an entry whose signature doesn't verify ([docs/search.md](../docs/search.md),
+  *Published versions*).
 - The fonts (Bricolage Grotesque, Hanken Grotesk, JetBrains Mono) are fetched by `next/font` when the site is built
   and served with it: a visitor's browser never asks Google for them.
 

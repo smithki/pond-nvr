@@ -1,0 +1,16 @@
+{
+  "about": "Search's picture models Pond may download, newest first. Pond takes the newest whose format it reads and whose minimumApp it is, and only if its signature verifies with the public key Pond carries; then only a file with this SHA-256. Added by pull requests from the search model workflow (docs/search.md, Published versions).",
+  "models": [
+    {
+      "id": "siglip2-v1",
+      "name": "SigLIP 2 base",
+      "format": 1,
+      "minimumApp": "0.2.0",
+      "size": 350310687,
+      "sha256": "eaae1d98dc24c66e725aa662b8909506ace61df1df83204fbf312cf62e1347b9",
+      "urls": ["https://github.com/smithki/pond-models/releases/download/siglip2-v1/siglip2-v1.aar"],
+      "published": "2026-11-10",
+      "signature": "YHmUoG1BajI8J62JZzO+KCcVqJtNaAJXXQRn1EOxRBlC5VUqwi31Tp9pkb5yZoOSVt3DPvW7Ygpk0eUNgc8QCw=="
+    }
+  ]
+}
