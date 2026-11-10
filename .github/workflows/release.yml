@@ -1,0 +1,62 @@
+# A release, made from a tag: pushing v0.1.0 runs make release VERSION=0.1.0 (scripts/release.sh) on macOS, signed
+# with the Developer ID and notarized with the App Store Connect API key from the release environment's secrets
+# (scripts/ci-secrets.sh puts them there; docs/release.md, Releases from CI), and makes a draft GitHub release with
+# the disk image, its checksum and the changelog's section as its notes. Published by hand, after a look.
+#
+# The runner: the variable RELEASE_RUNNER (a macOS 27 one: GitHub's own when it has it, or a machine of yours that
+# runs nothing else), else macos-latest.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# One release at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # the draft release
+
+jobs:
+  release:
+    runs-on: ${{ vars.RELEASE_RUNNER || 'macos-latest' }}
+    environment: release
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # Search's picture model, converted once and kept between releases (a few GB to convert, about 390 MB made),
+      # until a published one with a pinned hash replaces it (docs/search.md).
+      - uses: actions/cache@v4
+        with:
+          path: models/search
+          key: search-model-${{ hashFiles('scripts/search-model.sh', 'scripts/convert-siglip.py') }}
+
+      - name: The release keychain
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: scripts/ci-keychain.sh setup
+
+      - name: make release
+        run: make release VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: A draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          # The changelog's section for this version: from its heading to the next.
+          awk -v v="$version" '$0 ~ "^## " { if (on) exit; on = ($2 == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Pond $version" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "dist/release/Pond-$version.dmg" "dist/release/Pond-$version.dmg.sha256"
+
+      - name: Remove the release keychain
+        if: always()
+        run: scripts/ci-keychain.sh remove

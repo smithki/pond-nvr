@@ -8,17 +8,29 @@
 # Needs, once per Mac (docs/release.md):
 #   - a Developer ID Application certificate (Xcode › Settings › Accounts › Manage Certificates… › + ›
 #     Developer ID Application);
-#   - notarization's login in the keychain, under the profile "pond" (NOTARY_PROFILE to use another):
-#       xcrun notarytool store-credentials pond --apple-id YOU@EXAMPLE.COM --team-id TEAMID
+#   - notarization's login in the keychain, under the profile "pond" (NOTARY_PROFILE to use another), best an App
+#     Store Connect API key kept in the login keychain:
+#       xcrun notarytool store-credentials pond --key AuthKey_KEYID.p8 --key-id KEYID --issuer ISSUER \
+#           --keychain ~/Library/Keychains/login.keychain-db
 set -eu
 cd "$(dirname "$0")/.."
 
 VERSION=${1:-}
 PROFILE=${NOTARY_PROFILE:-pond}
+KEYCHAIN=${NOTARY_KEYCHAIN:-}
 OUT=dist/release
 APP="$OUT/Pond NVR.app"
 
 fail() { echo "✗ $1" >&2; exit 1; }
+
+# notarytool with the profile, from the keychain it was found in (none: notarytool's own store).
+notary() {
+    if [ -n "$KEYCHAIN" ]; then
+        xcrun notarytool "$@" --keychain-profile "$PROFILE" --keychain "$KEYCHAIN"
+    else
+        xcrun notarytool "$@" --keychain-profile "$PROFILE"
+    fi
+}
 
 [ -n "$VERSION" ] || fail "Which version? make release VERSION=0.1.0"
 
@@ -35,8 +47,14 @@ grep -q "^## $VERSION" CHANGELOG.md || fail "CHANGELOG.md has no \"## $VERSION\"
 
 IDENTITY=${DEVELOPER_ID:-$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')}
 [ -n "$IDENTITY" ] || fail "No Developer ID Application certificate in the keychain: Xcode › Settings › Accounts › Manage Certificates… › + › Developer ID Application."
-xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
-    || fail "No notarization login under the profile \"$PROFILE\": xcrun notarytool store-credentials $PROFILE --apple-id YOU --team-id TEAMID (docs/release.md)."
+# The profile in the login keychain first (where store-credentials --keychain puts it), then notarytool's own store,
+# which can go on answering with an older login after store-credentials says it replaced it.
+if [ -z "$KEYCHAIN" ]; then
+    KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+    notary history >/dev/null 2>&1 || KEYCHAIN=""
+fi
+notary history >/dev/null 2>&1 \
+    || fail "No notarization login that works under the profile \"$PROFILE\" (docs/release.md: Once per Mac)."
 
 # Search's picture model is part of a release: built in, not left out (search would work without pictures).
 [ -e models/search/siglip2.json ] || SEARCH_MODEL=1 scripts/search-model.sh
@@ -52,7 +70,7 @@ codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || fail "The app isn't sign
 # The app notarized and its ticket stapled to it, so it opens offline once copied out of the disk image.
 echo "Notarizing the app (a few minutes)…"
 ditto -c -k --keepParent "$APP" "$OUT/Pond.zip"
-xcrun notarytool submit "$OUT/Pond.zip" --keychain-profile "$PROFILE" --wait
+notary submit "$OUT/Pond.zip" --wait
 xcrun stapler staple "$APP"
 rm "$OUT/Pond.zip"
 
@@ -66,7 +84,7 @@ hdiutil create -volname "Pond $VERSION" -srcfolder "$STAGE" -fs APFS -format ULF
 rm -rf "$STAGE"
 codesign --sign "$IDENTITY" --timestamp "$DMG"
 echo "Notarizing the disk image…"
-xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
+notary submit "$DMG" --wait
 xcrun stapler staple "$DMG"
 
 # As Gatekeeper sees them on someone else's Mac.
