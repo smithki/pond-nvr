@@ -591,10 +591,13 @@ struct SidebarBounds: NSViewRepresentable {
             guard coordinator.item !== item else { return }
             coordinator.item = item
             let least = least, ideal = ideal, most = most
-            let again: (NSSplitViewItem) -> Void = { item in
+            // (Observers are called off the main actor's books; the item's only touched back on the main queue.)
+            let again: @Sendable (NSSplitViewItem) -> Void = { item in
+                nonisolated(unsafe) let item = item
                 DispatchQueue.main.async { SidebarBounds(least: least, ideal: ideal, most: most).apply(to: item) }
             }
-            let reopen: (NSSplitViewItem) -> Void = { item in
+            let reopen: @Sendable (NSSplitViewItem) -> Void = { item in
+                nonisolated(unsafe) let item = item
                 DispatchQueue.main.async { if item.isCollapsed { item.animator().isCollapsed = false } }
             }
             coordinator.watching = [
