@@ -243,35 +243,30 @@ struct SearchModelRow: View {
     let checking: Bool
     let check: () async -> Void
 
+    // One line on the right at any width (the version, or its download's bar, and the button); what's said of it,
+    // which can be long, under the label, where it wraps.
     var body: some View {
         LabeledContent {
             HStack(spacing: 12) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    switch status?.activity {
-                    case let .downloading(_, name, received, total)?:
-                        ProgressView(value: Double(received), total: Double(max(total, 1))).frame(width: 220)
-                        Text("Downloading \u{00B7} \(Self.megabytes(received)) of \(Self.megabytes(total))")
-                            .monospacedDigit().font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help("Downloading \(name)")
-                    case let .installing(_, name)?:
-                        ProgressView().progressViewStyle(.linear).frame(width: 220)
-                        Text("Checking it and putting it in place\u{2026}").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help(name)
-                    default:
-                        Text(status?.current?.name ?? "Not downloaded yet")
-                            .foregroundStyle(status?.current == nil ? .secondary : .primary)
-                        if let line = detail { Text(line).font(.caption).foregroundStyle(.secondary) }
-                    }
+                switch status?.activity {
+                case let .downloading(_, _, received, total)?:
+                    ProgressView(value: Double(received), total: Double(max(total, 1))).frame(width: 140)
+                case .installing?:
+                    ProgressView().progressViewStyle(.linear).frame(width: 140)
+                default:
+                    Text(status?.current?.name ?? "Not downloaded yet").lineLimit(1)
+                        .foregroundStyle(status?.current == nil ? .secondary : .primary)
                 }
                 Button("Check for Updates") { Task { await check() } }
                     .disabled(checking || status?.activity != nil)
             }
+            .fixedSize()
         } label: {
             Text("Picture model")
             if let problem = problemText {
                 Text(problem).foregroundStyle(.orange)
-            } else {
-                Text("Matches events\u{2019} pictures to the words you search for.")
+            } else if let line = detail {
+                Text(line)
             }
         }
     }
@@ -279,6 +274,13 @@ struct SearchModelRow: View {
     /// "Updated Nov 12 · Last checked today", or as much of it as there is.
     var detail: String? {
         guard let status else { return nil }
+        switch status.activity {
+        case let .downloading(_, name, received, total)?:
+            return "Downloading \(name) \u{00B7} \(Self.megabytes(received)) of \(Self.megabytes(total))"
+        case let .installing(_, name)?:
+            return "Checking \(name) and putting it in place\u{2026}"
+        default: break
+        }
         if status.activity == .checking || checking { return "Checking pond.camera\u{2026}" }
         var parts: [String] = []
         if status.current?.id == "built-in" { parts.append("Built into this copy of Pond") }
