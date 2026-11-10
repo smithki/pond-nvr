@@ -23,7 +23,7 @@ SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/
 # release (it asks Apple's server; make release sets SIGN_TIMESTAMP=1). Ad hoc signing can't have the runtime.
 CODESIGN := codesign --force $(if $(filter -,$(SIGN)),,--options runtime $(if $(SIGN_TIMESTAMP),--timestamp,--timestamp=none))
 
-.PHONY: help build app demo check hooks test test-docker clean install update signing release
+.PHONY: help build app demo check hooks test test-docker clean install update signing release publish
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
@@ -40,6 +40,7 @@ help:
 	@echo "make clean          remove dist/ and the Swift build folder"
 	@echo "make signing        once per Mac: a local signing certificate, so Keychain access survives rebuilds"
 	@echo "make release VERSION=0.1.0  a signed, notarized Pond-0.1.0.dmg in dist/release (docs/release.md)"
+	@echo "make publish VERSION=0.1.0  that release as a draft on GitHub, and its tag (when CI can't make it)"
 
 build:
 	swift build --package-path $(PKG) -c release
@@ -143,6 +144,11 @@ update: install
 # A release: signed with a Developer ID, notarized and stapled, in a disk image (scripts/release.sh, docs/release.md).
 release:
 	@scripts/release.sh "$(VERSION)"
+
+# The release make release made, published from this Mac as CI would: its tag, and a draft GitHub release
+# (scripts/publish.sh, docs/release.md). For when CI can't make it.
+publish:
+	@scripts/publish.sh "$(VERSION)"
 
 signing:
 	@scripts/setup-signing.sh

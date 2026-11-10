@@ -94,4 +94,6 @@ spctl --assess --type execute --verbose=2 "$APP"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
 
 (cd "$OUT" && shasum -a 256 "Pond-$VERSION.dmg" > "Pond-$VERSION.dmg.sha256")
+# The commit it was made from, for make publish (which publishes it only from that commit).
+git rev-parse HEAD > "$OUT/Pond-$VERSION.commit"
 echo "✓ $DMG ($(du -h "$DMG" | cut -f1)), SHA-256 $(cut -d' ' -f1 "$DMG.sha256")"

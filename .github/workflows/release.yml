@@ -3,6 +3,9 @@
 # (scripts/ci-secrets.sh puts them there; docs/release.md, Releases from CI), and makes a draft GitHub release with
 # the disk image, its checksum and the changelog's section as its notes. Published by hand, after a look.
 #
+# A release made and published on a Mac instead (make release, then make publish: docs/release.md, When CI can't)
+# has its draft on GitHub before its tag: then this finds it, in a minute on Linux, and builds nothing.
+#
 # The runner: GitHub's xcode-27 image (macOS 27 with Xcode 27) (the variable RELEASE_RUNNER names another: a machine of yours
 # must run nothing else).
 name: Release
@@ -20,7 +23,31 @@ permissions:
   contents: write   # the draft release
 
 jobs:
+  # Whether this tag's release was made already, on a Mac (make publish): a release for it, with its disk image.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      made: ${{ steps.check.outputs.made }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          # Drafts too (this token can see them): a draft has its tag's name before the tag exists.
+          made=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .assets[].name | select(. == \"Pond-$version.dmg\")")
+          if [ -n "$made" ]; then
+            echo "made=true" >> "$GITHUB_OUTPUT"
+            echo "Pond $version's release was made on a Mac (make publish): nothing built here." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "made=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: check
+    if: needs.check.outputs.made != 'true'
     runs-on: ${{ vars.RELEASE_RUNNER || 'xcode-27' }}
     environment: release
     timeout-minutes: 120
@@ -44,8 +71,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=${GITHUB_REF_NAME#v}
-          # The changelog's section for this version: from its heading to the next.
-          awk -v v="$version" '$0 ~ "^## " { if (on) exit; on = ($2 == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Pond $version" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "dist/release/Pond-$version.dmg" "dist/release/Pond-$version.dmg.sha256"

@@ -45,8 +45,9 @@ warning, offline as well. `make release` makes it from a clean commit, on a Mac 
    - puts it in a disk image beside a link to Applications, signs, notarizes and staples that;
    - checks both as Gatekeeper does on another Mac (`spctl`);
    - writes `dist/release/Pond-0.1.0.dmg` and its SHA-256.
-4. Tag the commit (`git tag v0.1.0`, pushed), publish the disk image and its checksum with the changelog section as
-   its notes, and set `Version.swift` back to the next `-dev`.
+4. Publish it: push a tag and CI makes the release ([Releases from CI](#releases-from-ci)), or, on the Mac that made
+   it, `make publish VERSION=0.1.0` ([When CI can't](#when-ci-cant)). Either way it's a draft on GitHub; publish it
+   there after a look. Then set `Version.swift` back to the next `-dev`.
 
 If notarization refuses it, `xcrun notarytool log SUBMISSION-ID --keychain-profile pond --keychain ~/Library/Keychains/login.keychain-db` says
 why.
@@ -92,5 +93,27 @@ repository's jobs no machine for it: a job waits, then is cancelled as "not acqu
 made on a Mac with `make release`.)
 
 What guards these keys, and what to do if one leaks: [ci-security.md](ci-security.md).
+
+## When CI can't
+
+When CI can't make a release (its runner isn't there, or it's down), the Mac set up as above makes and publishes
+it instead, the same way:
+
+```sh
+make release VERSION=0.1.0     # on the commit to release, pushed to main
+make publish VERSION=0.1.0
+```
+
+`make publish` (`scripts/publish.sh`) does what the workflow does after building: a draft GitHub release with the
+disk image, its checksum and the changelog's section as its notes (`scripts/release-notes.sh`, which the workflow
+uses too), then the tag `v0.1.0` on that commit, pushed. It refuses to when:
+- the disk image wasn't made from the commit checked out (`make release` records it), or there are changes not
+  committed;
+- that commit isn't on GitHub's `main`;
+- the tag or a release of it exists already;
+- the disk image doesn't match its checksum, has no notarization ticket, or Gatekeeper refuses it.
+
+The draft goes up before the tag, so the workflow the tag starts finds that release there, with its disk image,
+and builds nothing (a minute on Linux, its *check* job). Publish the draft on GitHub after a look, as with CI's.
 
 Not yet: updates from within the app (Sparkle and a signed feed).
