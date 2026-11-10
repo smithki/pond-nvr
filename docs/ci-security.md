@@ -11,6 +11,7 @@ those stay with the maintainer.
 | --- | --- | --- | --- |
 | Developer ID certificate and key (`.p12`) | Sign software as Pond's developer, which Macs then trust | the maintainer's keychain and password manager | the `release` environment |
 | App Store Connect API key (`.p8`) | Notarize software for the team (a Team key, Developer role: not App Store or account changes) | the same | `release` |
+| Pond's update key (EdDSA, Sparkle's) | Say which disk images Pond installs as updates: Pond refuses one that isn't signed with it | the maintainer's keychain and password manager | `release` |
 | Model signing key (Ed25519) | Say which search model Pond may use: Pond refuses one that isn't signed with it | the password manager | `models` |
 | pond-nvr-bot's private key | Act as the pond-nvr-bot GitHub App, within its permissions on the repositories it's installed on | the password manager | the environment of each job that uses it |
 
@@ -65,7 +66,8 @@ meant to grow, so these hold for every job given to it:
   them (a `.p12`, a `.p8`) live in the job's temporary folder only while they're imported, and keychains made for a job
   are deleted however it ends (`scripts/ci-keychain.sh`).
 - **What publishes needs a person.** A release is a draft until published by hand; a new model is a pull request until
-  merged.
+  merged. The appcast workflow commits to `main` itself (with the workflow's own token), but only what a published
+  release carries, signed when it was made: it holds no key.
 
 ## Before the repository is public
 
@@ -74,6 +76,9 @@ meant to grow, so these hold for every job given to it:
 - **CODEOWNERS** for `.github/`, `scripts/ci-*`, `scripts/release.sh` and the model's lock file, with code owners'
   review required, so a change to what handles the keys is always seen by the maintainer.
 - **Required reviewers** on `release` and `models`.
+- **The appcast workflow's commit**: it pushes to `main` with the workflow's token. With `main` protected, let it
+  (a bypass for GitHub Actions on that one file's path isn't offered, so: pond-nvr-bot opening a pull request
+  instead, or the appcast moved to a branch of its own that the site deploys from).
 
 ## If a key leaks
 
@@ -87,5 +92,8 @@ meant to grow, so these hold for every job given to it:
 - **The Developer ID certificate**: revoke it (developer.apple.com › Certificates), which stops Macs trusting what
   it signed from then; make a new one and release again. Tell Apple (Developer Support) if software you didn't make
   was signed with it.
+- **Pond's update key**: make a new one, put its public half in `app/Info.plist` (`SUPublicEDKey`), and release Pond
+  signed with the old one one last time, so copies already out there take the release that trusts the new key; until
+  then the old one could sign a disk image, though it would still need Pond's Developer ID and to reach the appcast.
 - **The App Store Connect key**: revoke it in App Store Connect › Users and Access › Integrations and make another.
 - Each in the password manager and the environments both (`scripts/ci-secrets.sh` puts the release's back).

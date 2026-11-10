@@ -57,6 +57,11 @@ app: build
 	swift build --package-path $(PKG) -c release --product PondApp
 	@rm -rf "$(APP)" && mkdir -p "$(APP)/Contents/MacOS"
 	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/PondApp" "$(APP)/Contents/MacOS/PondApp"
+	@# Sparkle, for updates of the app itself (docs/release.md, Updates): its framework in Contents/Frameworks, where
+	@# the app looks for it.
+	@mkdir -p "$(APP)/Contents/Frameworks"
+	@ditto "$$(swift build --package-path $(PKG) -c release --show-bin-path)/Sparkle.framework" "$(APP)/Contents/Frameworks/Sparkle.framework"
+	@install_name_tool -add_rpath @executable_path/../Frameworks "$(APP)/Contents/MacOS/PondApp"
 	@cp dist/pond "$(APP)/Contents/MacOS/pond"
 	@# The signaling service, for a demo's Ponds to meet through (on this Mac, for them alone).
 	swift build --package-path $(PKG) -c release --product pond-signal
@@ -101,6 +106,14 @@ app: build
 	fi
 	@$(CODESIGN) --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
 	@$(CODESIGN) --sign "$(SIGN)" --identifier pond-signal "$(APP)/Contents/MacOS/pond-signal"
+	@# Sparkle's parts signed as Pond is, innermost first, as its documentation says (its downloader keeps its own
+	@# entitlements).
+	@S="$(APP)/Contents/Frameworks/Sparkle.framework/Versions/B" && \
+	  $(CODESIGN) --sign "$(SIGN)" "$$S/XPCServices/Installer.xpc" && \
+	  $(CODESIGN) --sign "$(SIGN)" --preserve-metadata=entitlements "$$S/XPCServices/Downloader.xpc" && \
+	  $(CODESIGN) --sign "$(SIGN)" "$$S/Autoupdate" && \
+	  $(CODESIGN) --sign "$(SIGN)" "$$S/Updater.app" && \
+	  $(CODESIGN) --sign "$(SIGN)" "$(APP)/Contents/Frameworks/Sparkle.framework"
 	@$(CODESIGN) --sign "$(SIGN)" --entitlements app/Pond.entitlements "$(APP)"
 	@echo "✓ $(APP)"
 	@# The login service may run the pond just replaced: macOS then stops letting the running copy reach the

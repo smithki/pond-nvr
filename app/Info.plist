@@ -2,17 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDisplayName</key>
+	<string>Pond NVR</string>
+	<key>CFBundleExecutable</key>
+	<string>PondApp</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
-	<key>CFBundleExecutable</key>
-	<string>PondApp</string>
 	<key>CFBundleIdentifier</key>
 	<string>camera.pond</string>
 	<key>CFBundleName</key>
-	<string>Pond NVR</string>
-	<key>CFBundleDisplayName</key>
 	<string>Pond NVR</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -20,15 +20,25 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>27.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>27.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Pond sends your voice to a camera’s speaker while you talk through it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Pond connects to your cameras on the local network to check them and record them.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pond sends your voice to a camera’s speaker while you talk through it.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://pond.camera/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>K39HAu2d5XKuDNfn4iBlL+esk538RR+MTGoa8wGR9E4=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

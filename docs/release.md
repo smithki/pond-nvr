@@ -118,4 +118,23 @@ uses too), then the tag `v0.1.0` on that commit, pushed. It refuses to when:
 The draft goes up before the tag, so the workflow the tag starts finds that release there, with its disk image,
 and builds nothing (a minute on Linux, its *check* job). Publish the draft on GitHub after a look, as with CI's.
 
-Not yet: updates from within the app (Sparkle and a signed feed).
+## Updates
+
+Pond updates itself with [Sparkle](https://sparkle-project.org) (2.10.1, MIT): it asks pond.camera's appcast
+(`pond.camera/appcast.xml`, from `site/public/appcast.xml`) daily, or when asked (Pond › Check for Updates…, or
+Settings › Advanced), and offers a newer version with its notes. It installs one only if its disk image is signed
+with Pond's update key (an EdDSA key; its public half is `SUPublicEDKey` in `app/Info.plist`) and the app in it with
+the same Developer ID. Nothing about the Mac is sent with a check (`SUEnableSystemProfiling` off). After an update,
+the app restarts the recorder on its new copy of pond (it was still running the old one). Not in a demo.
+
+- **The key**, once: `src/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account pond` makes it, keeps the private
+  half in the login keychain and prints the public half, for `SUPublicEDKey`. Kept in the password manager too
+  (`generate_keys --account pond -x FILE` exports it), and in the `release` environment as `SPARKLE_ED_KEY`
+  (`scripts/ci-secrets.sh`).
+- **Each release**: `CFBundleVersion` one higher than the last (Sparkle compares it; `make release` refuses one that
+  isn't). `make release` signs the disk image (`sign_update`) and writes `Pond-VERSION.sparkle` beside it: the
+  signature, the size and the versions. It's published with the release (CI's or `make publish`'s).
+- **The appcast**, when the release is published on GitHub (the draft, by hand): the appcast workflow
+  (`.github/workflows/appcast.yml`) takes the release's `.sparkle` and its changelog section and adds its entry
+  (`scripts/appcast.py`), committed to `main`, which deploys pond.camera. Until a release is published, no Pond is
+  offered it. (It downloads the disk image from the release, so updates reach people once the repository is public.)

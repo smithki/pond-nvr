@@ -28,6 +28,12 @@ struct PondApp: App {
         // it stay closed (AppDelegate).
         .defaultLaunchBehavior(.presented)
         .commands {
+            // Updates of Pond itself (Updates: Sparkle), under About Pond.
+            CommandGroup(after: .appInfo) {
+                if Updates.shared.available {
+                    CheckForUpdatesButton(updates: Updates.shared)
+                }
+            }
             // The standard Quit is disabled while a sheet is open; this one closes the sheet and quits.
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Pond") { AppDelegate.quit() }.keyboardShortcut("q")

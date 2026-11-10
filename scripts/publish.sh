@@ -1,7 +1,8 @@
 #!/bin/sh
 # Publishes, from this Mac, the release make release made: what the release workflow does after building, for when
-# CI can't make it (docs/release.md, When CI can't). A draft GitHub release with the disk image, its checksum and the
-# changelog's section as its notes, then its tag, pushed. The draft is published by hand, after a look, as CI's are.
+# CI can't make it (docs/release.md, When CI can't). A draft GitHub release with the disk image, its checksum and its
+# Sparkle signature, and the changelog's section as its notes, then its tag, pushed. The draft is published by hand,
+# after a look, as CI's are.
 #
 #   make release VERSION=0.1.0 && make publish VERSION=0.1.0
 #
@@ -18,7 +19,7 @@ TAG="v$VERSION"
 fail() { echo "✗ $1" >&2; exit 1; }
 
 [ -n "$VERSION" ] || fail "Which version? make publish VERSION=0.1.0"
-[ -e "$DMG" ] && [ -e "$DMG.sha256" ] && [ -e "$OUT/Pond-$VERSION.commit" ] \
+[ -e "$DMG" ] && [ -e "$DMG.sha256" ] && [ -e "$OUT/Pond-$VERSION.sparkle" ] && [ -e "$OUT/Pond-$VERSION.commit" ] \
     || fail "No release of $VERSION in $OUT: make release VERSION=$VERSION first."
 COMMIT=$(git rev-parse HEAD)
 [ "$(cat "$OUT/Pond-$VERSION.commit")" = "$COMMIT" ] \
@@ -46,7 +47,7 @@ scripts/release-notes.sh "$VERSION" > "$NOTES"
 
 echo "Publishing Pond $VERSION ($(git rev-parse --short HEAD)) as a draft…"
 gh release create "$TAG" --draft --target "$COMMIT" --title "Pond $VERSION" --notes-file "$NOTES" \
-    "$DMG" "$DMG.sha256"
+    "$DMG" "$DMG.sha256" "$OUT/Pond-$VERSION.sparkle"
 git tag -a "$TAG" -m "Pond $VERSION" "$COMMIT"
 git push -q origin "refs/tags/$TAG"
 echo "✓ A draft release of Pond $VERSION, and its tag $TAG: publish it on GitHub after a look."

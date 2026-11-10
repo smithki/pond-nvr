@@ -1,0 +1,56 @@
+# Pond's appcast, the feed Sparkle offers updates of the app from (site/public/appcast.xml, served at
+# pond.camera/appcast.xml): when a release is published on GitHub (its draft published by hand, after a look), its
+# entry is added from the release's own Pond-VERSION.sparkle (Sparkle's signature of its disk image, made by make
+# release) and the changelog, and committed to main, which deploys pond.camera. Needs no key: the signature was made
+# with the release. (docs/release.md, Updates.)
+name: Appcast
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag (v0.2.0)
+        required: true
+
+permissions:
+  contents: write   # the commit to main
+
+concurrency:
+  group: appcast
+  cancel-in-progress: false
+
+jobs:
+  appcast:
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+
+      - name: Its entry
+        id: entry
+        run: |
+          version=${TAG#v}
+          if ! gh release download "$TAG" --pattern "Pond-$version.sparkle" --dir "$RUNNER_TEMP"; then
+            echo "Pond $version's release has no Sparkle signature (made before updates were): not in the appcast." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 scripts/appcast.py "$version" "$RUNNER_TEMP/Pond-$version.sparkle"
+          echo "added=true" >> "$GITHUB_OUTPUT"
+
+      - name: Committed to main
+        if: steps.entry.outputs.added == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/public/appcast.xml
+          git diff --cached --quiet && exit 0
+          git commit -m "Appcast: Pond ${TAG#v}"
+          git push origin HEAD:main

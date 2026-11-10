@@ -64,6 +64,8 @@ jobs:
         run: scripts/ci-keychain.sh setup
 
       - name: make release
+        env:
+          SPARKLE_ED_KEY: ${{ secrets.SPARKLE_ED_KEY }}
         run: make release VERSION="${GITHUB_REF_NAME#v}"
 
       - name: A draft release
@@ -74,7 +76,7 @@ jobs:
           scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Pond $version" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            "dist/release/Pond-$version.dmg" "dist/release/Pond-$version.dmg.sha256"
+            "dist/release/Pond-$version.dmg" "dist/release/Pond-$version.dmg.sha256" "dist/release/Pond-$version.sparkle"
 
       - name: Remove the release keychain
         if: always()

@@ -56,6 +56,7 @@ struct AdvancedSettings: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if Updates.shared.available { UpdatesSection() }
             Section {
                 LabeledContent("Version", value: Brand.version)
                 LocationRow(symbol: "doc.text", path: model.store.path)

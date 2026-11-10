@@ -123,6 +123,8 @@ final class AppModel {
     /// A camera check is waiting for permission to reach the local network (macOS is asking).
     private(set) var waitingForLocalNetwork = false
     private(set) var serviceState: ServiceControl.State = .notInstalled
+    /// Whether this launch has looked whether the recorder runs an older copy of pond (restartRecorderIfOutOfDate).
+    @ObservationIgnored var checkedRecorderCopy = false
     /// Remote access as the service has it (the Ponds paired, those connected), for the Pond switcher.
     var remoteStatus: ControlSocket.RemoteStatus?
     /// The other Ponds paired with this one, and their cameras (`remote.ponds`), shown beside this Mac's.
@@ -607,6 +609,8 @@ final class AppModel {
         // Running, and not known since when: it started with what is saved now (the app's launch).
         if case .running = serviceState {
             if recorderSettings == nil { recorderStarted() }
+            // (After an update: the recorder on the new copy.)
+            restartRecorderIfOutOfDate()
         } else {
             recorderSettings = nil
         }

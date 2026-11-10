@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pond's releases, for Sparkle (updates of the app itself), newest first. Each item is added by the appcast
+     workflow when its release is published on GitHub (scripts/appcast.py): don't edit one by hand, as Sparkle checks
+     each download against its signature. docs/release.md, Updates. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Pond</title>
+    <link>https://pond.camera</link>
+    <description>Pond's releases</description>
+    <language>en</language>
+  </channel>
+</rss>

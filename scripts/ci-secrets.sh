@@ -1,7 +1,7 @@
 #!/bin/bash
 # Puts CI's keys into GitHub's environments, from 1Password (docs/ci-security.md says what each is for):
-#   release (tags v* only): the Developer ID certificate and its password, and the App Store Connect API key
-#     notarization logs in with, for the release workflow (.github/workflows/release.yml);
+#   release (tags v* only): the Developer ID certificate and its password, the App Store Connect API key
+#     notarization logs in with, and Pond's update key (Sparkle's), for the release workflow (release.yml);
 #   models (main only): Pond's GitHub App (its ID and private key), which publishes search's models to pond-models,
 #     and the model signing key, which signs them for pond.camera's manifest.
 # Each value goes from 1Password to GitHub through a pipe: never shown, never written to a file. Run it on your own
@@ -30,6 +30,7 @@ P12_PASSWORD=""         # the .p12's password: op://…
 P8_DOCUMENT=""          # the App Store Connect API key, AuthKey_KEYID.p8 (a Team key, Developer role)
 ASC_KEY_ID=""           # the key's ID (in the .p8's name), or op://…
 ASC_ISSUER_ID=""        # the Issuer ID (App Store Connect › Users and Access › Integrations), or op://…
+SPARKLE_KEY_DOCUMENT="" # Pond's update key (generate_keys --account pond -x), a Document item
 BOT_APP_ID=""           # Pond's GitHub App's ID (its settings page), or op://…
 BOT_KEY_DOCUMENT=""     # its private key (.pem), a Document item
 MODEL_KEY_DOCUMENT=""   # the model signing key (swift scripts/search-model-sign.swift new-key), a Document item
@@ -39,7 +40,7 @@ EOF
 fi
 # shellcheck source=/dev/null
 . "$CONFIG"
-for name in VAULT P12_DOCUMENT P12_PASSWORD P8_DOCUMENT ASC_KEY_ID ASC_ISSUER_ID BOT_APP_ID BOT_KEY_DOCUMENT MODEL_KEY_DOCUMENT; do
+for name in VAULT P12_DOCUMENT P12_PASSWORD P8_DOCUMENT ASC_KEY_ID ASC_ISSUER_ID SPARKLE_KEY_DOCUMENT BOT_APP_ID BOT_KEY_DOCUMENT MODEL_KEY_DOCUMENT; do
     [ -n "${!name:-}" ] || fail "$name is empty in $CONFIG."
 done
 
@@ -86,6 +87,7 @@ put release DEVELOPER_ID_P12_PASSWORD "$(value "$P12_PASSWORD")"
 put release ASC_KEY_P8 "$(op document get "$P8_DOCUMENT" --vault "$VAULT")"
 put release ASC_KEY_ID "$(value "$ASC_KEY_ID")"
 put release ASC_ISSUER_ID "$(value "$ASC_ISSUER_ID")"
+put release SPARKLE_ED_KEY "$(op document get "$SPARKLE_KEY_DOCUMENT" --vault "$VAULT")"
 
 environment models branch main
 put models BOT_APP_ID "$(value "$BOT_APP_ID")"

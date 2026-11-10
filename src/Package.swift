@@ -5,6 +5,7 @@
 import PackageDescription
 
 var commandDependencies: [Target.Dependency] = ["PondCLI", "PondCore", "Ingest", "Recorder", "Control"]
+var dependencies: [Package.Dependency] = []
 var targets: [Target] = [
     .target(name: "PondCore"),
     .target(name: "Ingest"),
@@ -67,10 +68,12 @@ targets.append(.testTarget(name: "SoakTests", dependencies: ["Watch", "HAPCamera
 targets.append(.target(name: "Understanding"))
 targets.append(.testTarget(name: "UnderstandingTests", dependencies: ["Understanding"], resources: [.copy("Fixtures")]))
 commandDependencies += ["PondMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding", "Remote", "Demo"]
+// Updates of the app itself: Sparkle (MIT), a version pinned (docs/release.md, Updates).
+dependencies.append(.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"))
 // The app: settings and the recorder's state (make app bundles it as Pond NVR.app).
 targets.append(.executableTarget(name: "PondApp", dependencies: ["PondCore", "PondMac", "Ingest", "Control", "Recorder",
                                                                "HAP", "HAPCamera", "Devices", "Health", "Watch", "Detection",
-                                                               "Understanding", "Demo"]))
+                                                               "Understanding", "Demo", .product(name: "Sparkle", package: "Sparkle")]))
 targets.append(.testTarget(name: "PondAppTests", dependencies: ["PondApp", "PondCore", "Ingest", "Control", "Watch", "Understanding"],
                            resources: [.copy("Fixtures")]))
 #endif
@@ -81,5 +84,6 @@ let package = Package(
     name: "Pond",
     platforms: [.macOS("27.0")],
     products: [.executable(name: "pond", targets: ["pond"])],
+    dependencies: dependencies,
     targets: targets
 )
