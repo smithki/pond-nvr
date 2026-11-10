@@ -3,7 +3,7 @@
 # (scripts/ci-secrets.sh puts them there; docs/release.md, Releases from CI), and makes a draft GitHub release with
 # the disk image, its checksum and the changelog's section as its notes. Published by hand, after a look.
 #
-# The runner: GitHub's macOS 27 one, with Xcode 27 (the variable RELEASE_RUNNER names another: a machine of yours
+# The runner: GitHub's xcode-27 image (macOS 27 with Xcode 27) (the variable RELEASE_RUNNER names another: a machine of yours
 # must run nothing else).
 name: Release
 
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ${{ vars.RELEASE_RUNNER || 'macos-27' }}
+    runs-on: ${{ vars.RELEASE_RUNNER || 'xcode-27' }}
     environment: release
     timeout-minutes: 120
     steps:

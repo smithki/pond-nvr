@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   sign:
-    runs-on: macos-27
+    runs-on: macos-latest   # any macOS: it only needs Swift
     environment: models
     timeout-minutes: 15
     steps:
