@@ -58,8 +58,8 @@ Making the model on each machine suits a developer's first build, not releases: 
 - **Pinned in the repository.** A small lock file (such as `models/search.lock`) naming the archive's URL and SHA-256. `make app` downloads it (about 390 MB, seconds), checks the hash and unpacks it into `models/search/`, and refuses one that doesn't match; converting stays as a fallback for a fork without access, or is dropped.
 - **Cached by CI**, keyed by the lock file's hash, so a runner downloads it once.
 - **A new version only on purpose.** `scripts/search-model.sh` (or a `--convert` of it) makes a new one: convert, check with `convert-siglip.py --check`, run `SigLIPTests`, publish, bump the lock file. A change of model, or of its conversion, changes its embeddings. The database already keeps the manifest's name beside each embedding (`embedder`, now `SigLIP 2 base`) and the service embeds an event again when it differs; so the published model's name has to carry its version (`SigLIP 2 base v1`), or a new conversion under the same name would be compared with the old one's embeddings.
-- **Its licence with it.** SigLIP 2 is Apache-2.0: the archive and the app carry its licence and a NOTICE saying it was converted to Core ML and quantized, and by whom.
-- **In the app or on first use**, as the signed release settles (roadmap: A signed, notarized release): built in, a release is about 390 MB bigger; downloaded on first use, the same lock file says what the app fetches and checks.
+- **Its licence with it.** SigLIP 2 is Apache-2.0: the app carries its licence (`licenses/Apache-2.0.txt`) and `NOTICE` says it was converted to Core ML and quantized, and by whom; a published archive would carry them too.
+- **In the app**: settled for the first release, built in (about 390 MB bigger), so a release searches pictures at once with nothing fetched later ([release.md](release.md)). For now each Mac that makes releases converts its own copy; a published, pinned model is what CI will need.
 
 MobileCLIP, which this was first planned with, is left out: Apple's licence for its weights is for research.
 

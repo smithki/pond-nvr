@@ -18,8 +18,12 @@ endif
 # still holds each build's own hash, so after a rebuild it asks once more per password. Else ad hoc.
 APPLE_DEV := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
 SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/dev/null | grep '"Pond Local Signing"'),Pond Local Signing,-))
+# Every build under the hardened runtime, as a notarized release must be: what it stops (and the entitlements that
+# allow it again, app/Pond.entitlements) shows in everyday use, not first at release. A secure timestamp only for a
+# release (it asks Apple's server; make release sets SIGN_TIMESTAMP=1). Ad hoc signing can't have the runtime.
+CODESIGN := codesign --force $(if $(filter -,$(SIGN)),,--options runtime $(if $(SIGN_TIMESTAMP),--timestamp,--timestamp=none))
 
-.PHONY: help build app demo check hooks test test-docker clean install update signing
+.PHONY: help build app demo check hooks test test-docker clean install update signing release
 
 help:
 	@echo "make build          build the pond command (release) into dist/"
@@ -35,13 +39,14 @@ help:
 	@echo "                    pond demo list); quits one already open; FRESH=1 starts the scenario over"
 	@echo "make clean          remove dist/ and the Swift build folder"
 	@echo "make signing        once per Mac: a local signing certificate, so Keychain access survives rebuilds"
+	@echo "make release VERSION=0.1.0  a signed, notarized Pond-0.1.0.dmg in dist/release (docs/release.md)"
 
 build:
 	swift build --package-path $(PKG) -c release
 	@# A new file rather than overwriting: macOS kills programs started from a file rewritten in place
 	@# while another copy of it runs (the HomeKit accessory, the login service).
 	@mkdir -p dist && rm -f dist/pond && cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond" dist/pond
-	@codesign --force --sign "$(SIGN)" --identifier pond dist/pond
+	@$(CODESIGN) --sign "$(SIGN)" --identifier pond dist/pond
 	@echo "✓ dist/pond$(if $(filter -,$(SIGN)), (signed ad hoc; make signing to stop repeated Keychain prompts))"
 
 # Pond NVR.app: the app's executable plus pond itself (Contents/MacOS/pond), which the login service runs when it is
@@ -62,6 +67,9 @@ app: build
 	@# The icon's own mark, for the menu bar (cropped to it and drawn as a template image by the app, so it follows
 	@# the icon when that changes).
 	@cp app/AppIcon.icon/Assets/mark.svg "$(APP)/Contents/Resources/Mark.svg"
+	@# Pond's licence and notices, and the licences of what's built in (the models), with every copy of the app.
+	@cp LICENSE NOTICE "$(APP)/Contents/Resources/" && rm -rf "$(APP)/Contents/Resources/Licenses" && \
+	  cp -R licenses "$(APP)/Contents/Resources/Licenses"
 	@# (Every path whole: actool's helper can resolve a relative one against a folder of its own, and fail.)
 	@out="$$(cd "$(APP)/Contents/Resources" && pwd)" && \
 	  xcrun actool "$(CURDIR)/app/AppIcon.icon" --compile "$$out" --platform macosx --minimum-deployment-target 27.0 \
@@ -85,9 +93,9 @@ app: build
 	  for m in models/search/*.mlpackage; do xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Search" >/dev/null; done && \
 	  cp models/search/siglip2.json models/search/siglip2-tokenizer.json "$(APP)/Contents/Resources/Search/"; \
 	fi
-	@codesign --force --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
-	@codesign --force --sign "$(SIGN)" --identifier pond-signal "$(APP)/Contents/MacOS/pond-signal"
-	@codesign --force --sign "$(SIGN)" "$(APP)"
+	@$(CODESIGN) --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
+	@$(CODESIGN) --sign "$(SIGN)" --identifier pond-signal "$(APP)/Contents/MacOS/pond-signal"
+	@$(CODESIGN) --sign "$(SIGN)" --entitlements app/Pond.entitlements "$(APP)"
 	@echo "✓ $(APP)"
 	@# The login service may run the pond just replaced: macOS then stops letting the running copy reach the
 	@# network ("No route to host"), so it is restarted on the new one.
@@ -127,6 +135,10 @@ update: install
 	@if /usr/local/bin/pond service status >/dev/null 2>&1 && /bin/launchctl print gui/$$(id -u)/camera.pond.recorder >/dev/null 2>&1; then \
 	  /usr/local/bin/pond service restart; \
 	fi
+
+# A release: signed with a Developer ID, notarized and stapled, in a disk image (scripts/release.sh, docs/release.md).
+release:
+	@scripts/release.sh "$(VERSION)"
 
 signing:
 	@scripts/setup-signing.sh
