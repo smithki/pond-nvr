@@ -1,0 +1,21 @@
+# Who must see a change before it's merged, once main takes pull requests (docs/ci-security.md, Before the repository
+# is public): what handles CI's keys, makes and publishes releases, and says what Pond downloads and trusts.
+/.github/                       @smithki
+/scripts/ci-*                   @smithki
+/scripts/release.sh             @smithki
+/scripts/publish.sh             @smithki
+/scripts/release-notes.sh       @smithki
+/scripts/appcast.py             @smithki
+/scripts/sparkle-verify.swift   @smithki
+/scripts/model-fetch.sh         @smithki
+/scripts/search-model-*         @smithki
+/scripts/siglip-requirements.txt @smithki
+/models/                        @smithki
+/site/data/                     @smithki
+/site/public/appcast.xml        @smithki
+/app/Info.plist                 @smithki
+/app/Pond.entitlements          @smithki
+/src/Sources/Understanding/SearchModels.swift @smithki
+/src/Sources/PondApp/Updates.swift @smithki
+/SECURITY.md                    @smithki
+/CLA.md                         @smithki

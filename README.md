@@ -98,7 +98,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check.
 - [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.
 - [docs/release.md](docs/release.md): making a release (signed, notarized, in a disk image)
-- [site/](site/README.md): pond.camera, the landing page (a static Next.js site)
+- [site/](site/README.md): pond.camera: the website, and the manifest and appcast Pond downloads by
 - [docs/remote.md](docs/remote.md): other Ponds, from away: pairing, how a connection is made, what each party sees; [deploy/](deploy/README.md): the signaling service (and an optional relay or mesh) to run yourself.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
@@ -111,4 +111,5 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 
 GNU Affero General Public License v3.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). It includes Ultralytics YOLO26 (AGPL-3.0) as its built-in detection model; other models can be used in its place ([docs/detection.md](docs/detection.md)).
 
-Contributions are welcome under the [Contributor License Agreement](CLA.md): see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues are welcome; pull requests wait for the [Contributor License Agreement](CLA.md)'s review: see
+[CONTRIBUTING.md](CONTRIBUTING.md). Security problems: [SECURITY.md](SECURITY.md), privately.

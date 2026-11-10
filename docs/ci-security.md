@@ -69,16 +69,22 @@ meant to grow, so these hold for every job given to it:
   merged. The appcast workflow commits to `main` itself (with the workflow's own token), but only what a published
   release carries, signed when it was made: it holds no key.
 
-## Before the repository is public
+## Protecting what's public
 
-- **Protect `main`**: no force pushes or deletion, and changes through pull requests. The `models` environment trusts
-  whatever's on `main`, so whoever can push to it can run the model workflow with its keys.
-- **CODEOWNERS** for `.github/`, `scripts/ci-*`, `scripts/release.sh` and the model's lock file, with code owners'
-  review required, so a change to what handles the keys is always seen by the maintainer.
-- **Required reviewers** on `release` and `models`.
-- **The appcast workflow's commit**: it pushes to `main` with the workflow's token. With `main` protected, let it
-  (a bypass for GitHub Actions on that one file's path isn't offered, so: pond-nvr-bot opening a pull request
-  instead, or the appcast moved to a branch of its own that the site deploys from).
+- **`main`**: a ruleset ("main: no force pushes or deletion"): nothing pushed to it rewrites its history or removes it.
+  Changes don't go through pull requests yet (the maintainer pushes them); when they do, the ruleset requires them,
+  with the code owners' review.
+- **CODEOWNERS** (`.github/CODEOWNERS`): what handles the keys, makes and publishes releases, and says what Pond
+  downloads and trusts (the workflows, the release and model scripts, the locks, the manifest and appcast, the app's
+  Info.plist): a pull request touching them asks for the maintainer's review.
+- **Outside contributions**: not merged until the CLA's review and its check (CONTRIBUTING.md); a first-time
+  contributor's pull request runs no workflow until approved, and none of them names an environment.
+- **Required reviewers** on `release` and `models` (the maintainer): a job needing their keys waits for approval.
+- **GitHub's own checks**: Dependabot alerts, secret scanning with push protection, and private vulnerability
+  reporting (SECURITY.md).
+- **The appcast workflow's commit**: it pushes to `main` with the workflow's own token, which the ruleset allows (it
+  adds a commit, rewriting nothing). If `main` comes to require pull requests, it moves to a pull request opened by
+  pond-nvr-bot.
 
 ## If a key leaks
 

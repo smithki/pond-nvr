@@ -2,6 +2,11 @@
 
 Thank you for helping. Pond is open source under the [GNU Affero General Public License v3.0](LICENSE).
 
+> **Pull requests aren't accepted yet.** The Contributor License Agreement below is waiting for a lawyer's review,
+> and the check that asks for it isn't running yet, so nothing from outside can be merged for now. Issues are
+> welcome meanwhile: bugs (with a demo scenario or the doctor's report: [docs/demo.md](docs/demo.md)), cameras that
+> do or don't work, and ideas. A vulnerability goes through [SECURITY.md](SECURITY.md), privately.
+
 ## Before your first pull request
 
 Contributions are accepted under the [Pond Contributor License Agreement](CLA.md). You keep the copyright in your work. Every feature of Pond will always be open source; the agreement lets the project also offer it under other licences (for example, a commercial licence alongside the AGPL), and use contributions in companion apps such as an iPhone app, without having to find every contributor again. You'll be asked to sign it once, in your first pull request: a check on the pull request asks you to read it and post, as a comment of its own, the statement that signs it (a review or approval doesn't count). It records your GitHub account, the date, and the version of the CLA you signed (its version number and the SHA-256 of its text, a copy of which is kept). Nothing is merged before that. Contributions you made before signing are covered only if they're named in that pull request.
