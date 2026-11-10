@@ -3,8 +3,8 @@
 # (scripts/ci-secrets.sh puts them there; docs/release.md, Releases from CI), and makes a draft GitHub release with
 # the disk image, its checksum and the changelog's section as its notes. Published by hand, after a look.
 #
-# The runner: the variable RELEASE_RUNNER (a macOS 27 one: GitHub's own when it has it, or a machine of yours that
-# runs nothing else), else macos-latest.
+# The runner: GitHub's macOS 27 one, with Xcode 27 (the variable RELEASE_RUNNER names another: a machine of yours
+# must run nothing else).
 name: Release
 
 on:
@@ -21,15 +21,15 @@ permissions:
 
 jobs:
   release:
-    runs-on: ${{ vars.RELEASE_RUNNER || 'macos-latest' }}
+    runs-on: ${{ vars.RELEASE_RUNNER || 'macos-27' }}
     environment: release
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Search's picture model, converted once and kept between releases (a few GB to convert, about 390 MB made),
       # until a published one with a pinned hash replaces it (docs/search.md).
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: models/search
           key: search-model-${{ hashFiles('scripts/search-model.sh', 'scripts/convert-siglip.py') }}

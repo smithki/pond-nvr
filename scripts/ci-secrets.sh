@@ -1,8 +1,11 @@
 #!/bin/bash
-# Puts the release's secrets into GitHub, from 1Password, for the release workflow (.github/workflows/release.yml):
-# the Developer ID certificate and its password, and the App Store Connect API key notarization logs in with. Each
-# value goes from 1Password to GitHub through a pipe: never shown, never written to a file. Run it on your own Mac
-# when they're first set up and whenever one is renewed in 1Password. docs/release.md, Releases from CI.
+# Puts CI's keys into GitHub's environments, from 1Password (docs/ci-security.md says what each is for):
+#   release (tags v* only): the Developer ID certificate and its password, and the App Store Connect API key
+#     notarization logs in with, for the release workflow (.github/workflows/release.yml);
+#   models (main only): Pond's GitHub App (its ID and private key), which publishes search's models to pond-models,
+#     and the model signing key, which signs them for pond.camera's manifest.
+# Each value goes from 1Password to GitHub through a pipe: never shown, never written to a file. Run it on your own
+# Mac when they're first set up and whenever one is renewed in 1Password. docs/release.md, Releases from CI.
 #
 # Where they are in your 1Password is yours, not the repository's: it's read from ~/.config/pond/release-secrets
 # (RELEASE_SECRETS to name another file), which this script writes as a template the first time.
@@ -12,7 +15,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG=${RELEASE_SECRETS:-$HOME/.config/pond/release-secrets}
-ENVIRONMENT=release
 
 fail() { echo "✗ $1" >&2; exit 1; }
 
@@ -28,13 +30,16 @@ P12_PASSWORD=""         # the .p12's password: op://…
 P8_DOCUMENT=""          # the App Store Connect API key, AuthKey_KEYID.p8 (a Team key, Developer role)
 ASC_KEY_ID=""           # the key's ID (in the .p8's name), or op://…
 ASC_ISSUER_ID=""        # the Issuer ID (App Store Connect › Users and Access › Integrations), or op://…
+BOT_APP_ID=""           # Pond's GitHub App's ID (its settings page), or op://…
+BOT_KEY_DOCUMENT=""     # its private key (.pem), a Document item
+MODEL_KEY_DOCUMENT=""   # the model signing key (swift scripts/search-model-sign.swift new-key), a Document item
 EOF
     chmod 600 "$CONFIG"
     fail "Say where they are in 1Password, in $CONFIG (a template's there now), then run this again."
 fi
 # shellcheck source=/dev/null
 . "$CONFIG"
-for name in VAULT P12_DOCUMENT P12_PASSWORD P8_DOCUMENT ASC_KEY_ID ASC_ISSUER_ID; do
+for name in VAULT P12_DOCUMENT P12_PASSWORD P8_DOCUMENT ASC_KEY_ID ASC_ISSUER_ID BOT_APP_ID BOT_KEY_DOCUMENT MODEL_KEY_DOCUMENT; do
     [ -n "${!name:-}" ] || fail "$name is empty in $CONFIG."
 done
 
@@ -54,27 +59,37 @@ value() {
 
 # The value is held in memory only to check it isn't empty (a failed read sets nothing), then piped to GitHub.
 put() {
-    local name=$1 secret=$2
+    local environment=$1 name=$2 secret=$3
     [ -n "$secret" ] || fail "$name came back empty from 1Password: nothing set."
-    printf '%s' "$secret" | gh secret set "$name" --env "$ENVIRONMENT" --repo "$REPO" >/dev/null
-    echo "✓ $name"
+    printf '%s' "$secret" | gh secret set "$name" --env "$environment" --repo "$REPO" >/dev/null
+    echo "  ✓ $name"
 }
 
-# The environment, usable only by tags v* (a release), so no branch's or pull request's workflow reads its secrets.
-# (Required reviewers too once the repository is public: GitHub's private repositories on Pro don't have them.)
-echo "The $ENVIRONMENT environment of $REPO, for tags v* only"
-gh api -X PUT "repos/$REPO/environments/$ENVIRONMENT" --input - >/dev/null <<'EOF'
+# An environment that only runs of the given kind and name can use (a tag pattern, or a branch), so no other
+# branch's or pull request's workflow reads its secrets. (Required reviewers too once the repository is public:
+# GitHub's private repositories on Pro don't have them.)
+environment() {
+    local name=$1 type=$2 pattern=$3
+    echo "The $name environment of $REPO, for $type $pattern only"
+    gh api -X PUT "repos/$REPO/environments/$name" --input - >/dev/null <<'JSON'
 {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
-EOF
-if [ -z "$(gh api "repos/$REPO/environments/$ENVIRONMENT/deployment-branch-policies" \
-        --jq '.branch_policies[] | select(.type == "tag" and .name == "v*") | .id')" ]; then
-    gh api -X POST "repos/$REPO/environments/$ENVIRONMENT/deployment-branch-policies" -f name='v*' -f type=tag >/dev/null
-fi
+JSON
+    if [ -z "$(gh api "repos/$REPO/environments/$name/deployment-branch-policies" \
+            --jq ".branch_policies[] | select(.type == \"$type\" and .name == \"$pattern\") | .id")" ]; then
+        gh api -X POST "repos/$REPO/environments/$name/deployment-branch-policies" -f name="$pattern" -f type="$type" >/dev/null
+    fi
+}
 
-put DEVELOPER_ID_P12 "$(op document get "$P12_DOCUMENT" --vault "$VAULT" | base64)"
-put DEVELOPER_ID_P12_PASSWORD "$(value "$P12_PASSWORD")"
-put ASC_KEY_P8 "$(op document get "$P8_DOCUMENT" --vault "$VAULT")"
-put ASC_KEY_ID "$(value "$ASC_KEY_ID")"
-put ASC_ISSUER_ID "$(value "$ASC_ISSUER_ID")"
+environment release tag 'v*'
+put release DEVELOPER_ID_P12 "$(op document get "$P12_DOCUMENT" --vault "$VAULT" | base64)"
+put release DEVELOPER_ID_P12_PASSWORD "$(value "$P12_PASSWORD")"
+put release ASC_KEY_P8 "$(op document get "$P8_DOCUMENT" --vault "$VAULT")"
+put release ASC_KEY_ID "$(value "$ASC_KEY_ID")"
+put release ASC_ISSUER_ID "$(value "$ASC_ISSUER_ID")"
 
-echo "✓ The release's secrets are in $REPO's $ENVIRONMENT environment."
+environment models branch main
+put models BOT_APP_ID "$(value "$BOT_APP_ID")"
+put models BOT_PRIVATE_KEY "$(op document get "$BOT_KEY_DOCUMENT" --vault "$VAULT")"
+put models MODEL_SIGNING_KEY "$(op document get "$MODEL_KEY_DOCUMENT" --vault "$VAULT")"
+
+echo "✓ CI's keys are in $REPO's release and models environments."

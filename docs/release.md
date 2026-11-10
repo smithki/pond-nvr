@@ -82,9 +82,11 @@ secrets in from 1Password, on your own Mac, piping each value from `op` to `gh` 
 a file. Where they are in your 1Password stays out of the repository: the script reads it from
 `~/.config/pond/release-secrets`, writing a template there the first time. Run it again whenever one is renewed.
 
-The runner is the repository variable `RELEASE_RUNNER`, else `macos-latest`: it must have macOS 27 and its Xcode. A
-machine of your own must run nothing else (not your recorder, nor pull requests' code). Search's picture model is
+The runner is GitHub's `macos-27`, with Xcode 27; the repository variable `RELEASE_RUNNER` names another, which must
+have macOS 27 and its Xcode too. A machine of your own must run nothing else (not your recorder, nor pull requests' code). Search's picture model is
 converted on the first release and kept in the Actions cache; a published one with a pinned hash replaces that
 (search.md).
+
+What guards these keys, and what to do if one leaks: [ci-security.md](ci-security.md).
 
 Not yet: updates from within the app (Sparkle and a signed feed).
