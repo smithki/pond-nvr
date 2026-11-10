@@ -2,13 +2,18 @@
 
 What's in each release. What's been built, goal by goal and how, is in [docs/done.md](docs/done.md).
 
-## Unreleased
+## 0.2.0
 
 ### Search
 - **The picture model is downloaded by Pond**, not built into the app (the download is about 350 MB smaller): on
   first run, the version pond.camera names, signed by Pond's own key and checked before it's used. Pond checks once a
   week for a new version (Settings › General: Download picture model updates, and Check for Updates), and while a
   new one indexes every event again, search keeps finding them all.
+
+### Updates
+- **Pond updates itself** (Sparkle): Pond › Check for Updates…, and checking daily by itself (Settings › Advanced).
+  An update is installed only if it's signed with Pond's update key and Developer ID; after one, the recorder starts
+  again on the new copy.
 
 ### Making Pond
 - **The models aren't in the repository**: builds download the published ones by their locks, checked by hash
