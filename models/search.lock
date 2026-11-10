@@ -1,0 +1,21 @@
+# Search's picture model as published (docs/search.md, Published versions): what it was made from, so a new
+# conversion is made only when one of these changes, and the archive Pond and its builds download, with its hash.
+# Written by scripts/search-model-package.sh; changed only on purpose, in a pull request.
+
+version = siglip2-v1
+name = SigLIP 2 base
+# The folder's layout (1: Core ML's compiled models, siglip2.json, the tokenizer), and the first Pond that takes it.
+format = 1
+minimumApp = 0.2.0
+
+# What it was made from.
+source = google/siglip2-base-patch16-224
+revision = 75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2
+converter = scripts/convert-siglip.py 9d89eea4b63191ca7e0ff3af3572a0c4699c509f309d52df06286032ba88f672
+packages = torch==2.7.0 numpy==2.2.6 transformers==5.22.2 coremltools==9.0 sentencepiece==0.2.3 pillow==13.0.0
+
+# What was published.
+archive = siglip2-v1.aar
+url = https://github.com/smithki/pond-models/releases/download/siglip2-v1/siglip2-v1.aar
+size = 350310687
+sha256 = eaae1d98dc24c66e725aa662b8909506ace61df1df83204fbf312cf62e1347b9
