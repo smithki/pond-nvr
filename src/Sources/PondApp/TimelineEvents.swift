@@ -189,7 +189,8 @@ struct EventSource: Sendable {
                                  zones: e.zones.map { zoneNames["\(e.camera)/\($0)"] ?? $0 })
             if e.category != .ring {
                 event.quieted = judge.judge(id: e.id, camera: e.camera, category: e.category, start: e.start, box: e.box,
-                                            embedding: understood[e.id].flatMap { $0.subject ?? $0.scene })
+                                            embedding: understood[e.id].flatMap { $0.subject ?? $0.scene },
+                                            embedder: understood[e.id]?.embedder)
             }
             return event
         }

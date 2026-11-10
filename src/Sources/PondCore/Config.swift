@@ -15,6 +15,9 @@ public struct Config: Codable, Equatable, Sendable {
     public var cameras: [Camera]
     /// Reaching this Mac from outside (remote access); left out, it's off.
     public var remote: Remote?
+    /// Whether the service downloads search's picture model, and new versions of it, by itself (checking pond.camera
+    /// weekly): left out, it does. Off, it downloads one only when asked (Settings › Search, Check for Updates).
+    public var searchModelUpdates: Bool?
     /// Beta and test features (Settings › Advanced): what's being tried before everyone has it, and what
     /// checking a new version needs (test scenes kept from this Pond's events). Left out, off.
     public var testFeatures: Bool?
@@ -50,6 +53,7 @@ public struct Config: Codable, Equatable, Sendable {
         retention = try c.decodeIfPresent(Retention.self, forKey: .retention) ?? Retention()
         cameras = try c.decodeIfPresent([Camera].self, forKey: .cameras) ?? []
         remote = try c.decodeIfPresent(Remote.self, forKey: .remote)
+        searchModelUpdates = try c.decodeIfPresent(Bool.self, forKey: .searchModelUpdates)
         testFeatures = try c.decodeIfPresent(Bool.self, forKey: .testFeatures)
         testFeaturesOn = try c.decodeIfPresent([String].self, forKey: .testFeaturesOn)
     }

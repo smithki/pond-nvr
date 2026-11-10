@@ -98,6 +98,20 @@ differ slightly, and a version's embeddings must stay comparable with those ever
   `SEARCH_MODEL=convert make app` converts one on this Mac instead, at the lock's revision with the lock's
   packages, for working on the conversion. Next, Pond downloads it itself, rather than having it built in (roadmap:
   A signed, notarized release).
+- **Downloaded by Pond**: the service asks pond.camera once a week (`searchModelUpdates`, on unless set off), or when
+  asked (`search-model.check` on its control socket: Settings › Search, Check for Updates), and if the version it
+  should use (signed, in a format it reads, for its version) isn't on the Mac, downloads it into
+  `~/Library/Application Support/Pond/Search/<id>/`: from where it got to if a download stopped, its size and
+  SHA-256 checked against the signed entry, unpacked, and only then put in place (`SearchModelUpdater`). What it's
+  doing is in `search-model-status.json` beside the settings, for the app. It asks for nothing but the manifest and
+  the file: no cookies, nothing about the Mac or its owner. Not in demo mode.
+- **Switching to a new version**: once one's in place, the service embeds events' pictures by it, every event again,
+  newest first (each event's embedding keeps the name of the version that made it). Meanwhile search embeds the
+  question by each version events are still embedded by, and compares each event by its own, so it keeps finding
+  what it did; what's said of events ("this wasn't anything") is compared only with pictures embedded by the same
+  version. Once every event is embedded by the new one, the feedback's embeddings are brought over to it (those whose
+  events are gone are dropped: their learnt rules stay, not their likeness), and the older downloaded versions,
+  used by nothing now, are deleted.
 
 ## From the command line
 

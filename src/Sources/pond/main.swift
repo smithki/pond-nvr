@@ -14,6 +14,7 @@ import Health
 import HAPCamera
 import PondMac
 import Remote
+import Understanding
 import Watch
 #endif
 #if canImport(Darwin)
@@ -206,7 +207,13 @@ struct RecordingAndHomeKit: ServiceRunning {
         }
         pruning.setEventHandler { health?.prune(); events?.prune(days: config.retention.events.days) }
         // Events understood for search, in the background: a sentence each, and their pictures embedded.
-        let understander = events.map { Understander(store: $0, eventsFolder: config.storage.eventsPath) { line in log.log("pond", line) } }
+        // (By the newest version of search's picture model in the support folder beside the settings, or the app's own.)
+        let modelSupport = URL(fileURLWithPath: (self.configPath as NSString).deletingLastPathComponent)
+        let understander = events.map {
+            Understander(store: $0, eventsFolder: config.storage.eventsPath, models: { SearchModels.available(support: modelSupport) }) {
+                line in log.log("pond", line)
+            }
+        }
         understander?.start()
         defer { understander?.stop() }
         // Each event's own clip, copied out of the recording once its minute's complete (kept as long as events are).
@@ -266,10 +273,25 @@ struct RecordingAndHomeKit: ServiceRunning {
                 return ControlSocket.Reply(error: .notSupported)
             }
         }
+        // Search's picture model, downloaded from pond.camera's manifest and kept up to date (weekly, unless the
+        // settings say not to; or when the app asks), into the support folder beside the settings. Not in a demo.
+        let settingsPath = self.configPath
+        let searchModel = Demo.folder != nil ? nil : SearchModelUpdater(
+            support: modelSupport, statusPath: SearchModelStatus.path(nextTo: settingsPath), appVersion: Brand.version,
+            automatic: { (try? ConfigStore(path: settingsPath).load())?.searchModelUpdates != false }) { line in log.log("pond", line) }
+        searchModel?.start()
+        defer { searchModel?.stop() }
+        if let searchModel { controls.checkSearchModel = { Task.detached(priority: .utility) { await searchModel.check() } } }
         // Search, for the app and `pond search`: done here, where what it takes is kept ready.
         if let events {
-            let search = SearchService(store: events, cameras: { cameras.cameras }, keptDays: { config.retention.events.days })
+            let search = SearchService(store: events, cameras: { cameras.cameras }, keptDays: { config.retention.events.days },
+                                       models: { SearchModels.available(support: modelSupport) })
             search.prepare()
+            // A new version downloaded: events embedded again by it, and search comparing each by its own.
+            searchModel?.installed = { _ in
+                understander?.refresh()
+                search.refresh()
+            }
             controls.search = { request in
                 await search.search(request.question ?? "", reading: request.reading, byModel: request.byModel ?? false,
                                     plain: request.plain ?? false)

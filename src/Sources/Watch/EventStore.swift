@@ -165,13 +165,14 @@ public final class EventStore: @unchecked Sendable {
     }
 
     /// How far understanding's come: the ended events with a picture, and how many of those have a sentence (or a
-    /// try at one), and embeddings.
-    public func understandingProgress() -> (events: Int, described: Int, embedded: Int) {
+    /// try at one), and embeddings (by `embedder`, the version of the picture model in use, if it's named: so after a
+    /// new one's downloaded, how far embedding them all again has come).
+    public func understandingProgress(embedder: String? = nil) -> (events: Int, described: Int, embedded: Int) {
         queue.sync {
             rows("""
-            SELECT COUNT(*), SUM(u.description IS NOT NULL), SUM(u.scene IS NOT NULL)
+            SELECT COUNT(*), SUM(u.description IS NOT NULL), SUM(u.scene IS NOT NULL AND (? IS NULL OR u.embedder = ?))
             FROM events e LEFT JOIN understanding u ON u.id = e.id WHERE e.ongoing = 0 AND e.snapshot IS NOT NULL
-            """, []) { row in (row.int(0), row.int(1), row.int(2)) }.first ?? (0, 0, 0)
+            """, [embedder, embedder]) { row in (row.int(0), row.int(1), row.int(2)) }.first ?? (0, 0, 0)
         }
     }
 

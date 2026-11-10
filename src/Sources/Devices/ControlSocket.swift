@@ -25,7 +25,9 @@ public enum ControlSocket {
         /// "controls", "ptz.move", "ptz.stop", "ptz.presets", "ptz.goto", "ptz.save", "ptz.remove",
         /// "items.values" (every item's), "item.get", "item.set", "item.do" (the item named), "talk";
         /// "privacy.list" (the private cameras; `camera` unused) and "privacy.set" (`value` on or off);
-        /// "search" (events that answer `question`; `camera` unused);
+        /// "search" (events that answer `question`; `camera` unused); "search-model.check" (pond.camera asked now
+        /// which versions of search's picture model there are, and the one to use downloaded; answered at once, the
+        /// rest seen in the search model's status file);
         /// "remote.status" (whether it's on and reachable, who's paired and connected), "remote.relay-secret" (`code`),
         /// "remote.pair" (a new pairing code), "remote.devices", "remote.unpair" (`device`), "remote.join" (`code`),
         /// "remote.connect" (`device`: a path found to it, and how), "remote.watch" (`device`'s `camera` for `seconds`,
@@ -522,6 +524,8 @@ public final class ControlServer: @unchecked Sendable {
 
     /// Search (set by the service): a question answered, as the request asks.
     public var search: (@Sendable (ControlSocket.Request) async -> SearchResult)?
+    /// Search's picture model checked for (and downloaded) now.
+    public var checkSearchModel: (@Sendable () -> Void)?
 
     /// Remote access (set by the service, when it's on): the "remote." actions.
     public var remote: (@Sendable (ControlSocket.Request) async -> ControlSocket.Reply)?
@@ -592,6 +596,10 @@ public final class ControlServer: @unchecked Sendable {
             var reply = ControlSocket.Reply()
             if let search { reply.search = await search(request) } else { reply.error = .notSupported }
             return reply
+        case "search-model.check":
+            guard let checkSearchModel else { return ControlSocket.Reply(error: .notSupported) }
+            checkSearchModel()
+            return ControlSocket.Reply()
         case let action where action.hasPrefix("media."):
             guard let media else { return ControlSocket.Reply(error: .notSupported) }
             return await media(request)

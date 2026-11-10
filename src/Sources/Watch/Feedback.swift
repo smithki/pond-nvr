@@ -70,6 +70,37 @@ extension EventStore {
         queue.sync { _ = run("DELETE FROM feedback WHERE camera = ?", [camera]) }
     }
 
+    /// What's said of events, brought over to a new version of the picture model once every event is embedded by
+    /// it: each one's embedding replaced by its event's (if the event's still kept), and those by `old` versions
+    /// still left (their events gone) dropped, as nothing compares by them any more (a learnt rule doesn't need
+    /// one). How many were brought over.
+    @discardableResult
+    public func feedbackEmbeddings(to embedder: String, dropping old: Set<String>) -> Int {
+        queue.sync {
+            let moved = rows("""
+            SELECT COUNT(*) FROM feedback f JOIN understanding u ON u.id = f.id
+            WHERE u.embedder = ? AND f.embedder IS NOT ? AND COALESCE(u.subject, u.scene) IS NOT NULL
+            """, [embedder, embedder]) { $0.int(0) }.first ?? 0
+            _ = run("""
+            UPDATE feedback SET embedding = (SELECT COALESCE(u.subject, u.scene) FROM understanding u WHERE u.id = feedback.id),
+                embedder = ?
+            WHERE embedder IS NOT ? AND id IN (SELECT id FROM understanding WHERE embedder = ? AND COALESCE(subject, scene) IS NOT NULL)
+            """, [embedder, embedder, embedder])
+            for name in old { _ = run("UPDATE feedback SET embedding = NULL, embedder = NULL WHERE embedder = ?", [name]) }
+            return moved
+        }
+    }
+
+    /// Whether anything's still embedded by this version of the picture model: an event's picture, or what's said of one.
+    public func embeds(by embedder: String) -> Bool {
+        queue.sync {
+            (rows("""
+            SELECT EXISTS(SELECT 1 FROM understanding WHERE embedder = ? AND scene IS NOT NULL)
+                OR EXISTS(SELECT 1 FROM feedback WHERE embedder = ? AND embedding IS NOT NULL)
+            """, [embedder, embedder]) { $0.int(0) }.first ?? 0) != 0
+        }
+    }
+
     /// Everything said (a camera's, or every camera's), oldest first.
     public func feedback(camera: String? = nil) -> [EventFeedback] {
         queue.sync {
@@ -180,8 +211,10 @@ public struct EventJudge: Sendable {
     }
 
     /// Whether an event's probably nothing, and why; nil, it's to be shown.
+    /// `embedder`: the version of the picture model `embedding` is by; it's compared only with what's said of events
+    /// embedded by the same one (another version's embeddings aren't comparable).
     public func judge(id: String, camera: String, category: DetectedCategory, start: Date, box: Detection.Box?,
-                      embedding: [Float]?, calendar: Calendar = .current) -> Quieted? {
+                      embedding: [Float]?, embedder: String? = nil, calendar: Calendar = .current) -> Quieted? {
         switch verdicts[id] {
         case .nothing?: return .dismissed
         case .something?: return nil
@@ -194,7 +227,8 @@ public struct EventJudge: Sendable {
         }
         // Like the dismissed ones near here (of the kind), more than like any said to be something.
         guard let embedding else { return nil }
-        let here = feedback.filter { $0.camera == camera && $0.category == category && $0.box.map { Self.near($0, box) } == true }
+        let here = feedback.filter { $0.camera == camera && $0.category == category && $0.box.map { Self.near($0, box) } == true
+            && (embedder == nil || $0.embedder == nil || $0.embedder == embedder) }
         func likeness(_ f: EventFeedback) -> Float { f.embedding.map { Self.cosine($0, embedding) } ?? 0 }
         let like = here.filter { $0.verdict == .nothing && likeness($0) >= Self.alike }
         guard !like.isEmpty else { return nil }

@@ -37,11 +37,25 @@ public enum EventSearch {
     /// A sentence with this share of the telling words is kept.
     public static let wordsFloor = 0.6
 
-    /// `cameraIDs`, `zoneIDs`: the query's cameras and zones, as the settings' ids. `words`: the phrase's embedding (the
-    /// question's appearance, embedded by SigLIP), if there's a model; `probability`, its calibration.
+    /// The question's appearance, embedded by one version of the picture model, and that version's calibration.
+    public struct Words: @unchecked Sendable {
+        public var embedding: [Float]
+        public var probability: (Double) -> Double
+        public init(embedding: [Float], probability: @escaping (Double) -> Double) {
+            self.embedding = embedding
+            self.probability = probability
+        }
+    }
+
+    /// `cameraIDs`, `zoneIDs`: the query's cameras and zones, as the settings' ids. `byModel`: the phrase (the
+    /// question's appearance) embedded by each version of the picture model events are embedded by, by its name:
+    /// each event's picture is compared with the phrase by its own version (two versions' embeddings aren't
+    /// comparable), as while a new one embeds every event again. `words` and `probability`: one embedding for any
+    /// event whose version isn't among them.
     public static func answer(_ query: EventQuery, events: [CameraEvent], understood: [String: EventStore.Understood],
                               cameraIDs: Set<String>, zoneIDs: Set<String>, words: [Float]?,
-                              probability: ((Double) -> Double)?, calendar: Calendar = .current) -> Answer {
+                              probability: ((Double) -> Double)?, byModel: [String: Words] = [:],
+                              calendar: Calendar = .current) -> Answer {
         let candidates = events.filter { matches($0, query, cameraIDs: cameraIDs, zoneIDs: zoneIDs, calendar: calendar) }
         guard let appearance = query.appearance else {
             return Answer(hits: candidates.sorted { $0.start > $1.start }.map { Hit(id: $0.id, score: 1) }, appearanceIgnored: false)
@@ -52,10 +66,13 @@ public enum EventSearch {
         for event in candidates {
             let u = understood[event.id]
             var picture: Double?
-            if let words, let probability, let scene = u?.scene {
+            let model = u?.embedder.flatMap { byModel[$0] }
+                ?? words.flatMap { w in probability.map { Words(embedding: w, probability: $0) } }
+            if let model, let scene = u?.scene {
                 judged = true
-                let best = max(SigLIP.similarity(words, scene), u?.subject.map { SigLIP.similarity(words, $0) } ?? -1)
-                picture = probability(best)
+                let best = max(SigLIP.similarity(model.embedding, scene),
+                               u?.subject.map { SigLIP.similarity(model.embedding, $0) } ?? -1)
+                picture = model.probability(best)
             }
             var sentence: Double?
             if let description = u?.description, !description.isEmpty, !telling.isEmpty {
