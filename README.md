@@ -97,6 +97,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 - [docs/search.md](docs/search.md): searching events in plain words, the sentences and the picture model behind it.
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check.
 - [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.
+- [site/](site/README.md): pond.camera, the landing page (a static Next.js site)
 - [docs/remote.md](docs/remote.md): other Ponds, from away: pairing, how a connection is made, what each party sees; [deploy/](deploy/README.md): the signaling service (and an optional relay or mesh) to run yourself.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
