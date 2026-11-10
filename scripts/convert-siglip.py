@@ -7,7 +7,8 @@ encoder whose embeddings, compared with a dot product, say how well a picture an
     /tmp/siglip/bin/python scripts/convert-siglip.py                    # writes models/search/siglip2-*
     /tmp/siglip/bin/python scripts/convert-siglip.py --check PICTURE    # and checks them against PyTorch
 
-(coremltools 9 is tested with torch 2.7, and fails on numpy 2.3's stricter scalar conversion.)
+(Pinned in scripts/siglip-requirements.txt: torch 2.14.1 with coremltools 9; numpy below 2.3, whose stricter scalar
+conversion coremltools 9 fails on.)
 
 Writes, into models/search/ (too big for the repository, so ignored by git; make app builds them in when they're
 there):
@@ -31,7 +32,8 @@ NAME = "google/siglip2-base-patch16-224"
 REVISION = os.environ.get("SIGLIP_REVISION") or None
 SIZE = 224
 TOKENS = 64
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "search")
+# Where it writes (SIGLIP_OUT names another folder, to try a conversion beside the one in use).
+OUT = os.environ.get("SIGLIP_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "search")
 
 # Phrases the reference values are taken for: what search is asked, roughly.
 PHRASES = ["a person", "a man in a red jacket", "a delivery truck", "a black cat on the sofa",

@@ -36,24 +36,24 @@ case ${SEARCH_MODEL:-1} in
 esac
 
 [ -e "$OUT/siglip2.json" ] && [ ! -e "$OUT/.sha256" ] && exit 0
-# A Python torch 2.7 runs on (3.9 to 3.13): the first python3 on the PATH that is one, else macOS's own.
+# A Python torch 2.14 runs on, and coremltools 9 (3.10 to 3.13): the first python3 on the PATH that is one, else macOS's.
 PYTHON=
 for candidate in python3 python3.13 python3.12 python3.11 python3.10 /usr/bin/python3; do
     path=$(command -v "$candidate" 2>/dev/null) || continue
-    if "$path" -c 'import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)' 2>/dev/null; then
+    if "$path" -c 'import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)' 2>/dev/null; then
         PYTHON=$path
         break
     fi
 done
-[ -n "$PYTHON" ] || skip "no Python 3.9 to 3.13 found (Xcode's command line tools have one)"
+[ -n "$PYTHON" ] || skip "no Python 3.10 to 3.13 found (Homebrew's python@3.13, say)"
 
 echo "Converting search's picture model (a few minutes, a few GB downloaded the first time)…"
 rm -rf "$OUT"
 if [ ! -x "$VENV/bin/python" ]; then
     "$PYTHON" -m venv "$VENV" || skip "couldn't make a Python environment in $VENV"
 fi
-# The packages the published model was made with (coremltools 9 is tested with torch 2.7, and fails on numpy 2.3's
-# stricter scalars), and the model at its published revision (models/search.lock).
+# The packages the published model was made with (coremltools 9 with torch 2.14.1; numpy below 2.3,
+# whose stricter scalars coremltools 9 fails on), and the model at its published revision (models/search.lock).
 "$VENV/bin/pip" install --quiet --disable-pip-version-check -r scripts/siglip-requirements.txt \
     || skip "the converter's packages couldn't be installed (offline?)"
 SIGLIP_REVISION=$(sed -n 's/^revision = //p' models/search.lock) "$VENV/bin/python" scripts/convert-siglip.py \

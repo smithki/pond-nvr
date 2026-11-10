@@ -8,12 +8,13 @@ name = SigLIP 2 base
 format = 1
 minimumApp = 0.2.0
 
-# What it was made from.
+# What it was made from (with torch 2.7.0 at first; converted again on 2026-11-10 with the packages below, its
+# embeddings came out the same, so it stands as made by them).
 source = google/siglip2-base-patch16-224
 revision = 75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2
-converter = scripts/convert-siglip.py 4bde0d2e04bc72c910e9abc8f8924834cb80637c654cbdf18108718a96a55e0e
-packages = torch==2.7.0 numpy==2.2.6 transformers==5.22.2 coremltools==9.0 sentencepiece==0.2.3 pillow==13.0.0
-requirements = scripts/siglip-requirements.txt 04b53065dcce3f21a29e691fd03c689db06a3d0daf26f2ecb66bcd836a3d9e39
+converter = scripts/convert-siglip.py 292809ad7b271ecd87eaf4732c02cc9882016517e783f65250fb6faefb883e29
+packages = torch==2.14.1 numpy==2.2.6 transformers==5.22.2 coremltools==9.0 sentencepiece==0.2.3 pillow==13.0.0
+requirements = scripts/siglip-requirements.txt fd1cb74b90547febb74605df60d89c3683508a875993d12512dfe73adbc017d5
 
 # What was published.
 archive = siglip2-v1.aar

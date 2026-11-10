@@ -29,7 +29,9 @@ import Testing
 
 /// The real model's folder (models/search, made by scripts/convert-siglip.py; not in the repository), if it's there.
 let searchModels: URL? = {
-    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../models/search").standardized
+    // (POND_TEST_SEARCH_MODELS names another folder: a conversion being tried.)
+    let url = ProcessInfo.processInfo.environment["POND_TEST_SEARCH_MODELS"].map { URL(fileURLWithPath: $0) }
+        ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../models/search").standardized
     return FileManager.default.fileExists(atPath: url.appendingPathComponent("siglip2.json").path) ? url : nil
 }()
 

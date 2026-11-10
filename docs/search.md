@@ -38,11 +38,11 @@ Sentences come from the on-device Foundation Models only, never Private Cloud Co
 
 ## The picture model
 
-SigLIP 2 base (Google's `google/siglip2-base-patch16-224`, Apache-2.0), converted to Core ML by `scripts/convert-siglip.py`: an image encoder (88 MB, 8-bit) and a text encoder (270 MB, mostly its vocabulary), with Gemma's tokenizer. It's too big for the repository, so it's made locally: the first `make app` makes it (`scripts/search-model.sh`: once, into a Python environment of its own in `.build/siglip-venv`, downloading SigLIP 2 and the converter's packages, a few GB, for a few minutes) and every `make app` builds it in. Without Python or the network, the app is built without it and says so, and it's tried again next time; `SEARCH_MODEL=0 make app` skips it. By hand:
+SigLIP 2 base (Google's `google/siglip2-base-patch16-224`, Apache-2.0), converted to Core ML by `scripts/convert-siglip.py`: an image encoder (88 MB, 8-bit) and a text encoder (270 MB, mostly its vocabulary), with Gemma's tokenizer. It's too big for the repository, and it's converted once and published, not by each build ([Published versions](#published-versions)): builds download it, and Pond itself downloads it on first run. Converting one by hand, to work on the conversion (`SEARCH_MODEL=convert make app` does the same, into `.build/siglip-venv`), with the packages the published one was made with:
 
 ```sh
 python3 -m venv /tmp/siglip
-/tmp/siglip/bin/pip install "torch==2.7.0" "numpy<2.3" transformers coremltools sentencepiece Pillow
+/tmp/siglip/bin/pip install -r scripts/siglip-requirements.txt   # torch 2.14.1, coremltools 9, numpy below 2.3
 /tmp/siglip/bin/python scripts/convert-siglip.py                     # writes models/search/
 /tmp/siglip/bin/python scripts/convert-siglip.py --check PICTURE     # and compares it with PyTorch's on a picture
 make app                                                             # builds it in (Contents/Resources/Search)
