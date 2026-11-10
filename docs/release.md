@@ -57,7 +57,7 @@ why.
   a camera's speaker. `pond` and `pond-signal` ask for none.
 - **Search's picture model, built in** (about 390 MB more): a release searches pictures from the first event, with
   nothing downloaded later and no server to rely on. Each Mac that makes releases converts its own copy for now
-  ([search.md](search.md#for-releases-and-ci-not-done-yet) says what a published, pinned model would need, for CI).
+  ([search.md](search.md#published-versions) says what a published, pinned model would need, for CI).
 - **The licences**: `LICENSE`, `NOTICE` and `licenses/` (the texts the notices refer to) in the app's Resources.
 - The bundle identifier `camera.pond` (from pond.camera): settings, the Keychain items and the login service are
   known by it, so it stays.

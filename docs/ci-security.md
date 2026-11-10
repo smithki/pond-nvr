@@ -16,7 +16,8 @@ those stay with the maintainer.
 
 Each has one job, so one leaking doesn't give the others' power: the bot's key can upload files to `pond-models` but
 can't make Pond accept a model (that takes the signing key), and the signing key can sign a manifest but can't
-publish one (that takes merging to `main`, which deploys pond.camera).
+publish one (that takes merging to `main`, which deploys pond.camera through Vercel's GitHub app, which can read the repository
+and nothing else of CI's).
 
 ## Environments: which workflows can read them
 
@@ -40,9 +41,10 @@ meant to grow, so these hold for every job given to it:
 - **Each job asks for only what it needs.** A workflow mints its own token for the run (`actions/create-github-app-token`)
   naming the repositories and permissions it needs (`repositories: pond-models`, `permission-contents: write`), never
   the app's whole reach. The token lasts an hour.
-- **A permission is added for a job, and noted here.** The app starts with Contents (read and write) on
-  `pond-models` alone; a new job that needs more adds it (GitHub asks the owner to approve the change) and adds a
-  line to the table below. Nothing it doesn't use stays granted.
+- **A permission is added for a job, and noted here.** An app's permissions apply on every repository it's
+  installed on, so each is added only with the job that needs it (GitHub asks the owner to approve the change), and
+  the table below says which job uses which; nothing it doesn't use stays granted. It has Contents and Pull requests
+  (read and write), installed on `pond-models` and `pond-nvr`; each job's token narrows that to its own row.
 - **Installed only where a job needs it**, repository by repository ("Only select repositories"), never on all of the
   account's.
 - **No webhook**, so nothing calls into it; it acts only when a workflow mints a token.
@@ -51,7 +53,8 @@ meant to grow, so these hold for every job given to it:
 
 | Job | Workflow | Repositories | Permissions |
 | --- | --- | --- | --- |
-| Publish search models | model workflow (`models`) | `pond-models` | Contents: read and write |
+| Publish search models | `search-model.yml` (`models`) | `pond-models` | Contents: read and write |
+| Propose a search model (a branch and a pull request) | `search-model.yml` (`models`) | `pond-nvr` | Contents: read and write; Pull requests: read and write |
 
 ## Rules for workflows
 
@@ -77,7 +80,8 @@ meant to grow, so these hold for every job given to it:
 - **pond-nvr-bot's key**: the app's settings › Private keys: generate a new one, delete the old (which stops it at once),
   and put the new one in the environments. Then check `pond-models`' releases and the account's security log for what
   it did.
-- **The model signing key**: make a new one, put its public half in Pond, and release Pond; until then, the old one
+- **The model signing key**: make a new one (`swift scripts/search-model-sign.swift new-key`), put its public half in
+  Pond (`models/search-signing.pub`), and release Pond; until then, the old one
   could sign a manifest, though it would still have to reach pond.camera. Remove the manifest's entries signed with
   it that weren't yours.
 - **The Developer ID certificate**: revoke it (developer.apple.com › Certificates), which stops Macs trusting what

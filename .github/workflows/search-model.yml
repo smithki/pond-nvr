@@ -1,0 +1,152 @@
+# Search's picture model, kept up to date on purpose (docs/search.md, Published versions). Monthly, or by hand:
+#   1. check (Linux, a minute): has anything the published model was made from changed (models/search.lock)?
+#      SigLIP 2's revision on Hugging Face, the converter, its pinned packages. Nothing has: done.
+#   2. convert (macOS 27): convert it, check it (SigLIPTests), and compare it with the published version; if it
+#      would find practically the same, stop: a new version makes every Pond index its events again.
+#   3. publish: the archive as a release of pond-models, its entry signed into pond.camera's manifest, and a pull
+#      request with the manifest and the lock. No Pond uses it until that's merged, which deploys pond.camera.
+# The keys are the models environment's (main only): the model signing key, and pond-nvr-bot's, which mints a
+# token per step for only the repository and permissions that step needs (docs/ci-security.md).
+name: Search model
+
+on:
+  schedule:
+    - cron: "23 7 1 * *"   # the 1st of each month
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Convert even if nothing it's made from has changed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-model
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      revision: ${{ steps.check.outputs.revision }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: check
+        run: |
+          chmod +x scripts/search-model-check.sh
+          scripts/search-model-check.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Summary
+        run: |
+          echo "Search model check: ${{ steps.check.outputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+
+  convert:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || inputs.force
+    runs-on: xcode-27
+    environment: models
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # torch 2.7 runs on Python 3.9 to 3.13; the image's own is newer.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+
+      - name: Convert
+        env:
+          SIGLIP_REVISION: ${{ needs.check.outputs.revision }}
+        run: |
+          python -m venv "$RUNNER_TEMP/siglip"
+          "$RUNNER_TEMP/siglip/bin/pip" install --quiet --disable-pip-version-check -r scripts/siglip-requirements.txt
+          "$RUNNER_TEMP/siglip/bin/python" scripts/convert-siglip.py
+
+      - name: Check it
+        working-directory: src
+        run: swift test --filter SigLIPTests
+
+      - name: Compare it with the published version
+        id: compare
+        run: |
+          lock() { sed -n "s/^$1 = //p" models/search.lock; }
+          curl -fsSL -o "$RUNNER_TEMP/current.aar" "$(lock url)"
+          echo "$(lock sha256)  $RUNNER_TEMP/current.aar" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/current"
+          aa extract -i "$RUNNER_TEMP/current.aar" -d "$RUNNER_TEMP/current"
+          python3 scripts/search-model-compare.py "$RUNNER_TEMP/current/siglip2.json" models/search/siglip2.json | tee -a "$GITHUB_OUTPUT"
+
+      - name: Nothing worth publishing
+        if: steps.compare.outputs.worth != 'true'
+        run: |
+          echo "Converted again (${{ needs.check.outputs.reason }}), and it finds what the published version does (lowest similarity ${{ steps.compare.outputs.similarity }}): nothing published." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: A token for pond-models
+        if: steps.compare.outputs.worth == 'true'
+        id: models-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: pond-models
+          permission-contents: write
+
+      - name: Publish it
+        if: steps.compare.outputs.worth == 'true'
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.models-token.outputs.token }}
+          MODEL_SIGNING_KEY: ${{ secrets.MODEL_SIGNING_KEY }}
+          MODELS_REPO: ${{ github.repository_owner }}/pond-models
+        run: |
+          chmod +x scripts/search-model-publish.sh scripts/search-model-package.sh scripts/search-model-entry.sh
+          scripts/search-model-publish.sh "${{ needs.check.outputs.revision }}" | tee /dev/stderr | tail -1 >> "$GITHUB_OUTPUT"
+
+      - name: A token for this repository
+        if: steps.compare.outputs.worth == 'true'
+        id: repo-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: A pull request
+        if: steps.compare.outputs.worth == 'true'
+        env:
+          GH_TOKEN: ${{ steps.repo-token.outputs.token }}
+          VERSION: ${{ steps.publish.outputs.version }}
+          REASON: ${{ needs.check.outputs.reason }}
+          SIMILARITY: ${{ steps.compare.outputs.similarity }}
+          BOT: ${{ steps.repo-token.outputs.app-slug }}[bot]
+        run: |
+          lock() { sed -n "s/^$1 = //p" models/search.lock; }
+          id=$(gh api "/users/$BOT" --jq .id)
+          git config user.name "$BOT"
+          git config user.email "$id+$BOT@users.noreply.github.com"
+          branch="search-model/$VERSION"
+          git checkout -b "$branch"
+          git add models/search.lock site/data/search-models.json
+          git commit -m "Search model $VERSION" -m "$REASON"
+          git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$branch"
+          cat > "$RUNNER_TEMP/body.md" <<EOF
+          A new version of search's picture model, **$(lock name)** (\`$VERSION\`), converted because $REASON
+
+          - **Made from:** \`$(lock source)\` at \`$(lock revision)\`, with $(lock packages).
+          - **Checked:** SigLIPTests passed (its embeddings match SigLIP 2's own code).
+          - **Compared with the published version:** lowest similarity $SIMILARITY (below 0.9995 counts as a real change).
+          - **Published to pond-models:** $(lock url) ($(lock size) bytes, SHA-256 \`$(lock sha256)\`), signed into \`site/data/search-models.json\`.
+
+          Merging deploys pond.camera's manifest: every Pond then downloads it within a week and **indexes all its events again** with it. If it isn't wanted, close this, and delete the \`$VERSION\` release from pond-models.
+          EOF
+          gh pr create --base main --head "$branch" --title "Search model $VERSION" --body-file "$RUNNER_TEMP/body.md"

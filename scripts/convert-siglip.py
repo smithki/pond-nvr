@@ -3,7 +3,7 @@
 encoder whose embeddings, compared with a dot product, say how well a picture and a phrase go together.
 
     python3 -m venv /tmp/siglip
-    /tmp/siglip/bin/pip install "torch==2.7.0" "numpy<2.3" transformers coremltools sentencepiece Pillow   # (macOS)
+    /tmp/siglip/bin/pip install -r scripts/siglip-requirements.txt                                        # (macOS)
     /tmp/siglip/bin/python scripts/convert-siglip.py                    # writes models/search/siglip2-*
     /tmp/siglip/bin/python scripts/convert-siglip.py --check PICTURE    # and checks them against PyTorch
 
@@ -27,6 +27,8 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 
 NAME = "google/siglip2-base-patch16-224"
+# The model's revision on Hugging Face (models/search.lock names the published one); its latest without it.
+REVISION = os.environ.get("SIGLIP_REVISION") or None
 SIZE = 224
 TOKENS = 64
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "search")
@@ -60,8 +62,8 @@ def pooled(out):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    model = AutoModel.from_pretrained(NAME, torch_dtype=torch.float32).eval()
-    tokenizer = AutoTokenizer.from_pretrained(NAME)
+    model = AutoModel.from_pretrained(NAME, revision=REVISION, torch_dtype=torch.float32).eval()
+    tokenizer = AutoTokenizer.from_pretrained(NAME, revision=REVISION)
 
     class Image(torch.nn.Module):
         def __init__(self, m):

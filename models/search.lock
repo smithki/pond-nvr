@@ -11,8 +11,9 @@ minimumApp = 0.2.0
 # What it was made from.
 source = google/siglip2-base-patch16-224
 revision = 75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2
-converter = scripts/convert-siglip.py 9d89eea4b63191ca7e0ff3af3572a0c4699c509f309d52df06286032ba88f672
+converter = scripts/convert-siglip.py 4bde0d2e04bc72c910e9abc8f8924834cb80637c654cbdf18108718a96a55e0e
 packages = torch==2.7.0 numpy==2.2.6 transformers==5.22.2 coremltools==9.0 sentencepiece==0.2.3 pillow==13.0.0
+requirements = scripts/siglip-requirements.txt 04b53065dcce3f21a29e691fd03c689db06a3d0daf26f2ecb66bcd836a3d9e39
 
 # What was published.
 archive = siglip2-v1.aar

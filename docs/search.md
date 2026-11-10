@@ -50,18 +50,51 @@ make app                                                             # builds it
 
 The script records reference values (phrases' tokens and embeddings, a picture's embedding) that the Swift side is tested against when the model is present (`swift test --filter SigLIPTests`). A copy of Pond without it searches by what was found and the sentences.
 
-### For releases and CI (not done yet)
+### Published versions
 
-Making the model on each machine suits a developer's first build, not releases: the converter's packages are mostly unpinned (only torch and numpy are), so two machines converting a month apart can make slightly different models, and a release's embeddings must stay comparable with those its users' databases already hold; and a clean CI runner would download a few GB and depend on Hugging Face for every release. What releases need instead:
+The model Pond downloads is made once and published, never remade by a build: two conversions a month apart can
+differ slightly, and a version's embeddings must stay comparable with those every Pond's database holds.
 
-- **One model, made once, published.** The four files (`siglip2-image.mlpackage`, `siglip2-text.mlpackage`, `siglip2-tokenizer.json`, `siglip2.json`) converted on purpose and published as one archive with a version of its own (a GitHub release used only for it, such as `search-model-siglip2-v1`), never remade by a build.
-- **Pinned in the repository.** A small lock file (such as `models/search.lock`) naming the archive's URL and SHA-256. `make app` downloads it (about 390 MB, seconds), checks the hash and unpacks it into `models/search/`, and refuses one that doesn't match; converting stays as a fallback for a fork without access, or is dropped.
-- **Cached by CI**, keyed by the lock file's hash, so a runner downloads it once.
-- **A new version only on purpose.** `scripts/search-model.sh` (or a `--convert` of it) makes a new one: convert, check with `convert-siglip.py --check`, run `SigLIPTests`, publish, bump the lock file. A change of model, or of its conversion, changes its embeddings. The database already keeps the manifest's name beside each embedding (`embedder`, now `SigLIP 2 base`) and the service embeds an event again when it differs; so the published model's name has to carry its version (`SigLIP 2 base v1`), or a new conversion under the same name would be compared with the old one's embeddings.
-- **Its licence with it.** SigLIP 2 is Apache-2.0: the app carries its licence (`licenses/Apache-2.0.txt`) and `NOTICE` says it was converted to Core ML and quantized, and by whom; a published archive would carry them too.
-- **In the app**: settled for the first release, built in (about 390 MB bigger), so a release searches pictures at once with nothing fetched later ([release.md](release.md)). For now each Mac that makes releases converts its own copy; a published, pinned model is what CI will need.
+- **What a version is.** One Apple Archive of the folder Pond loads (the two models compiled for Core ML,
+  `siglip2.json`, the tokenizer), with SigLIP 2's licence and a notice of how it was made, published as a release
+  of [pond-models](https://github.com/smithki/pond-models) (`siglip2-v1`, …) and never changed after.
+  `scripts/search-model-package.sh` makes it.
+- **What it was made from**, in `models/search.lock`: SigLIP 2's revision on Hugging Face, the converter's SHA-256,
+  its packages (`scripts/siglip-requirements.txt`, every one pinned, and its SHA-256), and the archive's URL, size
+  and SHA-256.
+- **Where Pond learns of it**: pond.camera's manifest, `pond.camera/api/search-model`, built with the site from
+  `site/data/search-models.json`. Each entry (newest first) names a version, its format (the folder's layout) and the
+  first Pond that reads it (`minimumApp`), its size and SHA-256, where to download it, and a signature.
+- **Why Pond trusts it**: the signature. Pond carries the model signing key's public half
+  (`models/search-signing.pub`: `YElDtEdmCu8Lu4WWaU4RHAxrtd86pvwdd/p/BDSPuUk=`, Ed25519) and takes an entry only if
+  its signature verifies, then a file only if its SHA-256 is the entry's. Neither pond.camera nor the file's host can
+  hand Pond a model the key didn't sign. What's signed is the entry's fields, one per line, in this order, so no JSON
+  formatting changes it (`scripts/search-model-sign.swift`):
 
-MobileCLIP, which this was first planned with, is left out: Apple's licence for its weights is for research.
+  ```
+  pond search model
+  id: siglip2-v1
+  name: SigLIP 2 base
+  format: 1
+  minimumApp: 0.2.0
+  size: 350310687
+  sha256: eaae1d98dc24c66e725aa662b8909506ace61df1df83204fbf312cf62e1347b9
+  ```
+
+  The key is only in CI's `models` environment (and its owner's password manager): [ci-security.md](ci-security.md).
+- **A new version, only when it's worth it.** The search model workflow (`.github/workflows/search-model.yml`)
+  checks monthly whether anything the published version was made from has changed (`scripts/search-model-check.sh`).
+  If something has, it converts again on macOS, runs `SigLIPTests`, and compares the new model's reference
+  embeddings with the published one's (`scripts/search-model-compare.py`): when every one is practically the same
+  (cosine 0.9995 or more), it publishes nothing, since a new version makes every Pond index its events again. When
+  it's a real change, it publishes the archive to pond-models, signs its entry into the manifest
+  (`scripts/search-model-publish.sh`), and opens a pull request with the manifest and the lock. No Pond uses it
+  until that's merged, which deploys pond.camera. A new version's name carries its number (`SigLIP 2 base v2`):
+  the database keeps the model's name beside each embedding and embeds an event again when it differs.
+- **Its licence with it.** SigLIP 2 is Apache-2.0: each archive carries the licence, and its `NOTICE` says it was
+  converted to Core ML and quantized, from which revision, and with what.
+- **In the app**: built in for now (`make app` and `make release` convert their own, at the lock's revision with the
+  lock's packages). Next, Pond downloads it instead (roadmap: A signed, notarized release).
 
 ## From the command line
 

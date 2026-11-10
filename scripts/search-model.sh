@@ -42,10 +42,10 @@ echo "Making search's picture model (once for this copy of the repository: a few
 if [ ! -x "$VENV/bin/python" ]; then
     "$PYTHON" -m venv "$VENV" || skip "couldn't make a Python environment in $VENV"
 fi
-# As docs/search.md says (coremltools 9 is tested with torch 2.7, and fails on numpy 2.3's stricter scalars).
-"$VENV/bin/pip" install --quiet --disable-pip-version-check \
-    "torch==2.7.0" "numpy<2.3" transformers coremltools sentencepiece Pillow \
+# The packages the published model was made with (coremltools 9 is tested with torch 2.7, and fails on numpy 2.3's
+# stricter scalars), and the model at its published revision (models/search.lock).
+"$VENV/bin/pip" install --quiet --disable-pip-version-check -r scripts/siglip-requirements.txt \
     || skip "the converter's packages couldn't be installed (offline?)"
-"$VENV/bin/python" scripts/convert-siglip.py || skip "the conversion failed (see above)"
+SIGLIP_REVISION=$(sed -n 's/^revision = //p' models/search.lock) "$VENV/bin/python" scripts/convert-siglip.py || skip "the conversion failed (see above)"
 [ -e "$OUT/siglip2.json" ] || skip "the conversion wrote no manifest"
 echo "✓ $OUT: search's picture model"
