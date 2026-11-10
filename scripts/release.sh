@@ -56,18 +56,18 @@ fi
 notary history >/dev/null 2>&1 \
     || fail "No notarization login that works under the profile \"$PROFILE\" (docs/release.md: Once per Mac)."
 
-# The models a release builds in are the published ones the locks name (models/*.lock), not ones converted on this
-# Mac: downloaded (once) and checked against the locks' hashes. Search's is part of a release too, not left out
-# (search would work without pictures).
+# The detection model a release builds in is the published one models/detection.lock names, not one converted on
+# this Mac: downloaded (once) and checked against the lock's hash. Search's picture model isn't built in: Pond
+# downloads it itself, the version pond.camera's signed manifest names for it (docs/search.md, Published versions).
 REPLACE=1 scripts/model-fetch.sh models/detection.lock models/detection || fail "The detection model couldn't be downloaded (above)."
-REPLACE=1 scripts/model-fetch.sh models/search.lock models/search || fail "Search's picture model couldn't be downloaded (above): a release needs it."
 
 echo "Releasing Pond $VERSION, signed by $IDENTITY"
 rm -rf "$OUT" && mkdir -p "$OUT"
-make app APP="$APP" SIGN="$IDENTITY" SIGN_TIMESTAMP=1
+make app APP="$APP" SIGN="$IDENTITY" SIGN_TIMESTAMP=1 SEARCH_BUILT_IN=0
 
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || fail "The app isn't signed with the hardened runtime."
+[ ! -e "$APP/Contents/Resources/Search" ] || fail "Search's picture model is built into the app: a release leaves it for Pond to download."
 
 # The app notarized and its ticket stapled to it, so it opens offline once copied out of the disk image.
 echo "Notarizing the app (a few minutes)…"

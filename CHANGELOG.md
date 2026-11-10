@@ -2,6 +2,19 @@
 
 What's in each release. What's been built, goal by goal and how, is in [docs/done.md](docs/done.md).
 
+## Unreleased
+
+### Search
+- **The picture model is downloaded by Pond**, not built into the app (the download is about 350 MB smaller): on
+  first run, the version pond.camera names, signed by Pond's own key and checked before it's used. Pond checks once a
+  week for a new version (Settings › General: Download picture model updates, and Check for Updates), and while a
+  new one indexes every event again, search keeps finding them all.
+
+### Making Pond
+- **The models aren't in the repository**: builds download the published ones by their locks, checked by hash
+  (YOLO26 with its source, as its licence asks).
+- **Releases from a tag on CI**, or made and published on a Mac when CI can't (`make publish`).
+
 ## 0.1.0
 
 The first version.

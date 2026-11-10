@@ -65,10 +65,12 @@ public enum SearchModels {
     }
 
     /// The version this Pond should use: the newest (first) entry signed with the key, in a format it reads, for a
-    /// version of Pond no newer than this one.
+    /// version of Pond no newer than this one. (A development build, "0.2.0-dev", has 0.2.0's code: it takes what
+    /// 0.2.0 does.)
     public static func choose(_ manifest: Manifest, appVersion: String, publicKey: String = SearchModels.publicKey) -> Entry? {
-        manifest.models.first { entry in
-            entry.verifies(publicKey: publicKey) && formats.contains(entry.format) && !isNewer(entry.minimumApp, than: appVersion)
+        let app = String(appVersion.split(separator: "-", maxSplits: 1).first ?? "")
+        return manifest.models.first { entry in
+            entry.verifies(publicKey: publicKey) && formats.contains(entry.format) && !isNewer(entry.minimumApp, than: app)
         }
     }
 

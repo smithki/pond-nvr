@@ -35,7 +35,8 @@ warning, offline as well. `make release` makes it from a clean commit, on a Mac 
 
 ## Each release
 
-1. Say what's in it: a `## VERSION` section in `CHANGELOG.md` (the release's notes).
+1. Say what's in it: a `## VERSION` section in `CHANGELOG.md` (the release's notes): what's been gathered under
+   `## Unreleased` since the last one, under its version now.
 2. Set the version: `src/Sources/PondCore/Version.swift` (`"0.1.0"`, without `-dev`) and `app/Info.plist`
    (`CFBundleShortVersionString`, and `CFBundleVersion` one higher than the last release's). Commit.
 3. `make release VERSION=0.1.0`. It refuses, and says why, when anything above isn't so: changes not committed,
@@ -57,11 +58,12 @@ why.
 - **The hardened runtime**, which notarization requires, on every build (`make app` too), so what it stops shows in
   everyday use first. The app asks for one entitlement (`app/Pond.entitlements`): the microphone, for talking through
   a camera's speaker. `pond` and `pond-signal` ask for none.
-- **The models, built in**: detection's (YOLO26 small, about 18 MB) and search's picture model (about 390 MB more),
-  so a release finds events and searches pictures from the first one. Each is the published version its lock names
-  (`models/detection.lock`, `models/search.lock`), downloaded from pond-models and checked against the lock's
-  SHA-256 ([detection.md](detection.md#the-built-in-model), [search.md](search.md#published-versions)), never one
-  converted on the Mac making the release.
+- **The detection model, built in** (YOLO26 small, about 18 MB): a release finds events from the first one, offline
+  too. It's the published version `models/detection.lock` names, downloaded from pond-models and checked against the
+  lock's SHA-256 ([detection.md](detection.md#the-built-in-model)), never one converted on the Mac making the release.
+- **Search's picture model, not built in**: Pond downloads it itself on first run (about 350 MB), the version
+  pond.camera's signed manifest names, and keeps it up to date ([search.md](search.md#published-versions)). Until
+  it's there, search goes by what was found and the descriptions. (`make app` builds it in, for development.)
 - **The licences**: `LICENSE`, `NOTICE` and `licenses/` (the texts the notices refer to) in the app's Resources.
 - The bundle identifier `camera.pond` (from pond.camera): settings, the Keychain items and the login service are
   known by it, so it stays.

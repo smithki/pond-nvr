@@ -86,12 +86,13 @@ app: build
 	  xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Models" >/dev/null && \
 	  cp "$${m%.mlpackage}.json" "$(APP)/Contents/Resources/Models/"; \
 	done
-	@# Search's model (models/search/): the published one, downloaded on the first make app (scripts/search-model.sh:
-	@# once, about 350 MB; SEARCH_MODEL=0 skips it), then built in, compiled already (or compiled now, if converted on
-	@# this Mac). Without it (offline, or skipped), search works on what was found and the descriptions alone.
-	@scripts/search-model.sh
+	@# Search's model (models/search/), built in for development: the published one, downloaded on the first make app
+	@# (scripts/search-model.sh: once, about 350 MB; SEARCH_MODEL=0 skips it), compiled already (or compiled now, if
+	@# converted on this Mac). Without it (offline, or skipped), search works on what was found and the descriptions
+	@# alone until Pond downloads it itself. SEARCH_BUILT_IN=0 leaves it out, as a release does: Pond downloads it.
 	@rm -rf "$(APP)/Contents/Resources/Search"
-	@if [ -e models/search/siglip2.json ]; then \
+	@[ "$(SEARCH_BUILT_IN)" = 0 ] || scripts/search-model.sh
+	@if [ "$(SEARCH_BUILT_IN)" != 0 ] && [ -e models/search/siglip2.json ]; then \
 	  mkdir -p "$(APP)/Contents/Resources/Search" && \
 	  if ls models/search/*.mlpackage >/dev/null 2>&1; then \
 	    for m in models/search/*.mlpackage; do xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Search" >/dev/null; done; \

@@ -59,6 +59,9 @@ private let v1 = SearchModels.Entry(
         let manifest = SearchModels.Manifest(models: [unsigned, otherFormat, newer, v1])
         #expect(SearchModels.choose(manifest, appVersion: "0.2.0")?.id == "siglip2-v1")
         #expect(SearchModels.choose(manifest, appVersion: "0.1.0") == nil)
+        // A development build of 0.2.0 takes what 0.2.0 does; one of 0.1.1 doesn't.
+        #expect(SearchModels.choose(manifest, appVersion: "0.2.0-dev")?.id == "siglip2-v1")
+        #expect(SearchModels.choose(manifest, appVersion: "0.1.1-dev") == nil)
     }
 
     @Test func versionsCompareByTheirNumbers() {
