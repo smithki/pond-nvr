@@ -1,8 +1,8 @@
 # Changelog
 
-What's in each release. There are none yet: "Unreleased" is the first, and everything Pond does so far. What's been built, goal by goal and how, is in [docs/done.md](docs/done.md).
+What's in each release. What's been built, goal by goal and how, is in [docs/done.md](docs/done.md).
 
-## Unreleased
+## 0.1.0
 
 The first version.
 
