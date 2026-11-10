@@ -144,10 +144,13 @@ struct CheckSheet: View {
 struct AddCameraSheet: View {
     /// The sheet's margin: its heading, its cards (a grouped form's own inset) and its buttons, one distance from its edges.
     static let margin = 20.0
+    /// Its height: the details page whole (its stream addresses folded) under its heading and over its buttons, so it
+    /// scrolls only once more is unfolded.
+    static let tallest = 580.0
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// At most this tall (the window's height); the form scrolls inside.
-    var height = 560.0
+    var height = Self.tallest
     @State private var name = ""
     @State private var id = ""
     @State private var idEdited = false
@@ -216,6 +219,8 @@ struct AddCameraSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(page == .homeKit ? "Add to the Home App" : "Add Camera").font(.title2.bold())
                 .padding([.top, .horizontal], Self.margin)
+                // Room under it, so what scrolls stops short of it rather than right at its foot.
+                .padding(.bottom, 12)
                 .contentTransition(.opacity)
             ZStack {
                 switch page {
@@ -229,7 +234,7 @@ struct AddCameraSheet: View {
             // Its buttons' edges in line with the cards' and the heading's.
             bar.padding(Self.margin)
         }
-        .frame(width: 520, height: min(height, 560))
+        .frame(width: 520, height: min(height, Self.tallest))
         .onAppear {
             if let from = model.addingFrom {
                 use(from)
@@ -627,7 +632,13 @@ struct CameraSettingsPage: View {
                     TextField("Name", text: $name)
                     TextField("Address", text: $host, prompt: Text("192.168.1.30"))
                         .focused($focused, equals: .address)
-                    // At once, like HomeKit (not on Save).
+                } header: {
+                    header
+                }
+
+                // Private takes effect at once, as from the menu bar (held for Save, a camera could go on recording
+                // while it seemed private): a section of its own, saying so, apart from what Save and Revert do.
+                Section {
                     Toggle(isOn: Binding(get: { model.isPrivate(camera.id) },
                                          set: { on in Task { await model.setPrivacy(camera.id, on) } })) {
                         Text("Private")
@@ -636,8 +647,9 @@ struct CameraSettingsPage: View {
                              : "Not recorded, shown live or in the Home app until you turn this off. The Home app shows it as off meanwhile.")
                     }
                     .disabled(model.isPrivateOnCameraOnly(camera.id))
-                } header: {
-                    header
+                } footer: {
+                    Text("Takes effect at once, as in the menu bar: Save and Revert don\u{2019}t change it.")
+                        .foregroundStyle(.secondary)
                 }
 
                 homeKitSection

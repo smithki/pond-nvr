@@ -17,6 +17,8 @@ struct StorageView: View {
     @State var draftReserve: Double?
     /// The checklist opened or closed by hand (nil: open only while something's wrong).
     @State private var checklistOpen: Bool?
+    /// The space limits opened or closed by hand (nil: open only while one cuts the days kept short).
+    @State var limitsOpen: Bool?
 
     enum Target: Identifiable {
         case recordings, database

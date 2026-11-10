@@ -15,6 +15,9 @@ public enum Brand {
     public static let homeKitKeychainService = "pond-homekit"
     /// Remote access: this Mac's own keys, and the devices paired with it.
     public static let remoteKeychainService = "pond-remote"
+    /// Pond's own signaling service, which remote access uses unless one's own is set (remote.signaling): it only
+    /// introduces paired devices, passing sealed messages it can't read.
+    public static let hostedSignaling = "wss://signal.pond.camera"
 
     /// The folder for the settings file, the HomeKit status and the app's socket to the service.
     public static let supportFolder = "~/Library/Application Support/Pond"

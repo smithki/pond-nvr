@@ -23,8 +23,8 @@ extension StorageView {
 
     /// How long each is kept, under the folder they're kept in.
     @ViewBuilder var keepRows: some View {
-        DaysPicker(title: "Keep continuous recording", days: retention.continuous.days, presets: Self.continuousPresets,
-                   range: 1 ... 3650, detail: continuousDetail) { days in
+        DaysPicker(title: "Keep recordings for", days: retention.continuous.days, presets: Self.continuousPresets,
+                   range: 1 ... 3650, detail: continuousDetail, warning: !keepFits) { days in
             model.update { $0.retention.continuous.days = days }
         }
         DaysPicker(title: "Keep event clips and snapshots", days: retention.events.days, presets: Self.eventPresets,
@@ -40,8 +40,17 @@ extension StorageView {
                 StorageBar(segments: StorageBar.segments(drive: drive, used: outlook.used, estimate: estimate,
                                                          keepDays: retention.continuous.days, reserveGB: reserveGB))
                     .padding(.vertical, 4)
-                limitRow(estimate: estimate)
-                reserveRow
+                // The limits, folded (the days kept are the question; these are how much room they get): open by
+                // themselves when one is what cuts the days short.
+                FoldRow(title: "Space limits", summary: limitsSummary,
+                        expanded: Binding(get: { limitsOpen ?? limitBinds }, set: { limitsOpen = $0 }))
+                if limitsOpen ?? limitBinds {
+                    Group {
+                        limitRow(estimate: estimate)
+                        reserveRow
+                    }
+                    .padding(.leading, FoldRow.indent)
+                }
             } header: {
                 Text("Space on \(drive.name)")
             }
@@ -51,14 +60,38 @@ extension StorageView {
 
     // MARK: - Days
 
+    /// The days kept fit in the room recording has (or nothing's measured yet).
+    var keepFits: Bool {
+        guard let e = estimate else { return true }
+        return e.continuousDays >= Double(retention.continuous.days)
+    }
+
+    /// The limit on how much continuous recording may use is what cuts the days kept short (without it, they'd fit).
+    var limitBinds: Bool {
+        guard !keepFits, limitGB != nil, let unlimited = outlook?.estimate(eventDays: retention.events.days, maxContinuousGB: nil, minFreeGB: reserveGB)
+        else { return false }
+        return unlimited.continuousDays >= Double(retention.continuous.days)
+    }
+
+    /// How the days kept fit: their size, or how many do and why not more, with what to do.
     var continuousDetail: String? {
         guard let e = estimate else { return nil }
         let keep = retention.continuous.days
         let need = e.continuousPerDay * Double(keep)
-        if e.continuousDays >= Double(keep) {
-            return "About \(StorageEstimate.size(need)), at \(StorageEstimate.size(e.continuousPerDay)) a day."
+        if keepFits {
+            return "Fits: about \(StorageEstimate.size(need)), at \(StorageEstimate.size(e.continuousPerDay)) a day."
         }
-        return "Room for about \(StorageEstimate.duration(days: e.continuousDays)) of these: the oldest goes sooner."
+        let fit = "Only about \(StorageEstimate.duration(days: e.continuousDays)) fit"
+        if limitBinds {
+            return "\(fit) in the \(StorageEstimate.size((limitGB ?? 0) * 1e9)) it may use (Space limits, below): the oldest goes then. Raise the limit, or keep fewer days."
+        }
+        return "\(fit) on \(outlook?.drive?.name ?? "the drive"): the oldest goes then. Free up space on it, choose a bigger drive, or keep fewer days."
+    }
+
+    /// The space limits, folded: the most continuous recording may use, and the space kept free.
+    var limitsSummary: String {
+        let limit = limitGB.map { "At most \(StorageEstimate.size($0 * 1e9))" } ?? "No limit"
+        return "\(limit) \u{00B7} \(StorageEstimate.size(reserveGB * 1e9)) kept free"
     }
 
     var eventsDetail: String? {
@@ -139,6 +172,8 @@ struct DaysPicker: View {
     let presets: [Int]
     let range: ClosedRange<Int>
     var detail: String?
+    /// The detail is a warning (orange): the days don't fit.
+    var warning = false
     let set: (Int) -> Void
     @State private var custom = false
 
@@ -170,7 +205,9 @@ struct DaysPicker: View {
             }
         } label: {
             Text(title)
-            if let detail { Text(detail) }
+            if let detail {
+                Text(detail).foregroundStyle(warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            }
         }
     }
 

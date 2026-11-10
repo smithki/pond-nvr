@@ -93,7 +93,7 @@ Optional, and off unless set (Settings › Remote Access, or here): reaching thi
 | Key | Default | What it does |
 | --- | --- | --- |
 | `remote.enabled` | `false` | `true` to keep this Mac reachable: the service stays connected to the signaling service, and answers pairing and connections. |
-| `remote.signaling` | none | The signaling service's address: `wss://HOST` (or `ws://` on your own network, for testing). |
+| `remote.signaling` | Pond's service | A signaling service of your own: `wss://HOST` (or `ws://` on your own network, for testing). Left out, Pond's own (`wss://signal.pond.camera`). |
 | `remote.stun` | the signaling host, port 3478 | Where this Mac learns the address the world sees it at: `HOST[:PORT]`. pond-signal answers there (and on the next port, for telling what kind of router this Mac is behind). |
 | `remote.port` | any | A fixed UDP port to be reached on: forward it on the router when no other path works (the diagnosis says so). |
 | `remote.shareLocalAddresses` | `true` | `false` to offer only the public address the router shows, never this Mac's own (devices on the same network then meet through the router). |

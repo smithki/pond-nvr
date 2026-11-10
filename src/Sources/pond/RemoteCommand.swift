@@ -198,7 +198,7 @@ final class RemoteAccess: @unchecked Sendable {
             return ControlSocket.Reply()
         default:
             guard let host = current else {
-                return ControlSocket.Reply(error: .failed("remote access is off (remote.enabled and remote.signaling in the settings)"))
+                return ControlSocket.Reply(error: .failed("remote access is off (remote.enabled in the settings)"))
             }
             return await RemoteCommand.handle(request, host: host)
         }
@@ -208,9 +208,11 @@ final class RemoteAccess: @unchecked Sendable {
 /// Remote access in the service, if it's on (and set up right); else why not, if it should be.
 func startRemote(_ settings: Config.Remote?, pondName: String? = nil, log: @escaping @Sendable (String) -> Void) -> (RemoteHost?, String?) {
     guard let settings, settings.enabled else { return (nil, nil) }
-    guard let address = settings.signaling, let url = URL(string: address), ["ws", "wss"].contains(url.scheme) else {
-        log("! remote access is off: no signaling service set (remote.signaling, a wss:// address)")
-        return (nil, "No signaling server is set: a wss:// address.")
+    // Pond's own service unless one's own is set.
+    let address = settings.signaling.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? Brand.hostedSignaling
+    guard let url = URL(string: address), ["ws", "wss"].contains(url.scheme) else {
+        log("! remote access is off: remote.signaling isn\u{2019}t a wss:// address")
+        return (nil, "Your own signaling server must be a wss:// address.")
     }
     // How connections are made: where to learn this Mac's public address (the signaling host's STUN, unless one's
     // given), the port to answer from, whether its own addresses are offered, and the mesh.

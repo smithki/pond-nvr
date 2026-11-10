@@ -11,7 +11,7 @@ Work in progress. What works today:
 - **Events, on the Mac alone**: people, vehicles and animals found in each camera's video (Core ML), with zones; each event described in a sentence and found again by plain-language search ("a courier at the front door this week"), with Apple's on-device models only.
 - **Camera health**: a doctor for each camera, saying what's going wrong, since when, and what to try.
 - **The `pond` command** does all the setup from a terminal and runs the recorder as a login service.
-- **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, through a signaling service of your own; its cameras, events and timeline beside this Mac's, and told when it stops recording ([docs/remote.md](docs/remote.md)).
+- **Other Ponds, from away**: a second home's Pond (or a friend's) paired with this one, peer to peer and end to end encrypted, introduced by Pond's signaling service or one of your own; its cameras, events and timeline beside this Mac's, and told when it stops recording ([docs/remote.md](docs/remote.md)).
 - **Demo mode**: made-up cameras to explore Pond with, before having any ([docs/demo.md](docs/demo.md)).
 
 Next: an iPhone app on the same protocol, and a signed release. See [docs/roadmap.md](docs/roadmap.md).

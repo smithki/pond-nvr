@@ -1,7 +1,6 @@
-// Settings › Remote Access: reaching this Mac from elsewhere (another Pond, later the iPhone app). On or off and the
-// signaling server; the devices paired with it, pairing another (a QR code) or joining another Pond (its code),
-// and trying a connection to one; and how connections are made (directly or only over a mesh, a fixed port, this
-// Mac's own addresses, a relay of one's own). Saved as changed, and taken up by the recorder at once (only its
+// Settings › Remote Access: reaching this Mac from elsewhere (another Pond, later the iPhone app). On or off; the devices paired with it, pairing another (a QR code) or joining another Pond (its code),
+// and trying a connection to one; and, folded under Advanced, how connections are made (Pond's signaling service or
+// one's own, directly or only over a mesh, a fixed port, this Mac's own addresses, a relay of one's own). Saved as changed, and taken up by the recorder at once (only its
 // remote access starts again); what it's doing is asked of it every few seconds.
 import Devices
 import PondCore
@@ -29,6 +28,9 @@ struct RemoteAccessView: View {
     @State private var testing: String?
     @State private var tested: [String: (ok: Bool, words: String)] = [:]
     @State private var problem: String?
+    /// Your own signaling server rather than Pond's service (chosen, or set in the settings).
+    @State private var ownServer = false
+    @State private var showAdvanced = false
 
     enum Field { case signaling, relay, port, secret, meshSubnets }
 
@@ -40,29 +42,32 @@ struct RemoteAccessView: View {
 
     var remote: Config.Remote { model.config?.remote ?? .init() }
 
+    /// What's set under Advanced, folded: as it comes, or what isn't.
+    var advancedSummary: String {
+        var parts: [String] = []
+        if ownServer { parts.append("Own server") }
+        if remote.mesh { parts.append("Mesh only") }
+        if remote.port != nil { parts.append("Fixed port") }
+        if remote.relay != nil { parts.append("Relay") }
+        return parts.isEmpty ? "Pond\u{2019}s service, direct" : parts.joined(separator: " \u{00B7} ")
+    }
+
     var body: some View {
         Form {
             Section {
-                // (The server as typed saved first: it's what it's turned on with.)
                 Toggle(isOn: Binding(get: { remote.enabled }, set: { on in
+                    // (Your own server as typed saved first: it's what it's turned on with.)
                     saveFields()
                     save { $0.enabled = on }
                 })) {
                     Text("Reach this Mac from elsewhere")
                     Text("From your other Macs running Pond, and later the iPhone app.")
                 }
-                .disabled(!remote.enabled && signaling.trimmingCharacters(in: .whitespaces).isEmpty)
-                LabeledContent("Signaling server") {
-                    TextField("Signaling server", text: $signaling, prompt: Text("wss://signal.example.com"))
-                        .labelsHidden()
-                        .focused($focused, equals: .signaling)
-                        .onSubmit(saveFields)
-                }
+                // Your own server chosen, but none given yet: nothing to turn on with.
+                .disabled(!remote.enabled && ownServer && signaling.trimmingCharacters(in: .whitespaces).isEmpty)
                 if remote.enabled { LabeledContent("Status") { statusLabel } }
-            } header: {
-                Text("Remote access")
             } footer: {
-                Text("Paired devices connect to this Mac directly wherever they can, encrypted end to end. The signaling server is your own (see deploy/ in Pond\u{2019}s source): it only passes sealed messages between them, and can read none of them.")
+                Text("Paired devices connect to this Mac directly wherever they can, encrypted end to end. \(ownServer ? "Your own server" : "Pond\u{2019}s service") only introduces them, and can read nothing they send.")
                     .foregroundStyle(.secondary)
             }
 
@@ -85,57 +90,85 @@ struct RemoteAccessView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // How connections are made: for networks that need it, folded away (open by itself when anything in it
+            // isn't as it comes).
             Section {
-                Picker("Connect", selection: Binding(get: { remote.mesh }, set: { mesh in save { $0.mesh = mesh } })) {
-                    Text("Directly, over any network").tag(false)
-                    Text("Only over my mesh (Tailscale, Headscale)").tag(true)
-                }
-                if remote.mesh {
-                    LabeledContent("Mesh") { meshLabel }
-                    LabeledContent("Mesh ranges") {
-                        TextField("Mesh ranges", text: $meshSubnets, prompt: Text("Tailscale\u{2019}s"))
-                            .labelsHidden()
-                            .focused($focused, equals: .meshSubnets)
-                            .onSubmit(saveFields)
-                    }
-                }
-                Toggle(isOn: Binding(get: { remote.shareLocalAddresses }, set: { share in save { $0.shareLocalAddresses = share } })) {
-                    Text("Offer this Mac\u{2019}s own addresses")
-                    Text("Only its temporary IPv6 addresses, never its fixed one. Off, devices on this network meet it through the router.")
-                }
-                LabeledContent("Fixed UDP port") {
-                    TextField("Fixed UDP port", text: $port, prompt: Text("Any"))
-                        .labelsHidden()
-                        .focused($focused, equals: .port)
-                        .onSubmit(saveFields)
-                }
-                if !remote.mesh {
-                    LabeledContent("Relay") {
-                        TextField("Relay", text: $relay, prompt: Text("None"))
-                            .labelsHidden()
-                            .focused($focused, equals: .relay)
-                            .onSubmit(saveFields)
-                    }
-                    if !relay.trimmingCharacters(in: .whitespaces).isEmpty {
-                        LabeledContent("Relay secret") {
-                            HStack {
-                                SecureField("Relay secret", text: $secret,
-                                            prompt: Text(status?.relaySecret == true ? "Kept in the Keychain" : "None"))
+                FoldRow(title: "Advanced", summary: advancedSummary, expanded: $showAdvanced)
+                if showAdvanced {
+                    Group {
+                        Picker("Introduced by", selection: Binding(get: { ownServer }, set: { own in
+                            ownServer = own
+                            if !own {
+                                signaling = ""
+                                save { $0.signaling = nil }
+                            } else {
+                                focused = .signaling
+                            }
+                        })) {
+                            Text("Pond\u{2019}s service").tag(false)
+                            Text("My own server").tag(true)
+                        }
+                        if ownServer {
+                            LabeledContent("Server") {
+                                TextField("Server", text: $signaling, prompt: Text("wss://signal.example.com"))
                                     .labelsHidden()
-                                    .focused($focused, equals: .secret)
-                                    .onSubmit(saveSecret)
-                                Button("Save") { saveSecret() }.disabled(secret.isEmpty)
+                                    .focused($focused, equals: .signaling)
+                                    .onSubmit(saveFields)
+                            }
+                        }
+                        Picker("Connect", selection: Binding(get: { remote.mesh }, set: { mesh in save { $0.mesh = mesh } })) {
+                            Text("Directly, over any network").tag(false)
+                            Text("Only over my mesh (Tailscale, Headscale)").tag(true)
+                        }
+                        if remote.mesh {
+                            LabeledContent("Mesh") { meshLabel }
+                            LabeledContent("Mesh ranges") {
+                                TextField("Mesh ranges", text: $meshSubnets, prompt: Text("Tailscale\u{2019}s"))
+                                    .labelsHidden()
+                                    .focused($focused, equals: .meshSubnets)
+                                    .onSubmit(saveFields)
+                            }
+                        }
+                        Toggle(isOn: Binding(get: { remote.shareLocalAddresses }, set: { share in save { $0.shareLocalAddresses = share } })) {
+                            Text("Offer this Mac\u{2019}s own addresses")
+                            Text("Only its temporary IPv6 addresses, never its fixed one. Off, devices on this network meet it through the router.")
+                        }
+                        LabeledContent("Fixed UDP port") {
+                            TextField("Fixed UDP port", text: $port, prompt: Text("Any"))
+                                .labelsHidden()
+                                .focused($focused, equals: .port)
+                                .onSubmit(saveFields)
+                        }
+                        if !remote.mesh {
+                            LabeledContent("Relay") {
+                                TextField("Relay", text: $relay, prompt: Text("None"))
+                                    .labelsHidden()
+                                    .focused($focused, equals: .relay)
+                                    .onSubmit(saveFields)
+                            }
+                            if !relay.trimmingCharacters(in: .whitespaces).isEmpty {
+                                LabeledContent("Relay secret") {
+                                    HStack {
+                                        SecureField("Relay secret", text: $secret,
+                                                    prompt: Text(status?.relaySecret == true ? "Kept in the Keychain" : "None"))
+                                            .labelsHidden()
+                                            .focused($focused, equals: .secret)
+                                            .onSubmit(saveSecret)
+                                        Button("Save") { saveSecret() }.disabled(secret.isEmpty)
+                                    }
+                                }
                             }
                         }
                     }
+                    .padding(.leading, FoldRow.indent)
                 }
-            } header: {
-                Text("Connections")
             } footer: {
-                Text(remote.mesh
-                    ? "Connections are made over your mesh\u{2019}s tunnel alone: no public address is learned or offered, and no relay is used. Turn it on at both ends. Mesh ranges: Tailscale\u{2019}s (100.64.0.0/10, fd7a:115c:a1e0::/48) unless you give others, comma separated."
-                    : "Direct paths are tried first, IPv6 and IPv4. When none works, a fixed port forwarded on your router, or a relay of your own (coturn, in deploy/), gets through; the relay is used only then.")
-                    .foregroundStyle(.secondary)
+                if showAdvanced {
+                    Text(remote.mesh
+                        ? "Connections are made over your mesh\u{2019}s tunnel alone: no public address is learned or offered, and no relay is used. Turn it on at both ends. Mesh ranges: Tailscale\u{2019}s (100.64.0.0/10, fd7a:115c:a1e0::/48) unless you give others, comma separated."
+                        : "Direct paths are tried first, IPv6 and IPv4. When none works, a fixed port forwarded on your router, or a relay of your own (coturn, in deploy/), gets through; the relay is used only then. Your own signaling server: deploy/ in Pond\u{2019}s source.")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .pageForm()
@@ -232,6 +265,9 @@ struct RemoteAccessView: View {
 
     func loadFields() {
         signaling = remote.signaling ?? ""
+        ownServer = !signaling.trimmingCharacters(in: .whitespaces).isEmpty
+        // Open when anything in it isn't as it comes.
+        showAdvanced = ownServer || remote.mesh || remote.port != nil || remote.relay != nil || !remote.shareLocalAddresses
         relay = remote.relay ?? ""
         port = remote.port.map(String.init) ?? ""
         meshSubnets = (remote.meshSubnets ?? []).joined(separator: ", ")
