@@ -8,5 +8,19 @@
     <link>https://pond.camera</link>
     <description>Pond's releases</description>
     <language>en</language>
+    <item>
+      <title>Pond 0.2.0</title>
+      <pubDate>Tue, 10 Nov 2026 22:31:50 GMT</pubDate>
+      <sparkle:version>2</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[<h3>Search</h3>
+<ul><li><strong>The picture model is downloaded by Pond</strong>, not built into the app (the download is about 350 MB smaller): on first run, the version pond.camera names, signed by Pond's own key and checked before it's used. Pond checks once a week for a new version (Settings › General: Download picture model updates, and Check for Updates), and while a new one indexes every event again, search keeps finding them all.</li></ul>
+<h3>Updates</h3>
+<ul><li><strong>Pond updates itself</strong> (Sparkle): Pond › Check for Updates…, and checking daily by itself (Settings › Advanced). An update is installed only if it's signed with Pond's update key and Developer ID; after one, the recorder starts again on the new copy.</li></ul>
+<h3>Making Pond</h3>
+<ul><li><strong>The models aren't in the repository</strong>: builds download the published ones by their locks, checked by hash (YOLO26 with its source, as its licence asks).</li><li><strong>Releases from a tag on CI</strong>, or made and published on a Mac when CI can't (<code>make publish</code>).</li></ul>]]></description>
+      <enclosure url="https://github.com/smithki/pond-nvr/releases/download/v0.2.0/Pond-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="7nJfsn3k+hFCmHKU4IvZWZ5/XtVqL3gojS2bE6n2HyoDL0BR1Jz4m32c1TttLrem1qrBEbYsYJOVCUy/BdjUAg==" length="31500019"/>
+    </item>
   </channel>
 </rss>
