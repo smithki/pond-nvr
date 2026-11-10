@@ -1,8 +1,9 @@
 # Pond's appcast, the feed Sparkle offers updates of the app from (site/public/appcast.xml, served at
 # pond.camera/appcast.xml): when a release is published on GitHub (its draft published by hand, after a look), its
-# entry is added from the release's own Pond-VERSION.sparkle (Sparkle's signature of its disk image, made by make
-# release) and the changelog, and committed to main, which deploys pond.camera. Needs no key: the signature was made
-# with the release. (docs/release.md, Updates.)
+# entry is made from the release's own Pond-VERSION.sparkle (Sparkle's signature of its disk image, made by make
+# release) and the changelog, and pond-nvr-bot proposes it in a pull request. Merging it deploys pond.camera, and Pond
+# copies are offered the update from then. Needs no signing key: the signature was made with the release.
+# (docs/release.md, Updates; docs/ci-security.md, pond-nvr-bot.)
 name: Appcast
 
 on:
@@ -15,7 +16,7 @@ on:
         required: true
 
 permissions:
-  contents: write   # the commit to main
+  contents: read
 
 concurrency:
   group: appcast
@@ -25,17 +26,20 @@ jobs:
   appcast:
     if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
     runs-on: ubuntu-latest
+    environment: appcast
     timeout-minutes: 10
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
+          persist-credentials: false
 
       - name: Its entry
         id: entry
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=${TAG#v}
           if ! gh release download "$TAG" --pattern "Pond-$version.sparkle" --dir "$RUNNER_TEMP"; then
@@ -43,14 +47,38 @@ jobs:
             exit 0
           fi
           python3 scripts/appcast.py "$version" "$RUNNER_TEMP/Pond-$version.sparkle"
-          echo "added=true" >> "$GITHUB_OUTPUT"
+          git diff --quiet site/public/appcast.xml || echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Committed to main
-        if: steps.entry.outputs.added == 'true'
+      - name: A token for this repository
+        if: steps.entry.outputs.changed == 'true'
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: A pull request
+        if: steps.entry.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BOT: ${{ steps.token.outputs.app-slug }}[bot]
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          version=${TAG#v}
+          id=$(gh api "/users/$BOT" --jq .id)
+          git config user.name "$BOT"
+          git config user.email "$id+$BOT@users.noreply.github.com"
+          branch="appcast/$TAG"
+          git checkout -b "$branch"
           git add site/public/appcast.xml
-          git diff --cached --quiet && exit 0
-          git commit -m "Appcast: Pond ${TAG#v}"
-          git push origin HEAD:main
+          git commit -m "Appcast: Pond $version"
+          git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$branch"
+          gh pr create --base main --head "$branch" --title "Appcast: Pond $version" --body "$(cat <<EOF
+          Pond $version in the appcast, from its published release's Sparkle signature (\`Pond-$version.sparkle\`) and the changelog.
+
+          Merging deploys pond.camera's appcast: Pond copies with updates are offered $version from then.
+          EOF
+          )" || echo "(The pull request is there already: updated.)"

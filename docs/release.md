@@ -135,6 +135,6 @@ the app restarts the recorder on its new copy of pond (it was still running the 
   isn't). `make release` signs the disk image (`sign_update`) and writes `Pond-VERSION.sparkle` beside it: the
   signature, the size and the versions. It's published with the release (CI's or `make publish`'s).
 - **The appcast**, when the release is published on GitHub (the draft, by hand): the appcast workflow
-  (`.github/workflows/appcast.yml`) takes the release's `.sparkle` and its changelog section and adds its entry
-  (`scripts/appcast.py`), committed to `main`, which deploys pond.camera. Until a release is published, no Pond is
-  offered it. (It downloads the disk image from the release, so updates reach people once the repository is public.)
+  (`.github/workflows/appcast.yml`) takes the release's `.sparkle` and its changelog section, makes its entry
+  (`scripts/appcast.py`) and pond-nvr-bot proposes it in a pull request; merging it deploys pond.camera. Until then,
+  no Pond is offered it.

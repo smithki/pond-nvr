@@ -27,11 +27,12 @@ environment and the run is one the environment allows.
 
 - **`release`**: tags `v*` only. Used by `release.yml`.
 - **`models`**: the branch `main` only. Used by the model workflow (search model updates).
+- **`appcast`**: tags `v*` (a release's publishing), and `main` (by hand). Holds pond-nvr-bot's key only, to propose
+  a release's appcast entry; no signing key.
 
-No workflow triggered by a pull request names either, and none uses `pull_request_target` (which runs with the base
-repository's rights on a contributor's code). Once the repository is public, each environment also needs the
-maintainer's approval before a job starts (required reviewers: GitHub offers them on private repositories only to
-paid organisations).
+No workflow triggered by a pull request names any of them, and none uses `pull_request_target` (which runs with
+the base repository's rights on a contributor's code). `release` and `models` also wait for the maintainer's approval
+before a job starts (required reviewers).
 
 ## pond-nvr-bot
 
@@ -56,6 +57,7 @@ meant to grow, so these hold for every job given to it:
 | --- | --- | --- | --- |
 | Publish search models | `search-model.yml` (`models`) | `pond-models` | Contents: read and write |
 | Propose a search model (a branch and a pull request) | `search-model.yml` (`models`) | `pond-nvr` | Contents: read and write; Pull requests: read and write |
+| Propose a release's appcast entry (a branch and a pull request) | `appcast.yml` (`appcast`) | `pond-nvr` | Contents: read and write; Pull requests: read and write |
 
 ## Rules for workflows
 
@@ -65,26 +67,27 @@ meant to grow, so these hold for every job given to it:
 - **Secrets only in steps that use them**, as environment variables of that step, never echoed; files made from
   them (a `.p12`, a `.p8`) live in the job's temporary folder only while they're imported, and keychains made for a job
   are deleted however it ends (`scripts/ci-keychain.sh`).
-- **What publishes needs a person.** A release is a draft until published by hand; a new model is a pull request until
-  merged. The appcast workflow commits to `main` itself (with the workflow's own token), but only what a published
-  release carries, signed when it was made: it holds no key.
+- **What publishes needs a person.** A release is a draft until published by hand; a new model, and a release's
+  appcast entry, are pull requests until merged.
 
 ## Protecting what's public
 
-- **`main`**: a ruleset ("main: no force pushes or deletion"): nothing pushed to it rewrites its history or removes it.
-  Changes don't go through pull requests yet (the maintainer pushes them); when they do, the ruleset requires them,
-  with the code owners' review.
+- **`main`**, two rulesets:
+  - *"main: no force pushes or deletion"*: nothing rewrites its history or removes it. No one bypasses it, the
+    maintainer included.
+  - *"main: changes through pull requests"*: a change comes through a pull request, approved (one review, the code
+    owners' for what they own, by someone other than whoever pushed last, its threads resolved, an approval dismissed
+    by a later push). Only the repository's admin (the maintainer) bypasses it, to push to `main` directly; no app
+    or workflow does: pond-nvr-bot's changes (a search model, an appcast entry) come as pull requests.
 - **CODEOWNERS** (`.github/CODEOWNERS`): what handles the keys, makes and publishes releases, and says what Pond
   downloads and trusts (the workflows, the release and model scripts, the locks, the manifest and appcast, the app's
-  Info.plist): a pull request touching them asks for the maintainer's review.
-- **Outside contributions**: not merged until the CLA's review and its check (CONTRIBUTING.md); a first-time
+  Info.plist): a pull request touching them needs the maintainer's review.
+- **Outside contributions**: not merged until the CLA's review and its check (CONTRIBUTING.md); an outside
   contributor's pull request runs no workflow until approved, and none of them names an environment.
 - **Required reviewers** on `release` and `models` (the maintainer): a job needing their keys waits for approval.
+  (`scripts/ci-secrets.sh` keeps them, as whoever runs it.)
 - **GitHub's own checks**: Dependabot alerts, secret scanning with push protection, and private vulnerability
   reporting (SECURITY.md).
-- **The appcast workflow's commit**: it pushes to `main` with the workflow's own token, which the ruleset allows (it
-  adds a commit, rewriting nothing). If `main` comes to require pull requests, it moves to a pull request opened by
-  pond-nvr-bot.
 
 ## If a key leaks
 

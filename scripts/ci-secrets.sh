@@ -3,7 +3,9 @@
 #   release (tags v* only): the Developer ID certificate and its password, the App Store Connect API key
 #     notarization logs in with, and Pond's update key (Sparkle's), for the release workflow (release.yml);
 #   models (main only): Pond's GitHub App (its ID and private key), which publishes search's models to pond-models,
-#     and the model signing key, which signs them for pond.camera's manifest.
+#     and the model signing key, which signs them for pond.camera's manifest;
+#   appcast (tags v*, and main by hand): the app's ID and key again, to propose a published release's appcast entry.
+# release and models are approved by you, job by job (required reviewers).
 # Each value goes from 1Password to GitHub through a pipe: never shown, never written to a file. Run it on your own
 # Mac when they're first set up and whenever one is renewed in 1Password. docs/release.md, Releases from CI.
 #
@@ -66,22 +68,32 @@ put() {
     echo "  ✓ $name"
 }
 
-# An environment that only runs of the given kind and name can use (a tag pattern, or a branch), so no other
-# branch's or pull request's workflow reads its secrets. (Required reviewers too once the repository is public:
-# GitHub's private repositories on Pro don't have them.)
+# An environment that only runs of the given kinds and names can use (tag patterns, branches: "tag v*" "branch main"),
+# so no other branch's or pull request's workflow reads its secrets; with `reviewed`, a job waits for your approval
+# before it gets them (required reviewers: you, whoever runs this).
+ME=$(gh api user --jq .id)
 environment() {
-    local name=$1 type=$2 pattern=$3
-    echo "The $name environment of $REPO, for $type $pattern only"
-    gh api -X PUT "repos/$REPO/environments/$name" --input - >/dev/null <<'JSON'
-{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
-JSON
-    if [ -z "$(gh api "repos/$REPO/environments/$name/deployment-branch-policies" \
-            --jq ".branch_policies[] | select(.type == \"$type\" and .name == \"$pattern\") | .id")" ]; then
-        gh api -X POST "repos/$REPO/environments/$name/deployment-branch-policies" -f name="$pattern" -f type="$type" >/dev/null
+    local name=$1 reviewed=$2
+    shift 2
+    echo "The $name environment of $REPO, for $* only$([ "$reviewed" = reviewed ] && echo ", each job approved by you")"
+    if [ "$reviewed" = reviewed ]; then
+        reviewers="[{\"type\": \"User\", \"id\": $ME}]"
+    else
+        reviewers="[]"
     fi
+    gh api -X PUT "repos/$REPO/environments/$name" --input - >/dev/null <<JSON
+{"reviewers": $reviewers, "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+    for rule in "$@"; do
+        local type=${rule%% *} pattern=${rule#* }
+        if [ -z "$(gh api "repos/$REPO/environments/$name/deployment-branch-policies" \
+                --jq ".branch_policies[] | select(.type == \"$type\" and .name == \"$pattern\") | .id")" ]; then
+            gh api -X POST "repos/$REPO/environments/$name/deployment-branch-policies" -f name="$pattern" -f type="$type" >/dev/null
+        fi
+    done
 }
 
-environment release tag 'v*'
+environment release reviewed "tag v*"
 put release DEVELOPER_ID_P12 "$(op document get "$P12_DOCUMENT" --vault "$VAULT" | base64)"
 put release DEVELOPER_ID_P12_PASSWORD "$(value "$P12_PASSWORD")"
 put release ASC_KEY_P8 "$(op document get "$P8_DOCUMENT" --vault "$VAULT")"
@@ -89,9 +101,15 @@ put release ASC_KEY_ID "$(value "$ASC_KEY_ID")"
 put release ASC_ISSUER_ID "$(value "$ASC_ISSUER_ID")"
 put release SPARKLE_ED_KEY "$(op document get "$SPARKLE_KEY_DOCUMENT" --vault "$VAULT")"
 
-environment models branch main
+environment models reviewed "branch main"
 put models BOT_APP_ID "$(value "$BOT_APP_ID")"
 put models BOT_PRIVATE_KEY "$(op document get "$BOT_KEY_DOCUMENT" --vault "$VAULT")"
 put models MODEL_SIGNING_KEY "$(op document get "$MODEL_KEY_DOCUMENT" --vault "$VAULT")"
 
-echo "✓ CI's keys are in $REPO's release and models environments."
+# The appcast: pond-nvr-bot proposes a published release's entry in a pull request (no reviewer: you review the pull
+# request itself).
+environment appcast unreviewed "tag v*" "branch main"
+put appcast BOT_APP_ID "$(value "$BOT_APP_ID")"
+put appcast BOT_PRIVATE_KEY "$(op document get "$BOT_KEY_DOCUMENT" --vault "$VAULT")"
+
+echo "✓ CI's keys are in $REPO's release, models and appcast environments."
