@@ -1,0 +1,21 @@
+# The detection model built into Pond (docs/detection.md, The built-in model): what it was made from, and the
+# archive builds download (scripts/model-fetch.sh, into models/detection/), with its hash. Changed only on purpose,
+# in a pull request: a new built-in model changes what events are found, so it comes with a Pond release.
+
+version = yolo26s-v1
+name = YOLO26 small
+
+# What it was made from.
+source = Ultralytics YOLO26s (COCO's 80 classes), AGPL-3.0
+weights = https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt 646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b
+export = yolo export model=yolo26s.pt format=coreml imgsz=640 nms=False half=True
+packages = ultralytics==8.4.182 torch==2.14.1 coremltools==9.0
+exported = 2026-10-18
+
+# What was published.
+archive = yolo26s-v1.aar
+url = https://github.com/smithki/pond-models/releases/download/yolo26s-v1/yolo26s-v1.aar
+# Its source (the AGPL's Corresponding Source), published beside it: Ultralytics' weights, as exported from.
+source-url = https://github.com/smithki/pond-models/releases/download/yolo26s-v1/yolo26s.pt
+size = 18097343
+sha256 = 52317649cb366a2a99bc02722dfd609d676897679246b2ffa2249ff15b848521

@@ -5,7 +5,7 @@
 #
 #   make release VERSION=0.1.0
 #
-# Needs, once per Mac (docs/release.md):
+# Needs, once per Mac (docs/release.md), and the network (the models, the first time):
 #   - a Developer ID Application certificate (Xcode › Settings › Accounts › Manage Certificates… › + ›
 #     Developer ID Application);
 #   - notarization's login in the keychain, under the profile "pond" (NOTARY_PROFILE to use another), best an App
@@ -56,9 +56,11 @@ fi
 notary history >/dev/null 2>&1 \
     || fail "No notarization login that works under the profile \"$PROFILE\" (docs/release.md: Once per Mac)."
 
-# Search's picture model is part of a release: built in, not left out (search would work without pictures).
-[ -e models/search/siglip2.json ] || SEARCH_MODEL=1 scripts/search-model.sh
-[ -e models/search/siglip2.json ] || fail "Search's picture model couldn't be made (above): a release needs it."
+# The models a release builds in are the published ones the locks name (models/*.lock), not ones converted on this
+# Mac: downloaded (once) and checked against the locks' hashes. Search's is part of a release too, not left out
+# (search would work without pictures).
+REPLACE=1 scripts/model-fetch.sh models/detection.lock models/detection || fail "The detection model couldn't be downloaded (above)."
+REPLACE=1 scripts/model-fetch.sh models/search.lock models/search || fail "Search's picture model couldn't be downloaded (above): a release needs it."
 
 echo "Releasing Pond $VERSION, signed by $IDENTITY"
 rm -rf "$OUT" && mkdir -p "$OUT"

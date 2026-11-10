@@ -30,7 +30,8 @@ warning, offline as well. `make release` makes it from a clean commit, on a Mac 
    `--apple-id YOU@EXAMPLE.COM --team-id TEAMID` in place of the key's three options; TEAMID is in developer.apple.com
    › Account › Membership details. Type the password without its dashes (`abcdefghijklmnop`): with them, it was
    refused as incorrect (HTTP 401).
-3. **Search's picture model** made (`models/search/`): the first `make app` makes it, or `make release` does.
+3. Nothing for the models: `make release` downloads the published ones `models/*.lock` name (once) and checks
+   their hashes.
 
 ## Each release
 
@@ -55,9 +56,11 @@ why.
 - **The hardened runtime**, which notarization requires, on every build (`make app` too), so what it stops shows in
   everyday use first. The app asks for one entitlement (`app/Pond.entitlements`): the microphone, for talking through
   a camera's speaker. `pond` and `pond-signal` ask for none.
-- **Search's picture model, built in** (about 390 MB more): a release searches pictures from the first event, with
-  nothing downloaded later and no server to rely on. Each Mac that makes releases converts its own copy for now
-  ([search.md](search.md#published-versions) says what a published, pinned model would need, for CI).
+- **The models, built in**: detection's (YOLO26 small, about 18 MB) and search's picture model (about 390 MB more),
+  so a release finds events and searches pictures from the first one. Each is the published version its lock names
+  (`models/detection.lock`, `models/search.lock`), downloaded from pond-models and checked against the lock's
+  SHA-256 ([detection.md](detection.md#the-built-in-model), [search.md](search.md#published-versions)), never one
+  converted on the Mac making the release.
 - **The licences**: `LICENSE`, `NOTICE` and `licenses/` (the texts the notices refer to) in the app's Resources.
 - The bundle identifier `camera.pond` (from pond.camera): settings, the Keychain items and the login service are
   known by it, so it stays.
@@ -83,9 +86,10 @@ a file. Where they are in your 1Password stays out of the repository: the script
 `~/.config/pond/release-secrets`, writing a template there the first time. Run it again whenever one is renewed.
 
 The runner is GitHub's `xcode-27` image (macOS 27 with Xcode 27); the repository variable `RELEASE_RUNNER` names another, which must
-have macOS 27 and its Xcode too. A machine of your own must run nothing else (not your recorder, nor pull requests' code). Search's picture model is
-converted on the first release and kept in the Actions cache; a published one with a pinned hash replaces that
-(search.md).
+have macOS 27 and its Xcode too. A machine of your own must run nothing else (not your recorder, nor pull requests' code). The models are downloaded
+by the release itself, in seconds. (As of 2026-11-10 the `xcode-27` image is still a preview, and GitHub gave this
+repository's jobs no machine for it: a job waits, then is cancelled as "not acquired". Until it does, releases are
+made on a Mac with `make release`.)
 
 What guards these keys, and what to do if one leaks: [ci-security.md](ci-security.md).
 

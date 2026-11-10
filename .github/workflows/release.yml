@@ -27,13 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # Search's picture model, converted once and kept between releases (a few GB to convert, about 390 MB made),
-      # until a published one with a pinned hash replaces it (docs/search.md).
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: models/search
-          key: search-model-${{ hashFiles('scripts/search-model.sh', 'scripts/convert-siglip.py') }}
-
       - name: The release keychain
         env:
           DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}

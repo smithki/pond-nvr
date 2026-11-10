@@ -119,4 +119,17 @@ pip install ultralytics coremltools
 yolo export model=yolo26s.pt format=coreml imgsz=640 nms=False half=True
 ```
 
-The built-in model is `models/yolo26s.mlpackage` in the repository, compiled into the app by `make app`.
+### The built-in model
+
+YOLO26 small isn't kept in the repository: it's published, with its source, as the release `yolo26s-v1` of
+[pond-models](https://github.com/smithki/pond-models), and `models/detection.lock` names it: the archive's URL,
+size and SHA-256, and what it was made from (Ultralytics' `yolo26s.pt` and its hash, the export above, with
+Ultralytics 8.4.182, torch 2.14.1 and coremltools 9.0, on 2026-10-18). `make app` downloads it into
+`models/detection/` once (`scripts/model-fetch.sh`, refusing an archive whose hash differs), compiles it, and builds
+it in. Detection is what Pond's events are made of, so it stays built in, never downloaded later: a build without
+it fails.
+
+Its licence is the AGPL-3.0, as Pond's is: the archive carries the licence and a notice of how it was modified, and
+the release carries its source too (`yolo26s.pt`), so whoever gets the model can get what it was made from. A new
+built-in model changes what events are found, so it comes with a Pond release, and its lock changes in a pull
+request. To try a model on recordings, `POND_MODELS=models/detection` points the tools at the downloaded folder.

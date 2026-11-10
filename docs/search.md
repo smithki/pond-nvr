@@ -93,8 +93,11 @@ differ slightly, and a version's embeddings must stay comparable with those ever
   the database keeps the model's name beside each embedding and embeds an event again when it differs.
 - **Its licence with it.** SigLIP 2 is Apache-2.0: each archive carries the licence, and its `NOTICE` says it was
   converted to Core ML and quantized, from which revision, and with what.
-- **In the app**: built in for now (`make app` and `make release` convert their own, at the lock's revision with the
-  lock's packages). Next, Pond downloads it instead (roadmap: A signed, notarized release).
+- **In builds**: `make app` and `make release` download the published version `models/search.lock` names into
+  `models/search/` (once, about 350 MB; `scripts/model-fetch.sh`, checked against its SHA-256) and build it in.
+  `SEARCH_MODEL=convert make app` converts one on this Mac instead, at the lock's revision with the lock's
+  packages, for working on the conversion. Next, Pond downloads it itself, rather than having it built in (roadmap:
+  A signed, notarized release).
 
 ## From the command line
 

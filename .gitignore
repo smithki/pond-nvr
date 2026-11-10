@@ -1,7 +1,8 @@
 # generated
 dist/
-# search's model, too big for the repository: made by scripts/convert-siglip.py
+# the models, downloaded by builds as models/*.lock name them (scripts/model-fetch.sh), or converted here
 models/search/
+models/detection/
 
 # editors and the OS
 .DS_Store

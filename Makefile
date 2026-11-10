@@ -76,21 +76,25 @@ app: build
 	  --app-icon AppIcon --output-partial-info-plist "$$out/.icon-info.plist" \
 	  --output-format human-readable-text >/dev/null
 	@rm -f "$(APP)/Contents/Resources/.icon-info.plist"
-	@# The detection models built in (models/: a Core ML package and its manifest each), compiled now so they load
-	@# at once.
+	@# The detection model built in (models/detection/: a Core ML package and its manifest), downloaded as
+	@# models/detection.lock names it (once; scripts/model-fetch.sh), and compiled now so it loads at once. Pond finds
+	@# events with it, so a build without it fails.
+	@scripts/model-fetch.sh models/detection.lock models/detection
 	@rm -rf "$(APP)/Contents/Resources/Models" && mkdir -p "$(APP)/Contents/Resources/Models"
-	@for m in models/*.mlpackage; do \
+	@for m in models/detection/*.mlpackage; do \
 	  xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Models" >/dev/null && \
 	  cp "$${m%.mlpackage}.json" "$(APP)/Contents/Resources/Models/"; \
 	done
-	@# Search's model (models/search/, made by scripts/convert-siglip.py; not in the repository): made on the first
-	@# make app (scripts/search-model.sh: once, a few minutes; SEARCH_MODEL=0 skips it), then built in. Without it
-	@# (not made, or skipped), search works on what was found and the descriptions alone.
+	@# Search's model (models/search/): the published one, downloaded on the first make app (scripts/search-model.sh:
+	@# once, about 350 MB; SEARCH_MODEL=0 skips it), then built in, compiled already (or compiled now, if converted on
+	@# this Mac). Without it (offline, or skipped), search works on what was found and the descriptions alone.
 	@scripts/search-model.sh
 	@rm -rf "$(APP)/Contents/Resources/Search"
 	@if [ -e models/search/siglip2.json ]; then \
 	  mkdir -p "$(APP)/Contents/Resources/Search" && \
-	  for m in models/search/*.mlpackage; do xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Search" >/dev/null; done && \
+	  if ls models/search/*.mlpackage >/dev/null 2>&1; then \
+	    for m in models/search/*.mlpackage; do xcrun coremlcompiler compile "$$m" "$(APP)/Contents/Resources/Search" >/dev/null; done; \
+	  else cp -R models/search/*.mlmodelc "$(APP)/Contents/Resources/Search/"; fi && \
 	  cp models/search/siglip2.json models/search/siglip2-tokenizer.json "$(APP)/Contents/Resources/Search/"; \
 	fi
 	@$(CODESIGN) --sign "$(SIGN)" --identifier pond "$(APP)/Contents/MacOS/pond"
