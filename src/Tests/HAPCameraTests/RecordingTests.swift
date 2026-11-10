@@ -91,4 +91,31 @@ import Testing
         recording.setPrivate(false)
         #expect(!recording.cameraOn)
     }
+
+    /// The hub turning recording off and on (home and away can differ, and only what's so now reaches the camera):
+    /// each change kept, said in the log, and when it was last on.
+    @Test func theHubsChangesAreKept() throws {
+        final class Lines: @unchecked Sendable { var lines: [String] = [] }
+        let lines = Lines()
+        let recording = RecordingController(options: RecordingOptions(doorbell: false), state: nil) { lines.lines.append($0) }
+        defer { recording.stop() }
+        let camera = CameraAccessory(name: "Porch", details: AccessoryDetails(device: nil, cameraID: "porch"), recording: recording)
+        let management = try #require(camera.accessory.services.first { $0.type == "204" })
+        let active = try #require(management.characteristic(HAPType.active))
+        _ = try active.write(.int(1))
+        #expect(recording.current.onUntil == nil)
+        _ = try active.write(.int(0))
+        let state = recording.current
+        #expect(state.onUntil != nil)
+        #expect(state.changes?.map(\.recording) == [true, false])
+        #expect(lines.lines.contains { $0.contains("the hub set recording off, the camera on") })
+        // Written again unchanged (as the hub does on reconnecting): nothing more kept or said.
+        let said = lines.lines.count
+        _ = try active.write(.int(0))
+        #expect(recording.current.changes?.count == 2)
+        #expect(lines.lines.count == said, "\(lines.lines)")
+        // Only the last few kept.
+        for i in 0 ..< 20 { _ = try active.write(.int(i % 2)) }
+        #expect(recording.current.changes?.count == RecordingState.changesKept)
+    }
 }

@@ -11,7 +11,7 @@ import SwiftUI
 
 /// What the Settings window shows.
 enum SettingsPage: Hashable {
-    case general, storage, remote, advanced
+    case general, storage, remote, homeKit, advanced
     /// This Mac's recorder (whether it runs, the media engine, its log).
     case recorder
     /// Every camera at a glance (and the thresholds).
@@ -32,6 +32,7 @@ enum SettingsPage: Hashable {
         case "general": self = .general
         case "storage": self = .storage
         case "remote": self = .remote
+        case "homekit": self = .homeKit
         case "advanced": self = .advanced
         case "recorder": self = .recorder
         case "cameras": self = .cameras
@@ -202,6 +203,9 @@ struct SettingsWindow: View {
                 let remote = remoteAccessState
                 SidebarRow(title: "Remote Access", subtitle: remote.words, symbol: "network", dot: remote.dot)
                     .tag(SettingsPage.remote)
+                let homeKit = homeKitState(cameras)
+                SidebarRow(title: "HomeKit", subtitle: homeKit.words, symbol: "homekit", dot: homeKit.dot)
+                    .tag(SettingsPage.homeKit)
                 let all = camerasState(cameras)
                 SidebarRow(title: "Cameras", subtitle: all.words, symbol: "video", dot: all.dot, drills: true)
                     .tag(SettingsPage.cameras)
@@ -324,6 +328,7 @@ struct SettingsWindow: View {
         case .advanced: AdvancedSettings()
         case .storage: needsSettings { StorageView() }
         case .remote: needsSettings { RemoteAccessView() }
+        case .homeKit: needsSettings { HomeKitPage() }
         case .recorder: needsSettings { RecorderView() }
         case .cameras: needsSettings { DoctorView() }
         case let .camera(id):
@@ -354,6 +359,7 @@ struct SettingsWindow: View {
         case .general: "General"
         case .storage: "Storage"
         case .remote: "Remote Access"
+        case .homeKit: "HomeKit"
         case .advanced: "Advanced"
         case .recorder: "Recorder"
         case .cameras: "Cameras"
@@ -425,6 +431,22 @@ struct SettingsWindow: View {
         let ponds = model.otherPonds, connected = ponds.count { model.isConnected($0) }
         if ponds.isEmpty { return ("On \u{00B7} nothing paired yet", .green) }
         return ("On \u{00B7} \(connected) of \(ponds.count) Pond\(ponds.count == 1 ? "" : "s") connected", .green)
+    }
+
+    /// HomeKit: how many cameras are in the Home app, or the first that needs something done.
+    func homeKitState(_ cameras: [Config.Camera]) -> (words: String, dot: Color?) {
+        let inHome = cameras.filter(\.homekit)
+        guard !inHome.isEmpty else { return ("No cameras in the Home app", nil) }
+        let count = "\(inHome.count) of \(cameras.count) camera\(cameras.count == 1 ? "" : "s") in the Home app"
+        let states = inHome.compactMap { camera in model.homeKitState(for: camera).map { (camera, $0) } }
+        if states.contains(where: { $0.1 == .serviceStopped }) { return ("Off \u{00B7} the recorder isn\u{2019}t running", .orange) }
+        if let (camera, state) = states.first(where: { $0.1.needsAttention }) {
+            return ("\(camera.name): \(HomeKitText(state, camera: camera).title.lowercasedFirst)", .orange)
+        }
+        if inHome.contains(where: { camera in model.homeKitRecording(for: camera).map { RecordingText($0, camera: camera).attention } == true }) {
+            return (count + " \u{00B7} a recording failed", .orange)
+        }
+        return (count, .green)
     }
 
     /// Advanced: beta and test features, and the version.

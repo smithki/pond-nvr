@@ -129,6 +129,11 @@ public struct RecordingState: Codable, Equatable, Sendable {
     public var periodicSnapshots = true
     /// The last recording sent, for the app (kept across restarts).
     public var lastClip: HomeKitStatus.Recording.Clip?
+    /// When the hub last turned recording off after having it on, and its latest changes (HomeKitStatus.Recording).
+    public var onUntil: Date?
+    public var changes: [HomeKitStatus.Recording.Change]?
+    /// The most changes kept.
+    static let changesKept = 10
 
     public init() {}
 }
@@ -174,6 +179,8 @@ public final class RecordingController: @unchecked Sendable {
             next.sound = s.audioActive
             next.chosen = s.selected != nil
             if next.lastClip == nil { next.lastClip = s.lastClip }
+            next.onUntil = s.onUntil
+            next.changes = s.changes
             edit(&next)
             guard next != status || !told else { return nil }
             status = next
@@ -243,13 +250,27 @@ public final class RecordingController: @unchecked Sendable {
     }
 
     func change(_ edit: (inout RecordingState) -> Void) {
-        let next = lock.withLock { () -> RecordingState? in
+        let (next, said) = lock.withLock { () -> (RecordingState?, String?) in
             var s = state
             edit(&s)
-            guard s != state else { return nil }
+            guard s != state else { return (nil, nil) }
+            // Recording or the camera turned on or off by the hub (its Recording Options for the home's mode, home or
+            // away, an automation, or someone in the Home app): kept, and said in the log, as only what's so now
+            // reaches the camera.
+            var said: String?
+            if s.active != state.active || s.cameraActive != state.cameraActive {
+                let now = Date()
+                if state.active, !s.active { s.onUntil = now }
+                var changes = s.changes ?? []
+                changes.append(.init(at: now, recording: s.active, camera: s.cameraActive))
+                s.changes = Array(changes.suffix(RecordingState.changesKept))
+                said = "HomeKit: the hub set recording \(s.active ? "on" : "off"), the camera \(s.cameraActive ? "on" : "off")"
+                    + " (snapshots: event \(s.eventSnapshots ? "on" : "off"), periodic \(s.periodicSnapshots ? "on" : "off"))"
+            }
             state = s
-            return s
+            return (s, said)
         }
+        if let said { log(said) }
         if let next {
             saved?(next)
             report { _ in }
@@ -266,8 +287,8 @@ public final class RecordingController: @unchecked Sendable {
                                     value: .int(s.active ? 1 : 0))
         active.onWrite = { [weak self] value throws(HAPStatus) in
             guard let on = value.flag else { throw .invalidValue }
+            // (Said in the log by `change`, when it changes.)
             self?.change { $0.active = on }
-            self?.log("HomeKit: recording \(on ? "on" : "off") (HomeKit Secure Video)")
             return nil
         }
         let selected = Characteristic(type: HAPType.selectedCameraRecordingConfiguration, format: .tlv8,

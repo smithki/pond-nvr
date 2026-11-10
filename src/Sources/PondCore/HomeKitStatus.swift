@@ -66,6 +66,25 @@ public struct HomeKitStatus: Codable, Equatable, Sendable {
         public var recording = false
         public var lastClip: Clip?
         public var problem: RecordingProblem?
+        /// When the hub last turned recording off, after having it on: off now, but set up in the Home app for some
+        /// of the time (its Recording Options can differ when home and away, and the hub writes only what's so
+        /// now). Nil: never seen on.
+        public var onUntil: Date?
+        /// The hub's latest changes to recording and the camera, newest last (a few kept).
+        public var changes: [Change]?
+
+        /// One change the hub made: recording and the camera, on or off, as of then.
+        public struct Change: Codable, Equatable, Sendable {
+            public var at: Date
+            /// Recording allowed (Camera Recording Management's Active) and the camera on (Camera Operating Mode).
+            public var recording: Bool
+            public var camera: Bool
+            public init(at: Date, recording: Bool, camera: Bool) {
+                self.at = at
+                self.recording = recording
+                self.camera = camera
+            }
+        }
 
         public init() {}
 

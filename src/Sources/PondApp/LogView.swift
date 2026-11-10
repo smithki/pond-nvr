@@ -81,7 +81,7 @@ struct LogSection: View {
     @State private var overflows = false
     /// At most this many of the newest lines are made into the card's text: more than it shows, few enough to lay
     /// out again at once as the page is resized.
-    static let peekLines = 200
+    static let peekLines = 60
 
     var body: some View {
         PageCard {

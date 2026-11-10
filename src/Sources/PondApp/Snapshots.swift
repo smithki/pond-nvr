@@ -44,6 +44,26 @@ enum Snapshots {
             try? await Task.sleep(for: .seconds(1.5))
             save(settingsWindow(), to: "\(dir)/settings-\(name).png")
         }
+        // HomeKit, made up (the demo serves nothing to it): one camera in the Home app and recording to Secure Video,
+        // one being watched, a doorbell that won't ring, one waiting to be added; the rest not in it.
+        if let cameras = model.config?.cameras, cameras.count >= 4 {
+            var status = HomeKitStatus()
+            var recording = HomeKitStatus.Recording()
+            recording.on = true
+            recording.chosen = true
+            recording.lastClip = .init(at: Date().addingTimeInterval(-25 * 60), seconds: 18, bytes: 4_200_000)
+            var first = HomeKitStatus.Camera(running: true, paired: true)
+            first.recording = recording
+            status.cameras[cameras[0].id] = first
+            status.cameras[cameras[1].id] = HomeKitStatus.Camera(running: true, paired: true, viewers: 1)
+            status.cameras[cameras[2].id] = HomeKitStatus.Camera(running: true, paired: true, doorbell: .unknownModel)
+            status.cameras[cameras[3].id] = HomeKitStatus.Camera(running: true, paired: false,
+                                                                 setup: .init(code: "123-45-678", uri: "X-HM://0023ISYWY1234"))
+            model.pretendHomeKit(Set(cameras.prefix(4).map(\.id)), status: status)
+            model.showSettings(.homeKit)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(settingsWindow(), to: "\(dir)/settings-homekit.png")
+        }
         model.showSettings(.cameras)
         try? await Task.sleep(for: .seconds(2))
         save(settingsWindow(), to: "\(dir)/cameras.png")

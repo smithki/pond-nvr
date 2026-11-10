@@ -157,6 +157,12 @@ struct RecordingText: Equatable {
         } else if !r.motion {
             self.init(title: "Won\u{2019}t record", attention: true,
                       detail: "Pond can\u{2019}t see motion from \(name), and motion is what starts a recording.")
+        } else if !r.on, r.onUntil != nil || r.chosen {
+            // Set up, but off now: the Home app's Recording Options can differ when home and away, and the hub writes
+            // only what's so now (Pond never sees the options themselves).
+            let until = r.onUntil.map { " It was last recording \(Self.when($0, now: now))." } ?? ""
+            self.init(title: "Not recording right now",
+                      detail: "Your home hub has recording off for \(name) now, though it\u{2019}s set up in the Home app.\(until) Its Recording Options can differ when you\u{2019}re home and away (in the Home app, \(name)\u{2019}s settings \u{203A} Recording Options).")
         } else if !r.on {
             self.init(title: "Recording off in the Home app",
                       detail: "To record \(name)\u{2019}s motion to iCloud: in the Home app, \(name)\u{2019}s settings \u{203A} Recording Options.")

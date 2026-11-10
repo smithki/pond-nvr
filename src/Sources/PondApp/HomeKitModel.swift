@@ -39,6 +39,7 @@ extension AppModel {
 
     /// The status file, if the service that wrote it is still running.
     func readHomeKitStatus() -> HomeKitStatus? {
+        if let demoHomeKitStatus { return demoHomeKitStatus }
         guard let status = HomeKitStatus.read(homeKitStatusPath), kill(status.pid, 0) == 0 else { return nil }
         return status
     }

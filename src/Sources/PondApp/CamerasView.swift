@@ -142,6 +142,8 @@ struct CheckSheet: View {
 }
 
 struct AddCameraSheet: View {
+    /// The sheet's margin: its heading, its cards (a grouped form's own inset) and its buttons, one distance from its edges.
+    static let margin = 20.0
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// At most this tall (the window's height); the form scrolls inside.
@@ -212,7 +214,8 @@ struct AddCameraSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(page == .homeKit ? "Add to the Home App" : "Add Camera").font(.title2.bold()).padding([.top, .horizontal], 20)
+            Text(page == .homeKit ? "Add to the Home App" : "Add Camera").font(.title2.bold())
+                .padding([.top, .horizontal], Self.margin)
                 .contentTransition(.opacity)
             ZStack {
                 switch page {
@@ -223,7 +226,8 @@ struct AddCameraSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            bar.padding(16)
+            // Its buttons' edges in line with the cards' and the heading's.
+            bar.padding(Self.margin)
         }
         .frame(width: 520, height: min(height, 560))
         .onAppear {
@@ -289,6 +293,9 @@ struct AddCameraSheet: View {
             }
         }
         .formStyle(.grouped)
+        // On the sheet's own background, as its heading and buttons are (the form's own made it a band of another
+        // shade between them).
+        .scrollContentBackground(.hidden)
     }
 
     /// The check as it goes (in view from the start), then what it found: added, or why not yet.
@@ -325,6 +332,9 @@ struct AddCameraSheet: View {
             if let impact { StorageImpactSection(impact: impact, name: camera.name) }
         }
         .formStyle(.grouped)
+        // On the sheet's own background, as its heading and buttons are (the form's own made it a band of another
+        // shade between them).
+        .scrollContentBackground(.hidden)
         .animation(.smooth(duration: 0.3), value: result?.lines.count)
         .animation(.smooth(duration: 0.3), value: device)
     }
@@ -373,7 +383,7 @@ struct AddCameraSheet: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Self.margin)
         .frame(maxWidth: .infinity)
     }
 

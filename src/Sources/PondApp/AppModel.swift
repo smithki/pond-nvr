@@ -23,6 +23,9 @@ final class AppModel {
     let helperPath: String?
 
     private(set) var config: Config?
+    /// A demo's HomeKit, made up for its pictures (Snapshots, pretendHomeKit): what the service would say of the
+    /// cameras in the Home app. The demo serves nothing to HomeKit, so nothing else is made up.
+    var demoHomeKitStatus: HomeKitStatus?
     private(set) var loadError: String?
     /// Shown as an alert, then cleared.
     var alert: String?
@@ -306,7 +309,8 @@ final class AppModel {
     /// (`RecorderSettings`); `affectsRecorder` says only what the caller expects.
     @discardableResult
     func update(affectsRecorder: Bool = true, _ change: (inout Config) -> Void) -> Bool {
-        guard var next = config else { return false }
+        // Never saved with a demo's made-up HomeKit in it: its recorder would serve those cameras to HomeKit.
+        guard demoHomeKitStatus == nil, var next = config else { return false }
         change(&next)
         guard next != config else { return true }
         let previous = config
@@ -755,4 +759,19 @@ struct EventsState: Equatable {
     var newOnly: Set<String>?
     /// Only the quieted ones (probably nothing: like those dismissed), to look over; otherwise they're left out.
     var quietedOnly = false
+}
+
+extension AppModel {
+    /// In a demo only, for its pictures: these cameras shown as in the Home app (in memory: nothing saved, nothing
+    /// served to HomeKit), with what the service would say of them.
+    func pretendHomeKit(_ ids: Set<String>, status: HomeKitStatus) {
+        guard AppDefaults.isDemo, var config else { return }
+        for i in config.cameras.indices where ids.contains(config.cameras[i].id) {
+            config.cameras[i].homekit = true
+            if status.cameras[config.cameras[i].id]?.recording != nil { config.cameras[i].homekitRecording = true }
+        }
+        self.config = config
+        demoHomeKitStatus = status
+        homeKitStatus = status
+    }
 }

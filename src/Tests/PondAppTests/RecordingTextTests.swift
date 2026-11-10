@@ -23,6 +23,16 @@ import Testing
         #expect(blind.title == "Won\u{2019}t record" && blind.attention)
     }
 
+    /// Off now, but set up (the hub chose how to record) or on earlier: not "off in the Home app", which it isn't
+    /// (its Recording Options can differ when home and away).
+    @Test func setUpButOffNow() {
+        let chosen = RecordingText(status { $0.chosen = true }, camera: camera, now: now)
+        #expect(chosen.title == "Not recording right now" && !chosen.attention)
+        let earlier = RecordingText(status { $0.onUntil = now.addingTimeInterval(-3600) }, camera: camera, now: now)
+        #expect(earlier.title == "Not recording right now")
+        #expect(earlier.detail.contains("It was last recording "))
+    }
+
     @Test func videoOnlySaysWhyItWontRecord() {
         var videoOnly = camera
         videoOnly.device = Config.Device(manufacturer: "Reolink", model: "E1", provider: Config.Device.videoOnly)
