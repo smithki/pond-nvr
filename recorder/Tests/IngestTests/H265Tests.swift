@@ -9,8 +9,10 @@ import VideoToolbox
 
 @Suite struct H265Tests {
     static func packet(_ payload: [UInt8], sequence: UInt16, timestamp: UInt32 = 9000, marker: Bool = true) -> RTPPacket {
-        RTPPacket([0x80, (marker ? 0x80 : 0) | 96, UInt8(sequence >> 8), UInt8(sequence & 0xFF), UInt8(timestamp >> 24),
-                   UInt8(timestamp >> 16 & 0xFF), UInt8(timestamp >> 8 & 0xFF), UInt8(timestamp & 0xFF), 0, 0, 0, 1] + payload)!
+        let first: [UInt8] = [0x80, (marker ? 0x80 : 0) | 96, UInt8(sequence >> 8), UInt8(sequence & 0xFF)]
+        let time: [UInt8] = [UInt8(timestamp >> 24), UInt8(timestamp >> 16 & 0xFF), UInt8(timestamp >> 8 & 0xFF), UInt8(timestamp & 0xFF)]
+        let ssrc: [UInt8] = [0, 0, 0, 1]
+        return RTPPacket(first + time + ssrc + payload)!
     }
 
     /// A NAL unit of `type`: its two-byte header, then `body`.
@@ -33,11 +35,11 @@ import VideoToolbox
         let body = [UInt8](repeating: 0xAB, count: 30)
         let header: [UInt8] = [49 << 1, 1]
         var d = H265Depacketizer()
-        _ = d.push(Self.packet(header + [0x80 | 1] + body[0 ..< 10], sequence: 1, marker: false))
+        _ = d.push(Self.packet(header + [UInt8(0x80 | 1)] + Array(body[0 ..< 10]), sequence: 1, marker: false))
         // (The middle one lost.)
-        let units = d.push(Self.packet(header + [0x40 | 1] + body[20...], sequence: 3))
+        let units = d.push(Self.packet(header + [UInt8(0x40 | 1)] + Array(body[20...]), sequence: 3))
         #expect(d.lostPackets == 1)
-        #expect(units.isEmpty || units.allSatisfy(\.damaged))
+        #expect(units.isEmpty || units.allSatisfy { $0.damaged })
     }
 
     #if canImport(VideoToolbox)

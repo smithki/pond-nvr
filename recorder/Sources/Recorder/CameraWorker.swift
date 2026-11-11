@@ -137,19 +137,29 @@ public final class CameraWorker: @unchecked Sendable {
         }
         log.log(camera.id, "\(why): restarting it")
         let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var how: String?
+        let outcome = RestartOutcome()
         let id = camera.id
         Task.detached {
-            how = await restart(id)
+            outcome.how = await restart(id)
             done.signal()
         }
         _ = done.wait(timeout: .now() + 30)
-        if let how {
+        if let how = outcome.how {
             log.log(camera.id, "restarted (\(how)): back in a minute or so")
             health.record(camera.id, .restarted, how)
         } else {
             log.log(camera.id, "couldn\u{2019}t be restarted: restart it, or unplug it for a few seconds")
             health.record(camera.id, .restarted, "couldn\u{2019}t be restarted")
+        }
+    }
+
+    /// How a restart went (nil: it couldn't, or not in time), set by the task that asks and read by the worker after.
+    private final class RestartOutcome: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _how: String?
+        var how: String? {
+            get { lock.withLock { _how } }
+            set { lock.withLock { _how = newValue } }
         }
     }
 

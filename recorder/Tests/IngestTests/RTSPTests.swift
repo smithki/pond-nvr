@@ -60,9 +60,15 @@ final class ScriptedTransport: RTSPTransport {
 
     @Test func aStreamThatLosesItsFramingIsReadOnFromTheNextPacket() throws {
         var reader = RTSPReader()
-        let packets = (0 ..< 6).map { i in Fixtures.interleaved(UInt8(i % 2 * 2), (0 ..< 300 + i).map { UInt8(truncatingIfNeeded: $0 &* 13 &+ i) }) }
+        let packets: [[UInt8]] = (0 ..< 6).map { (i: Int) -> [UInt8] in
+            let data: [UInt8] = (0 ..< 300 + i).map { (j: Int) -> UInt8 in UInt8(truncatingIfNeeded: j &* 13 &+ i) }
+            return Fixtures.interleaved(UInt8(i % 2 * 2), data)
+        }
         // Two packets, then the end of one whose start never came (bytes that are neither), then the rest.
-        let garbage = (0 ..< 40_000).map { UInt8(truncatingIfNeeded: ($0 &* 7919) % 251 + 3) }.map { $0 == 0x24 || $0 == 0x52 ? 0x25 : $0 }
+        let garbage: [UInt8] = (0 ..< 40_000).map { (i: Int) -> UInt8 in
+            let byte = UInt8(truncatingIfNeeded: (i &* 7919) % 251 + 3)
+            return byte == 0x24 || byte == 0x52 ? 0x25 : byte
+        }
         reader.feed(packets[0] + packets[1] + garbage + packets[2] + packets[3])
         var read: [InterleavedPacket] = []
         while let item = try reader.next() { if case let .interleaved(p) = item { read.append(p) } }
