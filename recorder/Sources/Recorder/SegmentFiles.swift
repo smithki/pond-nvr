@@ -64,7 +64,7 @@ public final class SegmentFiles {
         close()
         let status = StorageLocation.status(of: root)
         guard status.isReady else {
-            setUnavailable("the recordings folder \(root) is \(status.description)")
+            setUnavailable("the recordings folder \(root) is \(status.description)", words: words(status))
             return
         }
         var target = path(for: wallTime)
@@ -79,7 +79,7 @@ public final class SegmentFiles {
                                                     withIntermediateDirectories: true)
             guard FileManager.default.createFile(atPath: partial, contents: Data(initSegment)),
                   let handle = FileHandle(forWritingAtPath: partial) else {
-                setUnavailable("\(partial) could not be created")
+                setUnavailable("\(partial) could not be created", words: words(nil))
                 return
             }
             try handle.seekToEnd()
@@ -88,10 +88,11 @@ public final class SegmentFiles {
             finalPath = target
             if state != .writing(path: target), case .unavailable = state {
                 log.log(camera, "recording to \(root) again")
+                HealthLog.shared.record(camera, .storageBack)
             }
             state = .writing(path: target)
         } catch {
-            setUnavailable("\(partial) could not be created: \(error.localizedDescription)")
+            setUnavailable("\(partial) could not be created: \(error.localizedDescription)", words: words(error))
         }
     }
 
@@ -102,7 +103,7 @@ public final class SegmentFiles {
         } catch {
             try? file.close()
             self.file = nil
-            setUnavailable("writing \(partialPath ?? "") failed: \(error.localizedDescription)")
+            setUnavailable("writing \(partialPath ?? "") failed: \(error.localizedDescription)", words: words(error))
             finishPartial()
         }
     }
@@ -124,9 +125,30 @@ public final class SegmentFiles {
         try? FileManager.default.moveItem(atPath: partial, toPath: target)
     }
 
-    private func setUnavailable(_ reason: String) {
+    /// `words`: why, plainly, for a gap in recordings ("the recordings drive was full"); recorded for the doctor
+    /// and the timeline when it begins.
+    private func setUnavailable(_ reason: String, words: String) {
         if state != .unavailable(reason) { log.log(camera, "not recording: \(reason)") }
+        if case .unavailable = state {} else { HealthLog.shared.record(camera, .storageFailed, words) }
         state = .unavailable(reason)
+    }
+
+    /// The folder not usable, in words.
+    func words(_ status: StorageLocation.Status) -> String {
+        switch status {
+        case .missing: "the recordings drive wasn\u{2019}t there"
+        case .notPrepared: "the recordings folder wasn\u{2019}t set up"
+        default: words(nil)
+        }
+    }
+
+    /// Writing failed, in words: full (said so by the error, or by what's left on the drive), or not written.
+    func words(_ error: Error?) -> String {
+        let code = (error as NSError?).map { ($0.domain, $0.code) }
+        let full = code.map { $0 == (NSPOSIXErrorDomain, Int(ENOSPC)) || $0 == (NSCocoaErrorDomain, CocoaError.fileWriteOutOfSpace.rawValue) } ?? false
+        let free = (try? URL(fileURLWithPath: root).resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity
+        if full || (free.map { $0 < 64 << 20 } ?? false) { return "the recordings drive was full" }
+        return "the recordings drive couldn\u{2019}t be written to"
     }
 
     /// Renames .partial files left by a crash (empty ones are deleted). Returns how many were recovered.

@@ -49,6 +49,7 @@ Only `storage` is required; everything else has the defaults shown.
 |---|---|---|
 | `name` | this Mac's name | How this Pond is shown beside others paired with it (in the Recording button's menu, the camera rail, the Timeline), and the name devices pairing with it see. In the app: Settings › General. |
 | `searchModelUpdates` | on | Whether the service downloads search's picture model by itself, and new versions of it: it asks pond.camera which versions there are once a week, and downloads the one signed for this Pond (docs/search.md, Published versions). Off, only when asked (Settings › Search, Check for Updates). |
+| `homekitSensor` | off | Pond's own sensor in HomeKit: a contact sensor, open while recording isn't going as it should (a camera not recording for 5 minutes, the drive unusable, the Mac going to sleep), for the Home app to notify about. In the app: Settings › HomeKit, Pond's status. |
 | `testFeatures` | off | Beta and test features: features tried before they're finished, each turned on of its own in `testFeaturesOn`. Off, none is on, whatever `testFeaturesOn` says. In the app: Settings › Advanced. |
 | `testFeaturesOn` | none | The beta and test features turned on: `testScenes`, test scenes kept from this Pond's events (beside its database, on this Mac only, past event retention) for checking a new version with `pond advanced scenes`. |
 

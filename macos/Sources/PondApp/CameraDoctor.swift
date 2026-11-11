@@ -6,6 +6,7 @@ import Devices
 import Foundation
 import Health
 import PondCore
+import Recorder
 import SwiftUI
 
 @MainActor
@@ -13,6 +14,14 @@ import SwiftUI
 final class CameraDoctor {
     private(set) var incidents: [HealthIncident] = []
     private(set) var samples: [HealthSample] = []
+    /// What this Mac's power and login settings mean for recording unattended (MacReadiness), worst first; read
+    /// every 5 minutes (not in a demo: it isn't the demo's Mac).
+    private(set) var mac: [MacFinding] = []
+    @ObservationIgnored private var macRead: Date?
+    @ObservationIgnored private var macRecording: Bool?
+
+    /// Each camera's gaps in recording in the last 24 hours, and why (RecordingGaps).
+    private(set) var gaps: [String: [RecordingGap]] = [:]
     /// Each camera's findings, worst first (ignored ones included).
     private(set) var findings: [String: [HealthFinding]] = [:]
     /// Read at least once (nothing kept yet, or no database: said apart from "all well").
@@ -48,7 +57,8 @@ final class CameraDoctor {
     static let samplesShown: TimeInterval = 86400
 
     /// Read again (off the main thread), and the findings worked out.
-    func refresh(config: Config?) async {
+    func refresh(config: Config?, recording: Bool = false) async {
+        await refreshMac(recording: recording)
         guard let config else { return }
         let path = config.storage.databasePath
         if store == nil || storePath != path {
@@ -59,15 +69,38 @@ final class CameraDoctor {
         let now = Date()
         let incidentsSince = now.addingTimeInterval(-Self.incidentsKept), samplesSince = now.addingTimeInterval(-Self.samplesShown)
         // Off the main thread: the database is read in its own queue, and the app goes on meanwhile.
-        let (incidents, samples) = await Task.detached(priority: .utility) {
-            (store.incidents(since: incidentsSince), store.samples(since: samplesSince))
+        let base = config.storage.recordingsPath, cameras = config.cameras.map(\.id)
+        let (incidents, samples, gaps) = await Task.detached(priority: .utility) {
+            let incidents = store.incidents(since: incidentsSince)
+            // The day's recordings, less what was private: where they stop, and why.
+            let privacy = store.privateSpans(from: samplesSince, to: now)
+            var gaps: [String: [RecordingGap]] = [:]
+            for camera in cameras {
+                let coverage = RecordingIndex.coverage(RecordingIndex.spans(base: base, camera: camera, from: samplesSince, to: now,
+                                                                            writing: true))
+                gaps[camera] = RecordingGaps.find(camera: camera, coverage: coverage, through: now, privateSpans: privacy[camera] ?? [],
+                                                  incidents: incidents)
+            }
+            return (incidents, store.samples(since: samplesSince), gaps)
         }.value
         self.incidents = incidents
         self.samples = samples
+        if gaps != self.gaps { self.gaps = gaps }
         self.config = config
         diagnose(now: now)
         hasRecords = !incidents.isEmpty || !samples.isEmpty
         refreshed = now
+    }
+
+    /// This Mac's settings read again, every 5 minutes or when the recorder starts or stops.
+    func refreshMac(recording: Bool, now: Date = Date()) async {
+        guard DemoSession.scenario == nil else { return }
+        if let macRead, now.timeIntervalSince(macRead) < 300, macRecording == recording { return }
+        macRead = now
+        macRecording = recording
+        let power = await Task.detached(priority: .utility) { MacPowerReader.read() }.value
+        let found = MacReadiness.findings(power, recording: recording)
+        if found != mac { mac = found }
     }
 
     /// The findings worked out again from what was read (on reading, or when the thresholds change).
@@ -165,6 +198,11 @@ final class CameraDoctor {
                                 HealthDiagnosis.duration(total.flowing), total.fps ?? 0, total.keyframeInterval ?? 0,
                                 (total.lossRate ?? 0) * 100, total.kilobitsPerSecond ?? 0))
         }
+        if let gaps = gaps[camera.id], !gaps.isEmpty {
+            lines.append("")
+            lines.append("Not recorded, last day:")
+            for gap in gaps { lines.append(Self.words(gap)) }
+        }
         let since = Date().addingTimeInterval(-86400)
         let recent = incidents(of: camera.id).filter { $0.time >= since }
         if !recent.isEmpty {
@@ -176,6 +214,13 @@ final class CameraDoctor {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// A gap in words: "03:12 – 06:40 (3 h): this Mac was asleep".
+    static func words(_ gap: RecordingGap) -> String {
+        let from = gap.range.lowerBound.formatted(date: .omitted, time: .shortened)
+        let to = gap.ongoing ? "now" : gap.range.upperBound.formatted(date: .omitted, time: .shortened)
+        return "\(from) \u{2013} \(to) (\(HealthDiagnosis.duration(gap.seconds)))" + (gap.reason.words.map { ": \($0)" } ?? "")
     }
 
     /// An incident in words.
@@ -193,6 +238,12 @@ final class CameraDoctor {
         case .serviceStarted: "The recorder started"
         case .wakeFailed: "Didn\u{2019}t start its video after privacy mode"
         case .restarted: "Restarted by Pond"
+        case .serviceStopped: "The recorder stopped"
+        case .macSleeping: "This Mac went to sleep"
+        case .macWoke: "This Mac woke"
+        case .macStarted: "This Mac started up"
+        case .storageFailed: "Not recorded"
+        case .storageBack: "Recording again"
         }
     }
 }

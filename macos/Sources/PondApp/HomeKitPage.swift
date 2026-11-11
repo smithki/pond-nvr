@@ -9,6 +9,8 @@ struct HomeKitPage: View {
     @Environment(AppModel.self) private var model
     /// The camera whose setup code is shown, over the page.
     @State private var pairing: Pairing?
+    /// Pond's own sensor's setup code, over the page.
+    @State private var pairingSensor = false
 
     struct Pairing: Identifiable {
         let id: String
@@ -51,6 +53,7 @@ struct HomeKitPage: View {
                 Text("Each camera is an accessory of its own in the Home app, served by this Mac. A camera recording to HomeKit Secure Video sends its clips to your home hub, which keeps them in iCloud.")
                     .foregroundStyle(.secondary)
             }
+            sensorSection
             if !outside.isEmpty {
                 Section("Not in the Home app") {
                     ForEach(outside) { camera in
@@ -70,6 +73,7 @@ struct HomeKitPage: View {
         }
         .pageForm()
         .sheet(item: $pairing) { HomeKitPairingSheet(cameraID: $0.id) }
+        .sheet(isPresented: $pairingSensor) { SensorPairingSheet() }
         // What the service says of HomeKit, as it changes (a camera added in the Home app, someone watching).
         .task {
             while !Task.isCancelled {
@@ -77,6 +81,66 @@ struct HomeKitPage: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+    }
+
+    /// Pond's own sensor: off (and what it's for), or how it is and what it says now.
+    var sensorSection: some View {
+        Section {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "sensor.fill").foregroundStyle(.secondary).frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    if model.config?.homekitSensor == true {
+                        let sensor = model.homeKitSensor
+                        HStack(spacing: 6) {
+                            Text("Recording")
+                            Circle().fill(sensorColor(sensor)).frame(width: 8, height: 8).accessibilityHidden(true)
+                            Text(sensorTitle(sensor)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if let alert = sensor?.alert {
+                            Text(alert).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text("Pond\u{2019}s own sensor")
+                        Text("Lets the Home app tell you, wherever you are, when Pond stops recording.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                if model.config?.homekitSensor == true {
+                    if let sensor = model.homeKitSensor, !sensor.paired, sensor.running {
+                        Button("Show Setup Code\u{2026}") { pairingSensor = true }
+                    }
+                    Button("Turn Off") { model.setHomeKitSensor(false) }
+                        .help("Stops the sensor; it stays in the Home app, not responding, until it\u{2019}s removed there")
+                } else {
+                    Button("Add to the Home App\u{2026}") {
+                        model.setHomeKitSensor(true)
+                        pairingSensor = true
+                    }
+                    .help("Shows its setup code to scan in the Home app")
+                }
+            }
+            .padding(.vertical, 2)
+        } header: {
+            Text("Pond\u{2019}s status")
+        } footer: {
+            Text("A contact sensor named Recording: closed while Pond records, open when a camera hasn\u{2019}t recorded for 5 minutes, the recordings drive can\u{2019}t be written to, or this Mac goes to sleep. Turn on its notifications in the Home app (the sensor\u{2019}s settings \u{203A} Status and Notifications). If this Mac is off or Pond\u{2019}s recorder isn\u{2019}t running, the Home app shows it as Not Responding, which it doesn\u{2019}t notify about.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    func sensorTitle(_ sensor: HomeKitStatus.Sensor?) -> String {
+        guard serviceRunning, let sensor, sensor.running else { return serviceRunning ? "Starting\u{2026}" : "Recorder not running" }
+        if !sensor.paired { return "Not added to the Home app yet" }
+        return sensor.alert == nil ? "Closed: all well" : "Open"
+    }
+
+    func sensorColor(_ sensor: HomeKitStatus.Sensor?) -> Color {
+        guard serviceRunning, let sensor, sensor.running else { return .secondary }
+        if !sensor.paired || sensor.alert != nil { return .orange }
+        return .green
     }
 
     var serviceRunning: Bool {
@@ -216,6 +280,45 @@ struct HomeKitPairingSheet: View {
             Text("In the Home app: + \u{203A} Add Accessory, then scan the code (or enter it).")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .task {
+            while !Task.isCancelled {
+                model.refreshHomeKit()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+}
+
+/// Pond's own sensor's setup code, as it's added: the code and QR code until the Home app has it, then that it's in.
+struct SensorPairingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Pond\u{2019}s Sensor to the Home App").font(.title2.bold())
+            if let sensor = model.homeKitSensor, sensor.paired {
+                Label("Pond\u{2019}s sensor is in the Home app", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.headline)
+                Text("To hear when Pond stops recording: in the Home app, open the sensor\u{2019}s settings \u{203A} Status and Notifications, and turn on Activity Notifications.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                if let setup = model.homeKitSensor?.setup { HomeKitSetupCode(code: setup.code, payload: setup.uri) }
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(model.homeKitSensor?.setup == nil ? "Starting HomeKit\u{2026}" : "Waiting for the Home app\u{2026}")
+                        .foregroundStyle(.secondary)
+                }
+            }
             HStack {
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)

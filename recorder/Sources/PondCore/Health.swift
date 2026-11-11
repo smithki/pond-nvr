@@ -30,6 +30,25 @@ public struct HealthIncident: Codable, Equatable, Sendable {
         /// Pond restarted it: it was there, but its video server refused every connection for minutes (detail:
         /// how, or why it couldn't).
         case restarted
+        /// The service stopped (asked to: by the app, launchd, logging out or shutting down). This Mac's side.
+        case serviceStopped
+        /// This Mac going to sleep, and waking (this Mac's side).
+        case macSleeping, macWoke
+        /// This Mac started up (at its boot time; recorded by the service's first start after it).
+        case macStarted
+        /// Its recordings couldn't be written (detail: why, in words: "the recordings drive was full"), and could
+        /// again.
+        case storageFailed, storageBack
+
+        /// This Mac's or the service's, not a camera's (recorded with no camera).
+        public var isMacWide: Bool {
+            [.serviceStarted, .serviceStopped, .macSleeping, .macWoke, .macStarted].contains(self)
+        }
+
+        /// Kept as long as recordings may be (a year, with privacy's changes): few, and what explains a gap in
+        /// recordings however far back they go.
+        public static let keptLong: [Kind] = [.madePrivate, .madePublic, .serviceStarted, .serviceStopped, .macSleeping, .macWoke,
+                                              .macStarted, .storageFailed, .storageBack]
     }
 
     public var camera: String
@@ -102,6 +121,8 @@ public struct HealthSample: Codable, Equatable, Sendable {
 public protocol HealthSink: AnyObject, Sendable {
     func record(_ incident: HealthIncident)
     func add(_ sample: HealthSample)
+    /// Waits until what's been handed over is written (before the service stops, or the Mac sleeps).
+    func flush()
 }
 
 /// The service's: everything records here, and it hands on to the sink (if any).
@@ -119,6 +140,9 @@ public final class HealthLog: @unchecked Sendable {
     public func record(_ camera: String, _ kind: HealthIncident.Kind, _ detail: String? = nil) {
         sink?.record(HealthIncident(camera: camera, kind: kind, detail: detail))
     }
+
+    /// Waits until what's been recorded is written.
+    public func flush() { sink?.flush() }
 
     public func add(_ sample: HealthSample) {
         guard !sample.isEmpty else { return }

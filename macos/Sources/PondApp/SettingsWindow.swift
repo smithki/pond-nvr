@@ -164,7 +164,7 @@ struct SettingsWindow: View {
         // window).
         .task {
             while !Task.isCancelled {
-                await model.doctor.refresh(config: model.config)
+                await model.doctor.refresh(config: model.config, recording: model.isRecorderRunning)
                 try? await Task.sleep(for: .seconds(5))
             }
         }

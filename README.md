@@ -74,7 +74,9 @@ The background recorder serves the cameras, sharing one connection per camera st
 - **How many can watch at once** (1–4), and **instant live view** (keeps a stream open so live views and snapshots start at once).
 - **Allow recording**: HomeKit Secure Video. The home hub decides what to keep and stores it in iCloud; turn recording on in the Home app, in the camera's Recording Options. Pond records from a few seconds before the motion, re-encoded to what the hub asks for. The HomeKit badge on the camera's tile, its settings and Settings › HomeKit say whether it is recording and why not. Recording Options can differ when you're home and away, and the hub tells Pond only what's so now: a camera set up to record but off for the moment shows as *Not recording right now* (with when it last was), not as off in the Home app, and the recorder's log notes each time the hub turns recording or the camera on or off.
 
-Each camera's HomeKit identity and pairings are kept in the login Keychain (`pond-homekit`); `pond homekit reset ID` forgets them. See [docs/security.md](docs/security.md).
+**Pond's own sensor** (Settings › HomeKit › Pond's status, off until added): an accessory of its own, a contact sensor named *Recording*, closed while Pond records and open when a camera that isn't private hasn't recorded for 5 minutes, the recordings drive can't be written to for a minute, or the Mac is going to sleep. Turn on its Activity Notifications in the Home app to hear about it away from home, with no server of Pond's. It can't say that the Mac is off or the recorder isn't running: the Home app shows it as Not Responding then, and doesn't notify.
+
+Each camera's HomeKit identity and pairings are kept in the login Keychain (`pond-homekit`); `pond homekit reset ID` forgets them (`_status` for Pond's sensor). See [docs/security.md](docs/security.md).
 
 ## The login service
 

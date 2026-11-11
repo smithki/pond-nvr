@@ -9,6 +9,7 @@ import Darwin
 import Glibc
 #endif
 #if canImport(IOKit)
+import IOKit
 import IOKit.pwr_mgt
 #endif
 
@@ -47,6 +48,9 @@ public final class RecordingService: @unchecked Sendable {
 
         let awake = preventIdleSleep()
         defer { allowIdleSleep(awake) }
+        // This Mac sleeping and waking, for the doctor and the timeline (why recordings stopped).
+        let power = PowerWatch(sleeping: sleeping)
+        defer { power.stop() }
         log.log("pond", "starting: \(config.cameras.count) camera\(config.cameras.count == 1 ? "" : "s"), recording to \(config.storage.recordingsPath)")
         for camera in config.cameras { add(camera, password: passwords[camera.id]) }
 
@@ -71,7 +75,12 @@ public final class RecordingService: @unchecked Sendable {
         lock.withLock { running = [:] }
         sources.forEach { $0.cancel() }
         log.log("pond", "stopped")
+        HealthLog.shared.record("", .serviceStopped)
+        HealthLog.shared.flush()
     }
+
+    /// Told this Mac is about to sleep (true; it waits a moment for what's said to go out) and has woken (false).
+    nonisolated(unsafe) public var sleeping: (@Sendable (Bool) -> Void)?
 
     /// Restarting a camera through its controls (set by the service, before cameras are added): how, or nil.
     /// Asked by a camera's worker when its video server keeps refusing connections though the camera's there.
@@ -123,4 +132,67 @@ public final class RecordingService: @unchecked Sendable {
         if id != 0 { IOPMAssertionRelease(id) }
         #endif
     }
+}
+
+/// Records this Mac going to sleep and waking (each written at once: a sleeping Mac writes nothing after).
+final class PowerWatch: @unchecked Sendable {
+    #if canImport(IOKit)
+    private var port: io_connect_t = 0
+    private var notifier: IONotificationPortRef?
+    private var handle: io_object_t = 0
+    private let queue = DispatchQueue(label: "pond.power")
+
+    // (IOKit's messages, which Swift doesn't import: iokit_common_msg(0x270…).)
+    static let canSleep: UInt32 = 0xE000_0270
+    static let willSleep: UInt32 = 0xE000_0280
+    static let poweredOn: UInt32 = 0xE000_0300
+
+    let sleeping: (@Sendable (Bool) -> Void)?
+
+    init(sleeping: (@Sendable (Bool) -> Void)? = nil) {
+        self.sleeping = sleeping
+        let me = Unmanaged.passUnretained(self).toOpaque()
+        port = IORegisterForSystemPower(me, &notifier, { refcon, _, message, argument in
+            guard let refcon else { return }
+            Unmanaged<PowerWatch>.fromOpaque(refcon).takeUnretainedValue().handle(message, argument)
+        }, &handle)
+        guard port != 0, let notifier else { return }
+        IONotificationPortSetDispatchQueue(notifier, queue)
+    }
+
+    private func handle(_ message: UInt32, _ argument: UnsafeMutableRawPointer?) {
+        switch message {
+        case Self.canSleep:
+            IOAllowPowerChange(port, Int(bitPattern: argument))
+        case Self.willSleep:
+            HealthLog.shared.record("", .macSleeping)
+            HealthLog.shared.flush()
+            // (A moment for HomeKit's sensor to be told, before the network goes.)
+            if let sleeping {
+                sleeping(true)
+                Thread.sleep(forTimeInterval: 1.5)
+            }
+            IOAllowPowerChange(port, Int(bitPattern: argument))
+        case Self.poweredOn:
+            HealthLog.shared.record("", .macWoke)
+            sleeping?(false)
+        default:
+            break
+        }
+    }
+
+    func stop() {
+        queue.sync {
+            if handle != 0 { IODeregisterForSystemPower(&handle) }
+            if let notifier { IONotificationPortDestroy(notifier) }
+            if port != 0 { IOServiceClose(port) }
+            handle = 0
+            notifier = nil
+            port = 0
+        }
+    }
+    #else
+    init(sleeping: (@Sendable (Bool) -> Void)? = nil) {}
+    func stop() {}
+    #endif
 }

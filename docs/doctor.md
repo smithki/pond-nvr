@@ -6,10 +6,10 @@ In Settings › Cameras, each camera's **Doctor** says how it's doing: what's go
 
 The service records two things for each camera in Pond's database (`pond.sqlite`, on the internal disk by default; `storage.database` in [configuration.md](configuration.md)):
 
-- **Incidents**: its video starting and stopping, being unreachable, a login refused, its own privacy mode, being made private or public, a control failing, not waking from privacy mode, being restarted by Pond, and the service starting.
+- **Incidents**: its video starting and stopping, being unreachable, a login refused, its own privacy mode, being made private or public, a control failing, not waking from privacy mode, being restarted by Pond, its recordings drive failing (full, missing, not writable) and coming back; and this Mac's side: the service starting and stopping, the Mac going to sleep and waking, and the Mac starting up (at its boot time).
 - **Five-minute samples** of its video: frames, packets lost, bytes, keyframes, and the camera's clock against the Mac's.
 
-A week is kept, pruned hourly, apart from recording retention. The app reads the database off the main thread and works out the findings itself (`HealthDiagnosis`), so the service only records.
+A week is kept, pruned hourly, apart from recording retention; what explains a gap in recordings (privacy, this Mac's side, the drive) is kept a year, as recordings may be. The app reads the database off the main thread and works out the findings itself (`HealthDiagnosis`), so the service only records.
 
 ## Findings
 
@@ -38,6 +38,34 @@ A finding lasts while its evidence does, mostly the last hour, so it clears afte
 Being private is never a problem: a private camera's gap in recordings is explained, not flagged. A camera waking from its own privacy mode isn't flagged either, unless it fails to wake.
 
 The figures above are the defaults. **Thresholds**, under the overview's cameras, changes them for every camera; **Restore Defaults** puts them back. They're kept in the app's preferences.
+
+## This Mac
+
+Pond records only while this Mac is on, awake and logged in, so the doctor also reads its power and login settings (every five minutes, with no administrator rights; nothing is changed: `MacReadiness`). Listed under **This Mac** on the **Every camera** page, each with **Open Settings…** where it's changed; problems and warnings also in the toolbar's overview:
+
+| Finding | Severity | When |
+|---|---|---|
+| This Mac may go to sleep | problem | It sleeps when idle, and the running recorder isn't holding that off. |
+| Running on its UPS | problem | The power's out; it runs on its backup battery. |
+| Running on battery | warning | A laptop unplugged: it sleeps when the battery runs low. |
+| Stays off after a power cut | warning | "Start up automatically after a power failure" is off. |
+| A laptop | notice | Closing its lid puts it to sleep. |
+| Records only once you've logged in | notice | Automatic login is off, or FileVault is on (which prevents it): after a restart, Pond waits at the login screen. A security trade-off, said rather than flagged. |
+| Low Power Mode is on | notice | Detection and HomeKit's video may fall behind. |
+
+The display going to sleep makes no difference: the Mac keeps running, and so does Pond. Not read in demo mode.
+
+## Gaps in recordings
+
+Where a camera's recordings stop for two minutes or more (not while it's private, which is shown as private), Pond says why, from what was recorded at the time (`RecordingGaps`), the first that fits:
+
+1. This Mac was asleep, or off or restarting (it started up during the gap).
+2. Pond's recorder was stopped.
+3. The recordings drive was full, wasn't there, or couldn't be written to.
+4. What the camera did as the gap began: it didn't answer (or every camera at once: this Mac lost the network), refused its login, its own privacy mode, its video stopped, didn't come back after privacy mode, or Pond was restarting it.
+5. Pond's recorder wasn't running (it started again during the gap with no stop recorded: it quit, or the power went).
+
+Otherwise it's "Not recorded", with nothing to say why. On the **Timeline**, a gap is an orange dashed stretch of the lane, why on hover; on a camera's doctor page, the last 24 hours' gaps (or "Recorded without a gap"); and in **Copy Report**.
 
 ## Where findings show
 

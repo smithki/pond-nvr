@@ -23,6 +23,9 @@ public struct Config: Codable, Equatable, Sendable {
     public var testFeatures: Bool?
     /// Which of them are on, each turned on of its own (only while `testFeatures` is): left out, none.
     public var testFeaturesOn: [String]?
+    /// Pond's own sensor in HomeKit (a contact sensor, open while recording isn't going as it should), for the Home
+    /// app to notify about wherever one is: left out, off.
+    public var homekitSensor: Bool?
 
     /// A beta or test feature, turned on in Settings › Advanced.
     public enum TestFeature: String, CaseIterable, Sendable {
@@ -56,6 +59,7 @@ public struct Config: Codable, Equatable, Sendable {
         searchModelUpdates = try c.decodeIfPresent(Bool.self, forKey: .searchModelUpdates)
         testFeatures = try c.decodeIfPresent(Bool.self, forKey: .testFeatures)
         testFeaturesOn = try c.decodeIfPresent([String].self, forKey: .testFeaturesOn)
+        homekitSensor = try c.decodeIfPresent(Bool.self, forKey: .homekitSensor)
     }
 
     /// Remote access: whether this Mac can be reached from outside, and the signaling service its devices find it

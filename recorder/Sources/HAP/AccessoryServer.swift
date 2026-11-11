@@ -16,6 +16,8 @@ public final class AccessoryServer: @unchecked Sendable {
     public var pairingsChanged: (@Sendable () -> Void)?
     /// Pairing steps and failures, for following a setup.
     public var log: (@Sendable (String) -> Void)?
+    /// Its name, in the pairing steps logged (several accessories share the log).
+    public var name: String?
     /// Told about each connection's session (for HomeKit Data Stream, which reuses its secret).
     public var sessionVerified: (@Sendable (SessionKeys) -> Void)?
     let pairSetup: PairSetup
@@ -68,12 +70,12 @@ public final class AccessoryServer: @unchecked Sendable {
         case ("POST", "/pair-setup"):
             let req = (try? TLV8.decode(request.body)) ?? []
             let reply = pairSetup.handle(req)
-            logStep("pair setup", req, reply)
+            logStep("pair setup", req, reply, conn)
             return tlv(reply, after: { [weak self] in self?.pairingsChanged?() })
         case ("POST", "/pair-verify"):
             let req = (try? TLV8.decode(request.body)) ?? []
             let reply = conn.verifier.handle(req)
-            logStep("pair verify", req, reply)
+            logStep("pair verify", req, reply, conn)
             return tlv(reply)
         default:
             break
@@ -115,12 +117,15 @@ public final class AccessoryServer: @unchecked Sendable {
         }
     }
 
-    private func logStep(_ what: String, _ request: [TLV8Item], _ reply: [TLV8Item]) {
+    private func logStep(_ what: String, _ request: [TLV8Item], _ reply: [TLV8Item], _ conn: HAPConnection) {
         let step = request.value(PairingTLV.state)?.first ?? 0
+        // Which accessory, and who's asking.
+        let whose = (name.map { " (\($0))" } ?? "") + ":"
+        let from = conn.peer.map { " from \($0)" } ?? ""
         if let e = reply.value(PairingTLV.error)?.first {
-            log?("! HomeKit: \(what) M\(step) refused: \(PairingError(rawValue: e).map { "\($0)" } ?? "error \(e)")")
+            log?("! HomeKit\(whose) \(what) M\(step) refused\(from): \(PairingError(rawValue: e).map { "\($0)" } ?? "error \(e)")")
         } else {
-            log?("… HomeKit: \(what) M\(step) → M\(reply.value(PairingTLV.state)?.first ?? 0)")
+            log?("… HomeKit\(whose) \(what) M\(step) → M\(reply.value(PairingTLV.state)?.first ?? 0)\(from)")
         }
     }
 
@@ -225,6 +230,8 @@ public enum HAPRequest {
 
 public final class HAPConnection: @unchecked Sendable {
     weak var server: AccessoryServer?
+    /// Where it comes from ("192.168.1.20:52114"), for the log.
+    public var peer: String?
     /// A timed write announced with PUT /prepare: its id and until when it may be made.
     private var prepared: (pid: UInt64, until: Date)?
     private let preparedLock = NSLock()

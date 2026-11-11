@@ -149,7 +149,7 @@ public final class HomeKitHost: @unchecked Sendable {
     /// Starts an accessory for each camera that is to be in HomeKit. A camera that cannot start is left out
     /// (and its status says why); the others carry on.
     public func start(cameras: [Config.Camera], password: (String) -> String?) {
-        lock.withLock { status = HomeKitStatus() }
+        lock.withLock { status = HomeKitStatus(sensor: status.sensor) }
         statusChanged?(lock.withLock { status })
         for camera in cameras { add(camera, password: password(camera.id)) }
     }
@@ -365,6 +365,88 @@ public final class HomeKitHost: @unchecked Sendable {
         lock.withLock { running.append(Running(camera: camera, record: record, listener: listener, accessory: accessory)) }
     }
 
+    // MARK: Pond's own sensor
+
+    /// The sensor's record (identity, setup code, pairings) is kept as a camera's is, under this id (a camera's id is
+    /// a slug of letters, digits and dashes, so never this).
+    public static let sensorID = "_status"
+
+    private var sensor: (accessory: StatusSensor, listener: HAPListener)?
+
+    /// Pond's own sensor started (if it isn't), named `name` in the Home app; closed until told otherwise.
+    public func startSensor(name: String) {
+        guard lock.withLock({ sensor == nil }) else { return }
+        let id = Self.sensorID
+        let record = record(for: id)
+        let accessory = StatusSensor(name: name)
+        let server = AccessoryServer(identity: record.identity, store: RecordPairingStore(records: records, camera: id),
+                                     accessory: accessory.accessory, setupCode: record.setupCode)
+        server.log = log
+        let listener = HAPListener(server: server, name: name, model: "Recording status", category: .sensor, setup: record.setup)
+        listener.log = log
+        listener.configNumber = Self.configNumber(for: accessory.accessory.layoutDigest, camera: id, records: records)
+        let setup = HomeKitStatus.Camera.Setup(code: record.setupCode, uri: record.setup.uri(category: AccessoryCategory.sensor.rawValue))
+        let records = self.records
+        server.sessionVerified = { [weak self] _ in self?.updateSensor { $0.paired = true; $0.setup = nil } }
+        server.pairingsChanged = { [weak self] in
+            let paired = records.record(for: id)?.isPaired ?? false
+            self?.updateSensor { $0.paired = paired; $0.setup = paired ? nil : setup }
+        }
+        do {
+            try listener.start(port: record.port)
+        } catch {
+            log("! HomeKit: Pond\u{2019}s sensor could not start: \(error)")
+            return
+        }
+        lock.withLock { sensor = (accessory, listener) }
+        updateSensor { $0 = HomeKitStatus.Sensor(running: true, paired: record.isPaired, setup: record.isPaired ? nil : setup) }
+        log("HomeKit: Pond\u{2019}s sensor is \(record.isPaired ? "in the Home app" : "waiting to be added to the Home app")")
+        Task {
+            for _ in 0 ..< 50 {
+                if let port = listener.port {
+                    if var latest = records.record(for: id), latest.port != port {
+                        latest.port = port
+                        records.save(latest, for: id)
+                    }
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    public func stopSensor() {
+        guard let gone = lock.withLock({ () -> (accessory: StatusSensor, listener: HAPListener)? in
+            defer { sensor = nil; status.sensor = nil; status.updated = Date() }
+            return sensor
+        }) else { return }
+        gone.listener.stop()
+        log("HomeKit: Pond\u{2019}s sensor stopped")
+        statusChanged?(lock.withLock { status })
+    }
+
+    /// What the sensor says: open, with why, or closed (nil). Said in the log when it changes.
+    public func setSensor(alert: String?) {
+        guard let accessory = lock.withLock({ sensor?.accessory }) else { return }
+        if (alert != nil) != accessory.isOpen {
+            log(alert.map { "HomeKit: Pond\u{2019}s sensor open: \($0)" } ?? "HomeKit: Pond\u{2019}s sensor closed: recording again")
+        }
+        accessory.set(open: alert != nil)
+        updateSensor { $0.alert = alert }
+    }
+
+    func updateSensor(_ change: (inout HomeKitStatus.Sensor) -> Void) {
+        let snapshot = lock.withLock { () -> HomeKitStatus? in
+            var next = status.sensor ?? HomeKitStatus.Sensor()
+            change(&next)
+            guard next != status.sensor else { return nil }
+            status.sensor = next
+            status.updated = Date()
+            return status
+        }
+        if let snapshot { statusChanged?(snapshot) }
+    }
+
     /// A doorbell's button, through the provider that recognised the camera.
     /// Watches what the camera notices: motion sets its motion sensor (which the home hub records on, with
     /// HomeKit Secure Video, and notifies about); a doorbell's press rings in the Home app.
@@ -416,6 +498,7 @@ public final class HomeKitHost: @unchecked Sendable {
         }
         for e in events { e.stop() }
         for r in all { r.listener.stop() }
+        stopSensor()
         for observer in lock.withLock({ privacyObservers.values }) { privacy.forget(observer) }
         lock.withLock { privacyObservers = [:] }
         lock.withLock {

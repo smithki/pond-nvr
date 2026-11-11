@@ -465,7 +465,7 @@ struct ContentView: View {
                 // What the live views decode, for the media engine's budget, every 6 s.
                 if tick % 3 == 0 { await model.reportLiveViews() }
                 // The doctor's findings for the tiles' marks, every 30 s (every 5 s while it's open).
-                if tick % 15 == 0 { await model.doctor.refresh(config: model.config) }
+                if tick % 15 == 0 { await model.doctor.refresh(config: model.config, recording: model.isRecorderRunning) }
                 // Events seen and kept, as test scenes of this Mac's own: a few each day (an hour after opening, then
                 // daily).
                 if tick % 43_200 == 1_800 { await model.keepSeenEvents() }

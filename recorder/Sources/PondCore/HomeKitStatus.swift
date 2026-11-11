@@ -8,11 +8,31 @@ public struct HomeKitStatus: Codable, Equatable, Sendable {
     /// The service's process, to tell a live file from one left by a service that stopped.
     public var pid: Int32
     public var cameras: [String: Camera]
+    /// Pond's own sensor (RecordingAlert), when it's on: whether it's in the Home app (its setup code until it is),
+    /// and what it says now.
+    public var sensor: Sensor?
 
-    public init(updated: Date = Date(), pid: Int32 = ProcessInfo.processInfo.processIdentifier, cameras: [String: Camera] = [:]) {
+    public struct Sensor: Codable, Equatable, Sendable {
+        public var running: Bool
+        public var paired: Bool
+        public var setup: Camera.Setup?
+        /// Why it's open (nil: closed, all well).
+        public var alert: String?
+
+        public init(running: Bool = false, paired: Bool = false, setup: Camera.Setup? = nil, alert: String? = nil) {
+            self.running = running
+            self.paired = paired
+            self.setup = setup
+            self.alert = alert
+        }
+    }
+
+    public init(updated: Date = Date(), pid: Int32 = ProcessInfo.processInfo.processIdentifier, cameras: [String: Camera] = [:],
+                sensor: Sensor? = nil) {
         self.updated = updated
         self.pid = pid
         self.cameras = cameras
+        self.sensor = sensor
     }
 
     public struct Camera: Codable, Equatable, Sendable {

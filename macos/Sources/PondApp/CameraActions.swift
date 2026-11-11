@@ -46,7 +46,7 @@ struct IgnoredArea: Equatable {
         case .animal: "animal"
         case .package: "package"
         case .item: "item"
-        case .ring, .motion, .privacy: nil
+        case .ring, .motion, .privacy, .gap: nil
         }
     }
 }

@@ -82,6 +82,7 @@ public final class HAPListener: @unchecked Sendable {
         self.model = model
         self.category = category
         self.setup = setup
+        server.name = server.name ?? name
     }
 
     var txtRecord: NWTXTRecord {
@@ -105,6 +106,15 @@ public final class HAPListener: @unchecked Sendable {
         let listener = try NWListener(using: parameters, on: port.flatMap { NWEndpoint.Port(rawValue: $0) } ?? .any)
         listener.service = NWListener.Service(name: name, type: "_hap._tcp", txtRecord: txtRecord)
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
+        // Said, for working out a pairing that doesn't start: whether it's on the network, and under what name.
+        listener.serviceRegistrationUpdateHandler = { [weak self] change in
+            guard let self else { return }
+            switch change {
+            case let .add(endpoint): self.log?("… HomeKit: \(self.name) advertised as \(endpoint)")
+            case let .remove(endpoint): self.log?("… HomeKit: \(self.name) no longer advertised as \(endpoint)")
+            @unknown default: break
+            }
+        }
         listener.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -141,9 +151,13 @@ public final class HAPListener: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        // Not paired yet: each connection said (a Home app adding it should come), to tell a pairing that never
+        // reached it from one that failed.
+        if !server.isPaired { log?("… HomeKit: \(name): a connection from \(connection.endpoint)") }
         let hap = server.connect { bytes in
             connection.send(content: Data(bytes), completion: .contentProcessed { _ in })
         }
+        hap.peer = "\(connection.endpoint)"
         connection.stateUpdateHandler = { state in
             switch state {
             case .failed, .cancelled: hap.closed()

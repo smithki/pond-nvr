@@ -67,8 +67,8 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
         }
     }
 
-    /// When a camera was made private and public again: kept a year (few, and the timeline shows them as far
-    /// back as recordings go).
+    /// When a camera was made private and public again, and what explains a gap in recordings (HealthIncident.Kind
+    /// .keptLong): kept a year (few, and the timeline shows them as far back as recordings go).
     public static let keepPrivacy: TimeInterval = 366 * 86400
 
     /// What's older than a week let go (privacy's changes, older than a year).
@@ -76,7 +76,8 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
         let before = now.addingTimeInterval(-Self.keep).timeIntervalSince1970
         let privacyBefore = now.addingTimeInterval(-Self.keepPrivacy).timeIntervalSince1970
         queue.async { [self] in
-            run("DELETE FROM incidents WHERE time < ? AND kind NOT IN ('madePrivate', 'madePublic')", [before])
+            let long = HealthIncident.Kind.keptLong.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+            run("DELETE FROM incidents WHERE time < ? AND kind NOT IN (\(long))", [before])
             run("DELETE FROM incidents WHERE time < ?", [privacyBefore])
             run("DELETE FROM samples WHERE start < ?", [before])
         }
@@ -90,6 +91,18 @@ public final class HealthStore: HealthSink, @unchecked Sendable {
     public func incidents(since: Date) -> [HealthIncident] {
         queue.sync {
             rows("SELECT camera, time, kind, detail FROM incidents WHERE time >= ? ORDER BY time", [since.timeIntervalSince1970]) { row in
+                guard let kind = HealthIncident.Kind(rawValue: row.text(2) ?? "") else { return nil }
+                return HealthIncident(camera: row.text(0) ?? "", time: Date(timeIntervalSince1970: row.double(1)), kind: kind,
+                                      detail: row.text(3))
+            }
+        }
+    }
+
+    /// Those within `from`…`to`, in time order: a week's of every kind at most, older ones only those kept long.
+    public func incidents(from: Date, to: Date) -> [HealthIncident] {
+        queue.sync {
+            rows("SELECT camera, time, kind, detail FROM incidents WHERE time >= ? AND time <= ? ORDER BY time",
+                 [from.timeIntervalSince1970, to.timeIntervalSince1970]) { row in
                 guard let kind = HealthIncident.Kind(rawValue: row.text(2) ?? "") else { return nil }
                 return HealthIncident(camera: row.text(0) ?? "", time: Date(timeIntervalSince1970: row.double(1)), kind: kind,
                                       detail: row.text(3))

@@ -12,12 +12,17 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
         case person, vehicle, bike, animal, package, item, ring, motion
         /// Not an event: a private stretch, as the hover card shows it.
         case privacy
+        /// Not an event: a gap in recording (and why), as the hover card shows it.
+        case gap
 
         var id: String { rawValue }
 
+        /// A stretch of the lane (private, or not recorded), not something seen.
+        var isStretch: Bool { self == .privacy || self == .gap }
+
         /// Which leads where several kinds are together (its colour and symbol first): a ring, someone, then
         /// what they came in, animals, and what was left.
-        static let prominence: [Kind] = [.ring, .person, .bike, .vehicle, .animal, .package, .item, .motion, .privacy]
+        static let prominence: [Kind] = [.ring, .person, .bike, .vehicle, .animal, .package, .item, .motion, .privacy, .gap]
         var prominence: Int { Self.prominence.firstIndex(of: self) ?? Self.prominence.count }
 
         init(_ category: DetectedCategory) {
@@ -44,6 +49,7 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .ring: "Doorbell"
             case .motion: "Motion"
             case .privacy: "Private"
+            case .gap: "Not recorded"
             }
         }
 
@@ -58,6 +64,7 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .ring: "bell.fill"
             case .motion: "dot.radiowaves.left.and.right"
             case .privacy: "eye.slash.fill"
+            case .gap: "video.slash.fill"
             }
         }
 
@@ -72,6 +79,7 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
             case .ring: .yellow
             case .motion: .gray
             case .privacy: .indigo
+            case .gap: .orange
             }
         }
     }
@@ -113,7 +121,7 @@ struct TimelineEvent: Identifiable, Equatable, Sendable {
         case .package: .package
         case .item: .item
         case .ring: .ring
-        case .motion, .privacy: .other
+        case .motion, .privacy, .gap: .other
         }
     }
 }
@@ -272,6 +280,12 @@ struct EventSource: Sendable {
         return store.privateSpans(from: from, to: to)
     }
 
+    /// What the service recorded of the cameras and this Mac within `from`…`to` (why recordings stopped).
+    func incidents(from: Date, to: Date) -> [HealthIncident] {
+        guard FileManager.default.fileExists(atPath: database), let store = HealthStore(path: database, readOnly: true) else { return [] }
+        return store.incidents(from: from, to: to)
+    }
+
     /// "A person and a dog, in Path." "A backpack left." "Doorbell pressed."
     func summary(_ e: CameraEvent) -> String {
         if e.category == .ring { return "Doorbell pressed." }
@@ -286,4 +300,19 @@ struct EventSource: Sendable {
     static func list(_ labels: [String: Int]) -> String { CameraEvent.words(labels) }
 
     static func join(_ parts: [String]) -> String { CameraEvent.join(parts) }
+}
+
+extension RecordingGap.Reason {
+    /// Why a gap in recording happened, as a symbol.
+    var symbol: String {
+        switch self {
+        case .macAsleep: "moon.zzz.fill"
+        case .macOff: "power"
+        case .recorderStopped, .recorderNotRunning: "stop.circle.fill"
+        case .storage: "externaldrive.badge.exclamationmark"
+        case .macNetwork: "wifi.slash"
+        case .privacyMode: "eye.slash"
+        case .unreachable, .loginRefused, .didntWake, .videoStopped, .restarted, .unknown: "video.slash.fill"
+        }
+    }
 }

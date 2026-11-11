@@ -51,6 +51,20 @@ import Testing
         #expect(store.incidents(since: .distantPast).count == 1)
     }
 
+    @Test func whatExplainsAGapIsKeptAYear() throws {
+        let (store, dir) = try Self.store()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let now = Date()
+        store.record(HealthIncident(camera: "", time: now.addingTimeInterval(-30 * 86400), kind: .macSleeping))
+        store.record(HealthIncident(camera: "porch", time: now.addingTimeInterval(-30 * 86400), kind: .storageFailed, detail: "full"))
+        store.record(HealthIncident(camera: "porch", time: now.addingTimeInterval(-30 * 86400), kind: .unreachable))
+        store.record(HealthIncident(camera: "", time: now.addingTimeInterval(-400 * 86400), kind: .macStarted))
+        store.prune(now: now)
+        store.flush()
+        let kept = store.incidents(from: now.addingTimeInterval(-500 * 86400), to: now)
+        #expect(kept.map(\.kind) == [.macSleeping, .storageFailed])
+    }
+
     @Test func theAppReadsWhatTheServiceWrites() throws {
         let (store, dir) = try Self.store()
         defer { try? FileManager.default.removeItem(atPath: dir) }

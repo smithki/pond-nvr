@@ -229,6 +229,11 @@ final class TimelineModel {
     @ObservationIgnored private(set) var index: [String: EventIndex] = [:]
     /// When each camera was private, in `loaded`, as read (up to when it was read).
     private(set) var privateSpans: [String: [ClosedRange<Date>]] = [:]
+    /// Each of this Mac's cameras' gaps in recording, in `loaded`, with why (RecordingGaps), as read; one going on
+    /// now runs to when it was read.
+    private(set) var gaps: [String: [RecordingGap]] = [:]
+    /// Being dragged along with the middle button: hover cards are hidden until it's let go.
+    var panning = false
     private var privacyRead = Date.distantPast
     /// Finished segments' real lengths, as measured.
     private var measured: [String: Double] = [:]
@@ -410,7 +415,7 @@ final class TimelineModel {
         let known = live.mapValues(\.path)
         // (This Mac's cameras from its own recordings; other Ponds' as their Ponds say, below.)
         let own = cameras.filter { ControlSocket.RemotePond.split($0) == nil }
-        let (found, starts, kept, privacy, writing) = await Task.detached {
+        let (found, starts, kept, privacy, writing, incidents) = await Task.detached {
             var out: [String: [RecordedSpan]] = [:]
             var starts: [String: Date] = [:]
             var writing: [String: LiveSegment] = [:]
@@ -420,7 +425,9 @@ final class TimelineModel {
                 writing[c] = RecordingIndex.beingWritten(base: base, camera: c, known: known[c])
             }
             let events = (source?.events(from: from, to: to) ?? []).filter { cameras.contains($0.camera) }
-            return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:], writing)
+            // (From a little before: what made a gap at the window's start.)
+            let incidents = own.isEmpty ? [] : source?.incidents(from: from.addingTimeInterval(-300), to: min(to, Date())) ?? []
+            return (out, starts, events, source?.privateSpans(from: from, to: min(to, Date())) ?? [:], writing, incidents)
         }.value
         for (c, segment) in writing where Date().timeIntervalSince(segment.through) < Self.liveTimeout {
             live[c] = segment
@@ -470,6 +477,15 @@ final class TimelineModel {
         if next != events { events = next }
         privateSpans = allPrivacy
         privacyRead = min(to, Date())
+        // This Mac's cameras' gaps, and why: up to now, for one not recording now (and not private).
+        var gapsFound: [String: [RecordingGap]] = [:]
+        for c in own {
+            let through = live[c] == nil && privateNow[c] == nil ? privacyRead : nil
+            let list = RecordingGaps.find(camera: c, coverage: covered[c] ?? [], through: through, privateSpans: privacy[c] ?? [],
+                                          incidents: incidents)
+            if !list.isEmpty { gapsFound[c] = list }
+        }
+        if gapsFound != gaps { gaps = gapsFound }
         loaded = from ... to
     }
 

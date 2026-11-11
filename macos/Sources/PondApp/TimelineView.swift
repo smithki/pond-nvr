@@ -895,7 +895,10 @@ struct TimelineLanes: View, @MainActor Animatable {
                                     switch phase {
                                     case let .active(point):
                                         let origin = geo.frame(in: .named(TimelineView.space)).origin
-                                        if let group = group(at: point, width: geo.size.width, visible: visible) {
+                                        // Being dragged along (the middle button held): no card, out of the way.
+                                        if timeline.panning {
+                                            hovered = nil
+                                        } else if let group = group(at: point, width: geo.size.width, visible: visible) {
                                             // Several too close to tell apart: all of them, in one card.
                                             let lead = lead(of: group, width: geo.size.width, visible: visible)
                                             hovered = EventHover(event: lead, anchor: CGPoint(x: origin.x + Self.anchorX(group.rect, pointer: point.x, width: geo.size.width),
@@ -906,11 +909,15 @@ struct TimelineLanes: View, @MainActor Animatable {
                                             hovered = EventHover(event: event,
                                                                  anchor: CGPoint(x: origin.x + Self.anchorX(mark, pointer: point.x, width: geo.size.width),
                                                                                  y: origin.y + mark.minY))
-                                        } else if let stretch = privateStretch(at: point, width: geo.size.width, visible: visible) {
+                                        } else if let stretch = privateStretch(at: point, width: geo.size.width, visible: visible)
+                                                    ?? recordingGap(at: point, width: geo.size.width, visible: visible) {
                                             // Too narrow for its word: what it is, on hover.
+                                            // Over its middle, or following the pointer when that's out of view (as an event's chip).
                                             let lane = laneRect(cameras.firstIndex { $0.id == stretch.camera } ?? 0, width: geo.size.width)
-                                            let mid = x(stretch.start.addingTimeInterval(stretch.seconds / 2), width: geo.size.width, visible: visible)
-                                            hovered = EventHover(event: stretch, anchor: CGPoint(x: origin.x + min(max(mid, 0), geo.size.width),
+                                            let x0 = x(stretch.start, width: geo.size.width, visible: visible)
+                                            let x1 = x(stretch.end, width: geo.size.width, visible: visible)
+                                            let rect = CGRect(x: x0, y: lane.minY, width: max(0, x1 - x0), height: lane.height)
+                                            hovered = EventHover(event: stretch, anchor: CGPoint(x: origin.x + Self.anchorX(rect, pointer: point.x, width: geo.size.width),
                                                                                                 y: origin.y + lane.minY + 3))
                                         } else {
                                             hovered = nil
@@ -939,10 +946,15 @@ struct TimelineLanes: View, @MainActor Animatable {
         // Two-finger sideways scrolling over the timeline pans it (up and down still scroll the lanes); so does
         // dragging with the middle button (the scroll wheel pressed).
         .onHover { overTimeline = $0 }
-        .background(HorizontalScroll(active: overTimeline) { dx in
+        .background(HorizontalScroll(active: overTimeline, onScroll: { dx in
             let perPoint = timeline.zoom.rawValue / max(lanesWidth ?? 600, 1)
             timeline.pan(by: -dx * perPoint)
-        })
+            // A hover card is left behind as the lanes move under it: gone, until the pointer moves again.
+            hovered = nil
+        }, onGrab: { grabbing in
+            timeline.panning = grabbing
+            if grabbing { hovered = nil }
+        }))
         .padding(.horizontal, 14)
         .padding(.vertical, Self.padding)
         // (Its bottom corners by the window's: following its curve.)
@@ -1177,6 +1189,24 @@ struct TimelineLanes: View, @MainActor Animatable {
                              start: span.lowerBound, end: span.upperBound,
                              summary: "Not recorded, shown live or in the Home app.")
     }
+
+    /// The gap in recording under a point (within a few points of a narrow one), as a hover card's "event": when, and
+    /// why.
+    func recordingGap(at point: CGPoint, width: Double, visible: ClosedRange<Date>) -> TimelineEvent? {
+        guard let lane = laneIndex(at: point.y) else { return nil }
+        let camera = cameras[lane].id
+        let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
+        let slack = 4 / width * length
+        let t = time(at: point.x, width: width, visible: visible)
+        guard let gap = timeline.gaps[camera]?.first(where: {
+            t >= $0.range.lowerBound.addingTimeInterval(-slack) && t <= $0.range.upperBound.addingTimeInterval(slack)
+        }) else { return nil }
+        return TimelineEvent(id: Self.gapID(camera, gap), camera: camera, kind: .gap, start: gap.range.lowerBound, end: gap.range.upperBound,
+                             summary: gap.reason.words.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }
+                                 ?? "Nothing recorded at the time says why.")
+    }
+
+    static func gapID(_ camera: String, _ gap: RecordingGap) -> String { "gap-\(camera)-\(gap.range.lowerBound.timeIntervalSince1970)" }
 
     /// A lane's bar, and an event's mark inside it, in the lanes canvas (a folded Pond's at no height).
     func laneRect(_ index: Int, width: Double, at t: Date = Date()) -> CGRect {
@@ -1637,7 +1667,8 @@ struct TimelineLanes: View, @MainActor Animatable {
             let coverage = drawnCoverage(camera.id, now: edgeNow)
             // Private stretches, reaching to the recording on either side (recording stops and starts again a
             // moment apart from the change), so the lane runs on through them without a break.
-            let privateSpans = Self.joined(timeline.privateSpans(of: camera.id, now: clockNow), to: coverage)
+            // (Going on now: to the same live edge as a recording's, so the lanes end together.)
+            let privateSpans = Self.joined(timeline.privateSpans(of: camera.id, now: edgeNow), to: coverage)
             let recordingNow = timeline.recordingNow(of: camera.id, now: edgeNow)
             for range in coverage where range.upperBound > visible.lowerBound && range.lowerBound < visible.upperBound {
                 // Running on under a private stretch beside it by a corner's width, so the bar shows in the
@@ -1701,6 +1732,8 @@ struct TimelineLanes: View, @MainActor Animatable {
                 // show at them, under it.
                 let bar = CGRect(x: x0, y: lane.minY, width: max(3, x1 - x0), height: lane.height)
                 let shape = Path(roundedRect: bar, cornerRadius: min(6, bar.width / 2))
+                // Kept out of the future's dimming, as a recording is (its end at the present isn't dimmed).
+                if span.upperBound > clockNow.addingTimeInterval(-3600) { recorded.append(shape) }
                 context.fill(shape, with: .style(.background))
                 context.fill(shape, with: .color(.indigo.opacity(selected ? 0.3 : 0.2)))
                 // The stripes keep to the time axis, so they don't slide as the view pans.
@@ -1727,6 +1760,26 @@ struct TimelineLanes: View, @MainActor Animatable {
                 // Hovered: its outline over all of it (drawn first, the stripes crossed it where it's kept inside the
                 // lanes' edge).
                 if highlighted == "private-\(camera.id)-\(span.lowerBound.timeIntervalSince1970)" {
+                    context.stroke(Path(roundedRect: Self.outline(bar, in: size), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
+                }
+            }
+            // Not recorded (and not private): an empty stretch, outlined in orange, dashed, with the words where
+            // there's room and why on hover. (What caused it may be this Mac's, not the camera's: RecordingGaps.)
+            for gap in timeline.gaps[camera.id] ?? [] where gap.range.upperBound > visible.lowerBound && gap.range.lowerBound < visible.upperBound {
+                let x0 = max(0, x(gap.range.lowerBound, width: size.width, visible: visible))
+                let x1 = min(size.width, x(gap.range.upperBound, width: size.width, visible: visible))
+                let bar = CGRect(x: x0, y: lane.minY, width: max(3, x1 - x0), height: lane.height).insetBy(dx: 0.75, dy: 0.75)
+                let shape = Path(roundedRect: bar, cornerRadius: min(5, bar.width / 2))
+                if gap.ongoing { recorded.append(shape) }
+                context.fill(shape, with: .color(.orange.opacity(selected ? 0.12 : 0.07)))
+                context.stroke(shape, with: .color(.orange.opacity(selected ? 0.75 : 0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                let label = context.resolve(Text("\(Image(systemName: gap.reason.symbol)) Not recorded")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.orange))
+                let box = label.measure(in: size)
+                if box.width + 16 < bar.width, box.height < bar.height {
+                    context.draw(label, at: CGPoint(x: bar.minX + 8 + box.width / 2, y: bar.midY))
+                }
+                if highlighted == Self.gapID(camera.id, gap) {
                     context.stroke(Path(roundedRect: Self.outline(bar, in: size), cornerRadius: 7), with: .color(.primary), lineWidth: 1.5)
                 }
             }
@@ -2159,7 +2212,7 @@ struct EventCallout: View {
             }
             HStack(spacing: 4) {
                 Text(when)
-                if event.kind != .privacy {
+                if !event.kind.isStretch {
                     Spacer(minLength: 16)
                     Text(isGroup && canZoom ? "Click to zoom in" : "Click to play")
                 }
@@ -2174,7 +2227,7 @@ struct EventCallout: View {
         if group.count > 1, let first = group.first, let last = group.map(\.end).max() {
             return "\(first.start.formatted(date: .omitted, time: .shortened)) – \(last.formatted(date: .omitted, time: .shortened))"
         }
-        if event.kind == .privacy {
+        if event.kind.isStretch {
             return "\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened)) · \(Self.length(event.seconds))"
         }
         return "\(event.start.formatted(date: .omitted, time: .standard)) · \(Int(event.seconds.rounded())) s"
@@ -2330,6 +2383,8 @@ struct EventBadge: View {
 struct HorizontalScroll: NSViewRepresentable {
     let active: Bool
     let onScroll: (Double) -> Void
+    /// A middle-button drag began (true) or ended (false).
+    var onGrab: (Bool) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSView {
         context.coordinator.start()
@@ -2339,21 +2394,24 @@ struct HorizontalScroll: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.active = active
         context.coordinator.onScroll = onScroll
+        context.coordinator.onGrab = onGrab
     }
 
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.stop() }
 
-    func makeCoordinator() -> Coordinator { Coordinator(active: active, onScroll: onScroll) }
+    func makeCoordinator() -> Coordinator { Coordinator(active: active, onScroll: onScroll, onGrab: onGrab) }
 
     @MainActor
     final class Coordinator {
         var active: Bool
         var onScroll: (Double) -> Void
+        var onGrab: (Bool) -> Void
         private var monitor: Any?
 
-        init(active: Bool, onScroll: @escaping (Double) -> Void) {
+        init(active: Bool, onScroll: @escaping (Double) -> Void, onGrab: @escaping (Bool) -> Void) {
             self.active = active
             self.onScroll = onScroll
+            self.onGrab = onGrab
         }
 
         /// A drag with the middle button (the scroll wheel pressed) under way: it pans, wherever the pointer goes.
@@ -2372,6 +2430,7 @@ struct HorizontalScroll: NSViewRepresentable {
                 case .otherMouseDown where event.buttonNumber == 2 && self.active:
                     self.grabbing = true
                     NSCursor.closedHand.push()
+                    self.onGrab(true)
                     return nil
                 case .otherMouseDragged where self.grabbing:
                     self.onScroll(event.deltaX)
@@ -2379,6 +2438,7 @@ struct HorizontalScroll: NSViewRepresentable {
                 case .otherMouseUp where self.grabbing:
                     self.grabbing = false
                     NSCursor.pop()
+                    self.onGrab(false)
                     return nil
                 default:
                     return event
@@ -2389,7 +2449,10 @@ struct HorizontalScroll: NSViewRepresentable {
         func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
-            if grabbing { NSCursor.pop() }
+            if grabbing {
+                NSCursor.pop()
+                onGrab(false)
+            }
             grabbing = false
         }
     }

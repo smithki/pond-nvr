@@ -80,26 +80,46 @@ extension AppModel {
     /// Puts the camera in HomeKit or takes it out, then starts or restarts the service so it takes effect.
     /// `recording`: whether it's offered to HomeKit Secure Video too (unchanged if nil), in the same change.
     func setHomeKit(_ id: String, _ on: Bool, recording: Bool? = nil) {
+        // Taken out before it was ever added: its identity forgotten below, so adding it again starts afresh.
+        let unpaired = !on && config?.cameras.first { $0.id == id }?.homekit == true && homeKitStatus?.cameras[id]?.paired == false
         guard update(affectsRecorder: false, { config in
             guard let i = config.cameras.firstIndex(where: { $0.id == id }) else { return }
             config.cameras[i].homekit = on
             if let recording { config.cameras[i].homekitRecording = recording ? true : nil }
         }) else { return }
         applyHomeKitChange()
+        if unpaired { resetHomeKitIdentity(id) }
     }
+
+    /// Pond's own sensor in HomeKit (open while recording isn't going as it should): on or off, the service told.
+    func setHomeKitSensor(_ on: Bool) {
+        let unpaired = !on && homeKitStatus?.sensor?.paired != true
+        guard update(affectsRecorder: false, { $0.homekitSensor = on ? true : nil }) else { return }
+        applyHomeKitChange()
+        // Turned off before it was added: its identity forgotten, so adding it again starts afresh (an attempt the
+        // Home app gave up on can leave it ignoring that identity for good).
+        if unpaired { resetHomeKitIdentity(HomeKitHost.sensorID) }
+    }
+
+    /// The sensor's state, as the service says it (nil: off, or the service isn't running it yet).
+    var homeKitSensor: HomeKitStatus.Sensor? { homeKitStatus?.sensor }
 
     /// The camera's HomeKit identity and pairings are forgotten: it leaves the Home app for good (it has to
     /// be removed there too) and gets a new setup code if it is added again.
     func forgetHomeKit(_ id: String) {
-        // Through the service's own program, which owns the Keychain item.
-        if let helperPath {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: helperPath)
-            process.arguments = ["homekit", "reset", id]
-            try? process.run()
-            process.waitUntilExit()
-        }
+        resetHomeKitIdentity(id)
         setHomeKit(id, false)
+    }
+
+    /// A HomeKit identity and its pairings forgotten, through the service's own program (which owns the Keychain
+    /// item): a camera's id, or the sensor's.
+    func resetHomeKitIdentity(_ id: String) {
+        guard let helperPath else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: helperPath)
+        process.arguments = ["homekit", "reset", id]
+        try? process.run()
+        process.waitUntilExit()
     }
 
     func setKind(_ id: String, _ kind: Config.Camera.Kind) {

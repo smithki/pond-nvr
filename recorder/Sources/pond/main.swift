@@ -143,12 +143,29 @@ struct RecordingAndHomeKit: ServiceRunning {
     /// The settings, read again on a reload.
     let configPath: String
 
+    /// When this Mac started up.
+    static func bootTime() -> Date? {
+        #if canImport(Darwin)
+        var time = timeval()
+        var size = MemoryLayout<timeval>.size
+        guard sysctlbyname("kern.boottime", &time, &size, nil, 0) == 0, time.tv_sec > 0 else { return nil }
+        return Date(timeIntervalSince1970: Double(time.tv_sec) + Double(time.tv_usec) / 1_000_000)
+        #else
+        return nil
+        #endif
+    }
+
     func run(config: Config, passwords: [String: String], for seconds: Double?, log: EventLog) {
         // Camera health for the doctor, in Pond's database: a week kept.
         let health = HealthStore(path: config.storage.databasePath)
         if let health {
             HealthLog.shared.sink = health
             health.prune()
+            // This Mac's start, once (at its boot time): a gap across it was the Mac off or restarting.
+            if let boot = Self.bootTime(),
+               !health.incidents(since: boot.addingTimeInterval(-5)).contains(where: { $0.kind == .macStarted }) {
+                health.record(HealthIncident(camera: "", time: boot, kind: .macStarted))
+            }
             HealthLog.shared.record("", .serviceStarted)
         } else {
             log.log("pond", "! camera health isn\u{2019}t kept: \(config.storage.databasePath) can\u{2019}t be opened")
@@ -320,6 +337,12 @@ struct RecordingAndHomeKit: ServiceRunning {
             }
             return RemoteAPI.Health(recording: count, problems: problems)
         }
+        // Pond's own sensor in HomeKit, when it's on: open while recording isn't going as it should (RecordingAlert),
+        // checked every 15 s and as this Mac goes to sleep.
+        let sensor = SensorWatch(host: host, recording: recording)
+        if config.homekitSensor == true { sensor.start(name: Brand.name) }
+        recording.sleeping = { sensor.sleeping($0) }
+        defer { sensor.stop() }
         remote.apply(config.remote, name: config.name)
         controls.remote = { await remote.handle($0) }
         controls.otherPond = { await remote.forward($0) }
@@ -328,7 +351,11 @@ struct RecordingAndHomeKit: ServiceRunning {
         // its settings did.
         let configPath = self.configPath
         controls.reload = {
-            let remoteChange = (try? ConfigStore(path: configPath).load()).flatMap { remote.apply($0.remote, name: $0.name) }
+            let next = try? ConfigStore(path: configPath).load()
+            let remoteChange = next.flatMap { remote.apply($0.remote, name: $0.name) }
+            if let next {
+                if next.homekitSensor == true { sensor.start(name: Brand.name) } else { sensor.stop() }
+            }
             func with(_ summary: String) -> String { remoteChange.map { summary == "nothing changed" ? $0 : "\(summary); \($0)" } ?? summary }
             return switch cameras.reload() {
             case let .applied(summary): (with(summary), false, false)
@@ -349,6 +376,75 @@ struct RecordingAndHomeKit: ServiceRunning {
             loggedOut.signal()
         }
         _ = loggedOut.wait(timeout: .now() + 5)
+    }
+}
+
+/// Pond's own HomeKit sensor kept up to date: each camera's recorder looked at every 15 s (and as this Mac goes to
+/// sleep), what's wrong worked out by RecordingAlert, and the sensor set from it.
+final class SensorWatch: @unchecked Sendable {
+    let host: HomeKitHost
+    let recording: RecordingService
+    private let lock = NSLock()
+    private var alert = RecordingAlert()
+    private var timer: DispatchSourceTimer?
+    private var asleep = false
+
+    init(host: HomeKitHost, recording: RecordingService) {
+        self.host = host
+        self.recording = recording
+    }
+
+    func start(name: String) {
+        host.startSensor(name: name)
+        lock.withLock {
+            guard timer == nil else { return }
+            let t = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.sensor"))
+            t.schedule(deadline: .now() + 5, repeating: 15)
+            t.setEventHandler { [weak self] in self?.check() }
+            t.resume()
+            timer = t
+        }
+    }
+
+    func stop() {
+        lock.withLock {
+            timer?.cancel()
+            timer = nil
+            alert = RecordingAlert()
+        }
+        host.stopSensor()
+    }
+
+    func sleeping(_ on: Bool) {
+        lock.withLock {
+            asleep = on
+            // Awake: the time asleep isn't counted against a camera reconnecting.
+            if !on { alert = RecordingAlert() }
+        }
+        check()
+    }
+
+    func check() {
+        let cameras = recording.workers.map { worker -> (id: String, name: String, state: RecordingAlert.CameraState) in
+            let state: RecordingAlert.CameraState
+            if PrivacyState.shared.isPrivate(worker.camera.id) {
+                state = .excused
+            } else {
+                switch worker.status {
+                case .recording: state = .recording
+                case .privacyMode, .keptPrivate, .stopped: state = .excused
+                case .storageUnavailable: state = .driveUnusable
+                case let .offline(why): state = .notRecording(why)
+                case .connecting: state = .notRecording("connecting")
+                }
+            }
+            return (worker.camera.id, worker.camera.name, state)
+        }
+        let said = lock.withLock { () -> String?? in
+            guard timer != nil else { return nil }
+            return .some(alert.check(cameras, asleep: asleep))
+        }
+        if let said { host.setSensor(alert: said) }
     }
 }
 

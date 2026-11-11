@@ -78,7 +78,7 @@ Pond is a server that looks like an app: it's only as good as the nights it does
 
 | Goal | Status | Notes |
 |---|---|---|
-| Knowing when it isn't working | in progress | What stops recording said plainly, as it happens and wherever one is: the Mac asleep or restarted for an update, the recordings drive full, missing or slow, the service stopped, a camera gone for long; and after the fact ("not recorded 03:12–06:40: the drive was full"), on the timeline and in the doctor. On this Mac, notifications (done); away, on one's phone: through the Home app (Pond's own HomeKit sensor going off, which the Home app can notify about, with no server of Pond's), and later push alerts through the hosted service. A quiet daily "all well" check one can glance at, rather than silence that could mean either. |
+| Knowing when it isn't working | in progress | What stops recording said plainly, as it happens and wherever one is: the Mac asleep or restarted for an update, the recordings drive full, missing or slow, the service stopped, a camera gone for long; and after the fact ("not recorded 03:12–06:40: the drive was full"), on the timeline and in the doctor. On this Mac, notifications (done); away, on one's phone: through the Home app (Pond's own HomeKit sensor going off, which the Home app can notify about, with no server of Pond's), and later push alerts through the hosted service. A quiet daily "all well" check one can glance at, rather than silence that could mean either. Done: gaps in recordings with why ([doctor.md](doctor.md#gaps-in-recordings)): the service records this Mac sleeping, waking and starting up, its own stops, and the drive failing; the timeline marks each gap, the doctor lists the day's. Pond's own HomeKit sensor (Settings › HomeKit: a contact sensor, open while recording isn't going as it should, the Mac going to sleep included; its Activity Notifications reach one's phone). This Mac's settings in the doctor ([doctor.md](doctor.md#this-mac): sleep, a power cut, the login screen, a battery). Next: the daily "all well"; then the sensor tried with a real home hub (pairing, notifications away). |
 
 ## Detection, events, search
 
@@ -94,5 +94,13 @@ A backlog: small, contained problems seen in use, each worth a fix but not a goa
 
 | Fix | Notes |
 | --- | --- |
-| (none open) | |
+| Open at login off by default | Pond is a recorder that should be running; off by default contradicts the notifications that say when it isn't. On by default, or asked about on first run. |
+| "Something." as an event's description | The language model sometimes answers with nothing useful ("Something.") for a Person event; such answers fall back to one made from what's known ("A person in the garage"). |
+| Developer lines in the Recorder log | Timing lines meant for debugging ("on the recording's clock…", from CameraWatcher) and "Recording (process N)" are shown to everyone; kept for `pond` and the doctor's report, left out of the app's log. |
+| Recorder log: slow rewrap, last line cut | Below about 1014 pt wide the log is slow to rewrap while resizing, and its last line is cut off at the bottom. |
+| Empty doctor charts look broken | A chart with nothing in the last 24 hours shows as an empty frame; it says "None in the last 24 hours". |
+| The camera panel mixes immediate and saved | Private takes effect at once while the rest wait for Save; one way for the panel (each change at once, or Private set apart from what's saved). |
+| Remote Access's rough edges | Three buttons per device where one menu would do; "Reachable through 127.0.0.1" (an address that means nothing to the reader, and isn't how others reach it); a footer that sends readers to "deploy/ in Pond's source". |
+| Icon-only toolbar buttons | "+" and others have no label or tooltip; each gets a tooltip, and a label where there's room. |
+| An event's kind badge covers the camera's timestamp | On event pictures the badge sits over the camera's own clock overlay; moved to a corner it doesn't cover, or made smaller. |
 

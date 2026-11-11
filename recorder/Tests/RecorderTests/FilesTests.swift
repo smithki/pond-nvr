@@ -39,11 +39,15 @@ final class TempFolder {
         let dir = try TempFolder()
         let root = dir.path + "/unplugged"
         let log = MemoryLog()
-        let files = SegmentFiles(root: root, camera: "porch", log: log)
+        let files = SegmentFiles(root: root, camera: "unplugged-porch", log: log)
+        // What the doctor and the timeline are told (why recordings stopped, and when they start again).
+        let health = CollectingSink()
+        HealthLog.shared.sink = health
+        defer { HealthLog.shared.sink = nil }
         files.handle([.start(initSegment: [1], wallTime: Self.wall), .fragment([2])])
         #expect(!FileManager.default.fileExists(atPath: root))
         guard case .unavailable = files.state else { Issue.record("expected unavailable"); return }
-        #expect(log.lines == ["porch: not recording: the recordings folder \(root) is not found: plug in the drive or mount the share"])
+        #expect(log.lines == ["unplugged-porch: not recording: the recordings folder \(root) is not found: plug in the drive or mount the share"])
         // Said once, not for every segment.
         files.handle([.end(SegmentSummary(wallTime: 0, seconds: 0, videoFrames: 0, audioFrames: 0)),
                       .start(initSegment: [1], wallTime: Self.wall + 60)])
@@ -53,7 +57,10 @@ final class TempFolder {
         try StorageLocation.prepare(root)
         files.handle([.start(initSegment: [1], wallTime: Self.wall + 120)])
         guard case .writing = files.state else { Issue.record("expected writing"); return }
-        #expect(log.lines.last == "porch: recording to \(root) again")
+        #expect(log.lines.last == "unplugged-porch: recording to \(root) again")
+        let said = health.incidents.filter { $0.camera == "unplugged-porch" }
+        #expect(said.map(\.kind) == [.storageFailed, .storageBack])
+        #expect(said.first?.detail == "the recordings drive wasn\u{2019}t there")
     }
 
     @Test func partialFilesAreRecovered() throws {
@@ -115,4 +122,14 @@ final class TempFolder {
         try FileManager.default.removeItem(atPath: "\(dir.path)/.pond-storage")
         #expect(RetentionSweeper(config: config, log: MemoryLog()).sweep(now: Self.now).deletedFiles == 0)
     }
+}
+
+/// Keeps what's recorded, for a test to look at.
+final class CollectingSink: HealthSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var kept: [HealthIncident] = []
+    var incidents: [HealthIncident] { lock.withLock { kept } }
+    func record(_ incident: HealthIncident) { lock.withLock { kept.append(incident) } }
+    func add(_ sample: HealthSample) {}
+    func flush() {}
 }

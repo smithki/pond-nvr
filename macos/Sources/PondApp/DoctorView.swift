@@ -13,6 +13,8 @@ struct DoctorView: View {
     @Environment(AppModel.self) private var model
     /// Ignored findings shown: they're folded away under the others until asked for.
     @State private var showIgnored = false
+    /// The day's earlier gaps in recording, beyond the newest few: folded away until asked for.
+    @State private var showEarlierGaps = false
     /// The check's sheet, over the page: a check running (Run Check…), or the last one's details (Details…).
     @State private var checkSheet: CheckRequest?
 
@@ -143,7 +145,43 @@ struct DoctorView: View {
                 Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras unless you run a check.")
                     .foregroundStyle(.secondary)
             }
+            macSection
             ThresholdsSection()
+        }
+    }
+
+    /// This Mac's settings, for recording unattended: what would stop it (sleep, a power cut, the login screen),
+    /// each with where it's changed. Nothing listed when all's set.
+    @ViewBuilder
+    var macSection: some View {
+        if !doctor.mac.isEmpty {
+            Section {
+                ForEach(doctor.mac) { finding in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: FindingRow.symbol(finding.severity))
+                            .foregroundStyle(FindingRow.color(finding.severity))
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(finding.headline).font(.headline)
+                            Text(finding.evidence).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            if let fix = finding.fix { Text(fix).font(.callout).fixedSize(horizontal: false, vertical: true) }
+                        }
+                        Spacer(minLength: 8)
+                        if let place = finding.place,
+                           let url = URL(string: "x-apple.systempreferences:\(place.rawValue)") {
+                            Button("Open Settings\u{2026}") { NSWorkspace.shared.open(url) }
+                                .controlSize(.small)
+                                .help("Opens where it\u{2019}s changed in System Settings")
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                Text("This Mac")
+            } footer: {
+                Text("Pond records only while this Mac is on, awake and logged in. Read from its settings every few minutes; nothing is changed.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -181,9 +219,50 @@ struct DoctorView: View {
             header(camera)
         }
         Section("Last 24 hours") {
+            gapRows(camera)
             IncidentStrip(incidents: doctor.incidents(of: camera.id), samples: doctor.samples(of: camera.id))
             DayCharts(samples: doctor.samples(of: camera.id), incidents: doctor.incidents(of: camera.id))
                 .frame(height: 90)
+        }
+    }
+
+    /// Where its recordings stopped in the day, and why (this Mac asleep, the drive full, the camera gone); or that
+    /// they didn't, once it's recorded today.
+    @ViewBuilder
+    func gapRows(_ camera: Config.Camera) -> some View {
+        let gaps = doctor.gaps[camera.id] ?? []
+        if gaps.isEmpty {
+            if doctor.samples(of: camera.id).contains(where: { $0.frames > 0 }) {
+                Label("Recorded without a gap" + (model.isPrivate(camera.id) ? ", apart from while it was private" : ""),
+                      systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+        } else {
+            // The newest first; past a few, the rest folded away.
+            let newest = Array(gaps.reversed())
+            ForEach(newest.prefix(3), id: \.range.lowerBound) { gap in gapRow(gap) }
+            if newest.count > 3 {
+                FoldRow(title: "Earlier", summary: "\(newest.count - 3)", expanded: $showEarlierGaps)
+                if showEarlierGaps {
+                    ForEach(newest.dropFirst(3), id: \.range.lowerBound) { gap in gapRow(gap).padding(.leading, FoldRow.indent) }
+                }
+            }
+        }
+    }
+
+    /// A gap in recording: when, how long, and why.
+    func gapRow(_ gap: RecordingGap) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: gap.reason.symbol).foregroundStyle(.orange).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text((gap.ongoing ? "Not recording since " : "Not recorded ")
+                     + gap.range.lowerBound.formatted(date: .omitted, time: .shortened)
+                     + (gap.ongoing ? "" : " \u{2013} " + gap.range.upperBound.formatted(date: .omitted, time: .shortened))
+                     + " (\(HealthDiagnosis.duration(gap.seconds)))")
+                Text(gap.reason.words.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "Nothing recorded at the time says why")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -342,7 +421,8 @@ struct IncidentStrip: View {
         case .connected, .madePublic: .up
         case .unreachable, .loginRefused, .failed, .wakeFailed: .down
         case .privacyMode, .madePrivate: .hidden
-        case .stalled, .controlFailed, .serviceStarted, .restarted: nil
+        case .stalled, .controlFailed, .serviceStarted, .restarted, .serviceStopped, .macSleeping, .macWoke, .macStarted,
+             .storageFailed, .storageBack: nil
         }
     }
 
@@ -433,7 +513,7 @@ struct IncidentList: View {
     @State private var overflows = false
 
     static let problems: Set<HealthIncident.Kind> = [.stalled, .unreachable, .loginRefused, .failed, .controlFailed, .privacyMode, .wakeFailed,
-                                                     .restarted]
+                                                     .restarted, .storageFailed]
 
     var shown: [HealthIncident] { everything ? incidents : incidents.filter { Self.problems.contains($0.kind) } }
 
@@ -483,7 +563,7 @@ struct IncidentList: View {
 
     func row(_ incident: HealthIncident) -> some View {
         let (mark, color): (String, Color) = switch incident.kind {
-        case .stalled, .unreachable, .loginRefused, .failed, .wakeFailed: ("✗", .red)
+        case .stalled, .unreachable, .loginRefused, .failed, .wakeFailed, .storageFailed: ("✗", .red)
         case .controlFailed, .privacyMode, .restarted: ("!", .orange)
         case .connected: ("✓", .green)
         default: ("", .clear)

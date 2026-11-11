@@ -76,6 +76,12 @@ extension AppModel {
             out.append(.init(id: "room", level: .warning, symbol: "externaldrive", title: "Room for \(room) of recordings",
                              short: "Drive filling up", detail: "Not the \(outlook.keepDays) days kept: the oldest go sooner.", fix: .storageSettings))
         }
+        // This Mac's settings: what would stop recording unattended (the doctor's "This Mac").
+        for finding in doctor.mac where finding.severity >= .warning {
+            out.append(.init(id: "mac \(finding.id)", level: finding.severity == .problem ? .problem : .warning,
+                             symbol: finding.severity == .problem ? "exclamationmark.triangle" : "bolt.badge.clock",
+                             title: finding.headline, short: finding.headline, detail: finding.fix ?? finding.evidence, fix: .doctor(nil)))
+        }
         // Each camera: not recorded (the service watch), else the doctor's worst worth a mark.
         let silent: Set<String> = if case let .notRecording(names)? = watch.problem { Set(names) } else { [] }
         for camera in cameras where !isPrivate(camera.id) {
@@ -122,6 +128,9 @@ extension AppModel {
         if items.count == 1 { return items[0].short }
         return items.isEmpty ? recorderWords : "\(items.count) need attention"
     }
+
+    /// The recorder is running now.
+    var isRecorderRunning: Bool { if case .running = serviceState { true } else { false } }
 
     /// How many things need attention (not counting cameras kept private).
     var attentionCount: Int { attention.count { $0.level >= .warning } }
