@@ -1,7 +1,7 @@
 // The signaling service: a blind courier between Ponds and their devices. Each connects to its mailbox (proving it's
 // its own: the mailbox is the SHA-256 of a secret only it can derive), and sends envelopes to others' mailboxes;
 // they're passed on to whoever's connected there, and kept nowhere (nobody there: "undelivered"). Envelopes are
-// sealed end to end (Pond's Remote module), so all it ever learns is which mailboxes speak, when, and how much.
+// sealed end to end (PondProtocol's Envelope), so all it ever learns is which mailboxes speak, when, and how much.
 //
 // Its messages, one JSON object a WebSocket text frame:
 //   → {"op":"hello","mailbox":HEX,"secret":BASE64}            ← {"op":"ready"} | {"op":"error","why":…} (closed)

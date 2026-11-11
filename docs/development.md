@@ -70,10 +70,10 @@ Learning from one's own feedback is a Pond's own business, tuned for its own cam
 ## Where things go
 
 - One module per responsibility; the table is in [architecture.md](architecture.md).
-- Code that needs only Foundation stays free of Apple frameworks, so it is tested on Linux too. Modules that need Apple frameworks are added to `Package.swift` inside `#if os(macOS)`.
+- Code that needs only Foundation stays free of Apple frameworks, so it is tested on Linux too. Modules that need Apple frameworks are added to their package's `Package.swift` inside `#if os(macOS)`; the protocol (`protocol/`) depends on nothing of Pond's, and each package only on the ones before it ([architecture.md](architecture.md)).
 - Each module has a test target, `<package>/Tests/<Module>Tests/`.
 - The app's views are in `PondApp`; everything they change goes through `AppModel` (tested in `macos/Tests/PondAppTests/`).
-- `pond` commands live in `PondCLI` (`CLI.swift`, `CameraCommands.swift`); `Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `recorder/Tests/PondCLITests/Fakes.swift`.
+- `pond` commands live in `PondCLI` (`CLI.swift`, `CameraCommands.swift`); `recorder/Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `recorder/Tests/PondCLITests/Fakes.swift`.
 - Code ported from HAP-NodeJS or HomeKitADK names its source file in a comment.
 
 ## Adding a setting

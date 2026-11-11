@@ -4,7 +4,7 @@ What Pond can do to a camera besides watching it: move it (pan, tilt, zoom), kee
 
 ## Providers
 
-A **provider** is one way of talking to cameras: `ReolinkProvider` (Reolink's HTTP API) and `ONVIFProvider` (any camera with ONVIF). Each implements `CameraProvider` (`Devices/CameraProvider.swift`), and offers what it can for a given camera:
+A **provider** is one way of talking to cameras: `ReolinkProvider` (Reolink's HTTP API) and `ONVIFProvider` (any camera with ONVIF). Each implements `CameraProvider` (`recorder/Sources/Devices/CameraProvider.swift`), and offers what it can for a given camera:
 
 | Control | Protocol | Shape |
 |---|---|---|
@@ -27,7 +27,7 @@ The dock shows the everyday items in fixed places for every camera (day and nigh
 
 ## Which provider serves what
 
-`CameraControls` (`Devices/Controls.swift`) holds one camera's controls in the service. Its providers, in order (`CameraProviders.order(for:)`):
+`CameraControls` (`recorder/Sources/Devices/Controls.swift`) holds one camera's controls in the service. Its providers, in order (`CameraProviders.order(for:)`):
 
 1. the one the camera was chosen to be talked to through (its settings' **Talks through**);
 2. the others that fit it: its make's own, if Pond has one;
@@ -68,7 +68,7 @@ The Home app talks back too. A camera that can be talked through has a Speaker i
 
 ## Adding a make
 
-A provider for another make, or another protocol for one (Reolink's own Baichuan, say), is a file in `Devices/Providers/` and an entry in `CameraProviders.all`:
+A provider for another make, or another protocol for one (Reolink's own Baichuan, say), is a file in `recorder/Sources/Devices/Providers/` and an entry in `CameraProviders.all`:
 
 1. `maker`: the make it's for, matched against what the camera says it is, so it's offered for that make's cameras.
 2. `identify`, and stream addresses if it knows them.

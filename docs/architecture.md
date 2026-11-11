@@ -14,14 +14,7 @@ camera's sub-stream (Watch) ──► Detection ──► events ──► Under
 
 Two programs come out of it: `pond`, the command and the background service (`pond run`, a launchd agent), which records, watches, serves HomeKit and answers other Ponds; and `Pond NVR.app`, which shows and sets it all, and asks `pond` for anything that needs a camera's password. A third, `pond-signal`, is the signaling service other Ponds meet through, run on a server of one's own ([deploy/](../deploy/README.md)).
 
-Four SwiftPM packages, one per part, with a module per responsibility. Each depends only on the ones before it, so a part can't reach into one after it:
-
-| Package | What it is | Licence |
-|---|---|---|
-| [`protocol/`](../protocol/) | Pond's network protocol: what Ponds and their devices say to each other and to the signaling service (`Traversal`, `SignalProtocol`, `PondProtocol`). Depends on nothing of Pond's, so anything can speak it | MIT |
-| [`signaling/`](../signaling/) | `pond-signal`, the signaling service (`Signal`) | AGPL-3.0 |
-| [`recorder/`](../recorder/) | Everything Pond does on the Mac, and the `pond` command: the modules below, from `PondCore` to `Demo` | AGPL-3.0 |
-| [`macos/`](../macos/) | The Mac app (`PondApp`), its bundle's files (`app/`: Info.plist, entitlements, icon) and Sparkle. `make app` builds here, the rest with it | AGPL-3.0 |
+The code is in four SwiftPM packages, one per part, with a module per responsibility ([The repository](#the-repository) says what else is where).
 
 Modules marked Linux build there too (`make test-docker`); the rest need macOS's frameworks.
 
@@ -50,6 +43,46 @@ Modules marked Linux build there too (`make test-docker`); the rest need macOS's
 | `PondApp` (macos) | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and video depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`, `EventRail`, `EventCard`, `EventDetail`; search asked of the service), with other Ponds beside this Mac's; the Settings window; and the menu bar item, which watches the recorder (`ServiceWatch`). `AppModel` saves through `ConfigStore` and leaves reading passwords to `pond` | no |
 
 The models sit behind small protocols (`DescriptionModel`, the query parser), so an MLX or cloud model could replace Apple's without touching the rest. The default is on-device only.
+
+## The repository
+
+Four parts, each a SwiftPM package of its own, under its own licence (NOTICE says the same):
+
+| Package | What it is | Licence |
+|---|---|---|
+| [`protocol/`](../protocol/) | Pond's network protocol: what Ponds and their devices say to each other and to the signaling service (`Traversal`, `SignalProtocol`, `PondProtocol`) | MIT |
+| [`signaling/`](../signaling/) | `pond-signal`, the signaling service (`Signal`) | AGPL-3.0 |
+| [`recorder/`](../recorder/) | Everything Pond does on the Mac, and the `pond` command: every module from `PondCore` to `Demo` | AGPL-3.0 |
+| [`macos/`](../macos/) | The Mac app (`PondApp`), its bundle's files (`app/`: Info.plist, entitlements, icon) and Sparkle | AGPL-3.0 |
+
+They depend on each other one way only, so a part can't reach into one that depends on it:
+
+```
+macos/ ──────────────► recorder/ ─────────────► protocol/
+  │                       │                         ▲
+  │  (pond-signal,        │  (its remote tests      │
+  │   bundled for         │   run the service)      │
+  │   demo mode)          ▼                         │
+  └──────────────────► signaling/ ──────────────────┘
+```
+
+`protocol/` uses nothing of Pond's. That's what lets it be MIT, and lets an app that speaks Pond's protocol (an iPhone app, say) use it without the AGPL parts. Code that both sides of a connection need belongs there; what only a Mac does (the Keychain, the API's answers, live video from a camera) stays in `recorder/`.
+
+`make app` builds everything from `macos/` (its build folder has all four); `make check` and `make test` go through each package. Each package keeps its own build folder (`<package>/.build`); Xcode opens `macos/Package.swift`, or a part's own.
+
+Everything else:
+
+| Folder | What's there |
+|---|---|
+| [`deploy/`](../deploy/README.md) | Running `pond-signal`, a relay (coturn) and a mesh (Headscale) on a server of one's own, with Docker |
+| [`scripts/`](../scripts/) | What `make` and CI run: releases, the models (fetching, converting, packaging, signing), the footage guard, CI's secrets |
+| [`models/`](../models/) | The lock files naming the models builds download (`detection.lock`, `search.lock`) and the search model's signing key; the models themselves are downloaded here, never committed |
+| [`site/`](../site/README.md) | pond.camera: the site, Sparkle's appcast, and the search model's signed manifest |
+| [`docs/`](./) | How Pond works and how it's made |
+| [`tests/`](../tests/README.md) | The Linux container `make test-docker` runs the tests in (the tests are in each package's `Tests/`) |
+| [`third-party/`](../third-party/) | Licence texts of what's built in or followed (copied into the app as `Licenses/`) |
+| [`brand/`](../brand/) | The logo. The name, logo and icon aren't under the code's licences (NOTICE) |
+| [`.github/`](../.github/) | CI's workflows ([ci-security.md](ci-security.md)) and CODEOWNERS |
 
 ## What Reolink's RTSP server does
 

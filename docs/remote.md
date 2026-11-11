@@ -5,7 +5,7 @@ Reaching a Pond from outside its network: from another Mac's Pond (the start of 
 ## The pieces
 
 - **Pond, on each Mac.** With `remote.enabled`, its service stays connected to a signaling service, answers pairing, and answers connections from the devices and Ponds paired with it.
-- **A signaling service of your own**: `pond-signal`, in `deploy/`, on any server Docker runs on (a small VPS is plenty). It passes sealed messages between paired devices, and answers STUN (UDP 3478 and 3479), so a Pond can learn the address the world sees it at without asking a third party.
+- **A signaling service of your own**: `pond-signal` (its code in `signaling/`, deployed from `deploy/`), on any server Docker runs on (a small VPS is plenty). It passes sealed messages between paired devices, and answers STUN (UDP 3478 and 3479), so a Pond can learn the address the world sees it at without asking a third party.
 - **Optionally, a relay of your own** (coturn, `deploy/`'s `relay` profile), for when no direct path works; or **a mesh** (Tailscale or Headscale, the `mesh` profile), for connecting only over its tunnel.
 
 ## Setting it up
