@@ -1,17 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Fira_Code } from "next/font/google";
 import "./globals.css";
 
-// The fonts, downloaded at build time and served with the site (no request to Google from a visitor's browser).
-const display = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const body = Hanken_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
-const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "600"], variable: "--font-mono" });
+// The fonts (DESIGN.md), downloaded at build time and served with the site (no request to Google from a visitor's
+// browser): Bricolage Grotesque for the wordmark alone, Fira Code for everything else.
+const mark = Bricolage_Grotesque({ subsets: ["latin"], weight: ["700"], variable: "--font-mark" });
+const code = Fira_Code({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-code" });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://pond.camera"),
   title: "Pond: every camera, recorded on your Mac",
   description:
-    "Pond records your IP cameras around the clock to a drive you choose, finds what happened in plain words, and puts each camera in Apple’s Home app. Your footage never leaves the house.",
+    "Pond records your IP cameras around the clock to your own drive, tells you what happened, and puts each camera in Apple’s Home app. Free, open source, and your footage never leaves the house.",
   openGraph: {
     title: "Pond",
     description: "Every camera, recorded on your Mac.",
@@ -19,19 +19,18 @@ export const metadata: Metadata = {
     siteName: "Pond",
     type: "website",
   },
+  icons: { icon: "/mark.svg" },
 };
 
 export const viewport: Viewport = {
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0d1315" },
-    { media: "(prefers-color-scheme: light)", color: "#eef3f3" },
-  ],
+  themeColor: "#0b1419",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+    <html lang="en" className={`${mark.variable} ${code.variable}`}>
       <body>{children}</body>
     </html>
   );

@@ -6,3 +6,6 @@ macos/Tests/PondAppTests/Fixtures/five-seconds.mp4
 # The website's screenshots (web/): Pond's demo mode, made-up cameras and settings, no one's home.
 web/public/screenshots/homekit.jpg
 web/public/screenshots/doctor.jpg
+web/public/screenshots/live.jpg
+web/public/screenshots/timeline.jpg
+web/public/screenshots/events.jpg

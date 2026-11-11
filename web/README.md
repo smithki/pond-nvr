@@ -13,14 +13,17 @@ npm run build    # the site, as Vercel builds it (npm start serves it)
 npm run lint     # TypeScript's checks
 ```
 
-- `app/page.tsx` is the page; `app/globals.css` its look (dark first, as the app is, and light for a light Mac).
-- `components/` has the three parts that move: the camera wall's ticking timestamps, the example searches, and the
-  drive-size sliders (`DriveSize`, from the README's 32 GB per camera per day at 2560×1440).
+- [DESIGN.md](DESIGN.md) is how it looks and why: type, colour, pictures, rules.
+- `app/page.tsx` is the page (its words, the night in Pond's log at its top); `app/globals.css` its look (dark,
+  its colours at the top).
+- `components/`: the example searches, the drive-size sliders (`DriveSize`, from the README's 32 GB per camera per
+  day at 2560×1440), and `Shot`, a picture of the app or, until its file is in `public/screenshots/`, a placeholder
+  naming it.
 - `data/search-models.json` is the search model manifest, served at `/api/search-model` by
   `app/api/search-model/route.js`. Its entries come from the search model workflow's pull requests, signed: don't
   edit one by hand, since Pond refuses an entry whose signature doesn't verify ([docs/search.md](../docs/search.md),
   *Published versions*).
-- The fonts (Bricolage Grotesque, Hanken Grotesk, JetBrains Mono) are fetched by `next/font` when the site is built
+- The fonts (Bricolage Grotesque for the wordmark, Fira Code for the rest) are fetched by `next/font` when the site is built
   and served with it: a visitor's browser never asks Google for them.
 
 Every claim on the page should be true of Pond as it is: check it against the main README's list of what works,

@@ -106,7 +106,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
 - [docs/security.md](docs/security.md): credentials, HomeKit keys, what listens on the network.
 - [docs/development.md](docs/development.md): building, testing, conventions.
-- [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/done.md](docs/done.md): what's been built, and how.
+- [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/done.md](docs/done.md): what's been built, and how; [docs/first-run.md](docs/first-run.md): the plan for a first run without a guide.
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## License
