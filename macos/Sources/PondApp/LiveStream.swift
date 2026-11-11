@@ -182,6 +182,9 @@ private struct Reader: Sendable {
         var showingNoPicture = false
         // What the last connection left behind (frames, sound) goes; this one starts afresh.
         receiver.flush()
+        // Pictures shown on the camera's clock, a little behind its fastest arrivals (PlayoutClock): its own delay,
+        // learnt as it plays, from where this stream's last view left it.
+        var clock = PlayoutClock(delay: LearntDelay.get(url))
         let aac = session.audio.map { AACDepacketizer(format: $0.format) }
         player.begin(format: session.audio.flatMap { AudioOutput.format(config: $0.format["config"]) })
         report(.hasAudio(player.format != nil))
@@ -201,7 +204,8 @@ private struct Reader: Sendable {
                 if audio.muted {
                     player.mute()
                 } else if let aac, player.format != nil, let rtp = RTPPacket(packet.data) {
-                    for frame in aac.push(rtp) { player.play(frame) }
+                    // Behind the picture as the picture is behind the camera (and a little more), so they keep together.
+                    for frame in aac.push(rtp) { player.play(frame, behind: max(AudioOutput.delay, clock.delay)) }
                 }
                 continue
             }
@@ -223,8 +227,14 @@ private struct Reader: Sendable {
                         report(.size(CGSize(width: Int(d.width), height: Int(d.height))))
                     }
                 }
-                guard let format,
-                      let sample = Self.sample(unit.nalus, format: format, at: synchronizer.currentTime()) else { continue }
+                guard let format else { continue }
+                // Replayed (from before the view joined, for a quick start): shown at once, as they come. Live: on the
+                // camera's clock.
+                let now = synchronizer.currentTime()
+                let at = packet.replayed ? now
+                    : CMTime(seconds: clock.time(arrival: now.seconds, timestamp: unit.timestamp), preferredTimescale: 90000)
+                if !packet.replayed { LearntDelay.set(url, clock.delay) }
+                guard let sample = Self.sample(unit.nalus, format: format, at: at, immediately: packet.replayed) else { continue }
                 switch receiver.enqueueImmediately(CMReadySampleBuffer(unsafeBuffer: sample)) {
                 case .enqueued, .enqueuedWithDecodeFailures:
                     break
@@ -245,8 +255,8 @@ private struct Reader: Sendable {
         }
     }
 
-    /// One frame as length-prefixed NAL units, to be shown at `time` (and at once, as soon as it is decoded).
-    static func sample(_ nalus: [[UInt8]], format: CMVideoFormatDescription, at time: CMTime) -> CMSampleBuffer? {
+    /// One frame as length-prefixed NAL units, to be shown at `time` (or, `immediately`, as soon as it is decoded).
+    static func sample(_ nalus: [[UInt8]], format: CMVideoFormatDescription, at time: CMTime, immediately: Bool = true) -> CMSampleBuffer? {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(nalus.reduce(0) { $0 + $1.count + 4 })
         for nal in nalus {
@@ -270,7 +280,7 @@ private struct Reader: Sendable {
             allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: 1,
             sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
             sampleSizeArray: &size, sampleBufferOut: &sample) == noErr, let sample else { return nil }
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+        if immediately, let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
            CFArrayGetCount(attachments) > 0 {
             let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
             CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
@@ -340,6 +350,8 @@ private struct AudioPlayer {
     private var receiver: AVSampleBufferAudioRenderer.Receiver?
     /// The synchronizer time of the first frame since unmuting, and that frame's RTP timestamp.
     private var start: (time: CMTime, timestamp: UInt32)?
+    /// How far behind it began: begun again when the picture's delay has moved on from it.
+    private var startedBehind = 0.0
 
     init(synchronizer: AVSampleBufferRenderSynchronizer) {
         self.synchronizer = synchronizer
@@ -359,18 +371,20 @@ private struct AudioPlayer {
         start = nil
     }
 
-    /// One AAC frame (1024 samples), placed on the synchronizer's clock by its RTP timestamp.
-    mutating func play(_ frame: AACFrame) {
+    /// One AAC frame (1024 samples), placed on the synchronizer's clock by its RTP timestamp, `behind` seconds after
+    /// it came.
+    mutating func play(_ frame: AACFrame, behind: Double = AudioOutput.delay) {
         if receiver == nil { receiver = synchronizer.sampleBufferReceiver(adding: AVSampleBufferAudioRenderer()) }
         let now = synchronizer.currentTime()
         func time(_ start: (time: CMTime, timestamp: UInt32)) -> CMTime {
             let ticks = Int64(Int32(bitPattern: frame.timestamp &- start.timestamp))
             return start.time + CMTime(value: ticks, timescale: CMTimeScale(rate))
         }
-        // Begin (or begin again, after falling behind) a little after now.
-        if start == nil || time(start!) < now {
+        // Begin (or begin again, after falling behind, or when the picture's delay has moved) a little after now.
+        if start == nil || time(start!) < now || abs(behind - startedBehind) > 0.1 {
             if start != nil { receiver?.flush() }
-            start = (now + CMTime(seconds: AudioOutput.delay, preferredTimescale: 90000), frame.timestamp)
+            start = (now + CMTime(seconds: behind, preferredTimescale: 90000), frame.timestamp)
+            startedBehind = behind
         }
         guard let start, let format, let sample = AudioOutput.sample(frame.data, format: format, at: time(start)) else { return }
         _ = receiver?.enqueueImmediately(CMReadySampleBuffer(unsafeBuffer: sample))
@@ -395,4 +409,12 @@ extension LiveStream {
         }
         return URLComponents(string: url)?.host ?? url
     }
+}
+
+/// Each stream's live delay as last learnt (PlayoutClock), so a view opened again starts with it, not with a stall
+/// while it learns. For this run of the app only.
+enum LearntDelay {
+    private static let delays = Mutex<[String: Double]>([:])
+    static func get(_ url: String) -> Double { delays.withLock { $0[url] ?? 0 } }
+    static func set(_ url: String, _ delay: Double) { delays.withLock { $0[url] = delay } }
 }
