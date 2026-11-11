@@ -626,28 +626,15 @@ struct CameraSettingsPage: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                // Private first, a box of its own: it takes effect at once, as from the menu bar (held for Save, a
-                // camera could go on recording while it seemed private), so it's kept apart from what Save and Revert
-                // do, and its own words say so (a note under it read as being about what followed). Then the most
-                // used: name and address, HomeKit, then the login (rarely changed after setup), what the camera is,
-                // and the advanced.
-                Section {
-                    Toggle(isOn: Binding(get: { model.isPrivate(camera.id) },
-                                         set: { on in Task { await model.setPrivacy(camera.id, on) } })) {
-                        Text("Private")
-                        Text(model.isPrivateOnCameraOnly(camera.id)
-                             ? "Its own privacy mode is on: turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app"). Pond shows it as private meanwhile."
-                             : "Not recorded, shown live or in the Home app while it\u{2019}s on; the Home app shows it as off. Changes at once, without Save.")
-                    }
-                    .disabled(model.isPrivateOnCameraOnly(camera.id))
-                } header: {
-                    header
-                }
-
+                // Most used first: name and address, HomeKit, then the login (rarely changed after
+                // setup), what the camera is, and the advanced. (Private is in the toolbar: it takes effect at once, as
+                // from the menu bar, apart from what Save and Revert do.)
                 Section {
                     TextField("Name", text: $name)
                     TextField("Address", text: $host, prompt: Text("192.168.1.30"))
                         .focused($focused, equals: .address)
+                } header: {
+                    header
                 }
 
                 homeKitSection

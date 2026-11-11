@@ -129,6 +129,11 @@ struct SettingsWindow: View {
                 // A camera's page: its doctor, or its settings; and the page's own action, where it has one.
                 .toolbar {
                     if model.settingsPage.isCameras {
+                        // This Mac's camera: private or not, at once (as from the menu bar).
+                        if case let .camera(id) = model.settingsPage, let camera = cameras.first(where: { $0.id == id }) {
+                            // (In one glass with Show in Live, its disc marking it on as a chosen segment would.)
+                            ToolbarItem(placement: .primaryAction) { PrivacyToolbarButton(camera: camera) }
+                        }
                         ToolbarItem(placement: .primaryAction) { pageAction(cameras) }
                     } else {
                         // Held but unseen, with no glass: a toolbar with nothing in it is drawn shorter, and the
@@ -645,5 +650,28 @@ struct SidebarProbe: View {
         Color.clear.onGeometryChange(for: Double.self) { $0.frame(in: .global).minY } action: { y in
             Self.top[layer] = y
         }
+    }
+}
+
+/// A camera made private or not, at once (not part of its settings' Save): indigo glass while it's private, as
+/// private is drawn everywhere. Not while the camera's own privacy mode holds it (turned off in its own app).
+struct PrivacyToolbarButton: View {
+    @Environment(AppModel.self) private var model
+    let camera: Config.Camera
+
+    var body: some View {
+        let on = model.isPrivate(camera.id)
+        let onCamera = model.isPrivateOnCameraOnly(camera.id)
+        // A toolbar toggle: on, the system fills it (the shape its hover shows, in the toolbar's own glass), tinted
+        // indigo as private is drawn everywhere. Nothing drawn by hand, so it fits whatever macOS makes the toolbar.
+        Toggle(isOn: Binding(get: { on }, set: { value in Task { await model.setPrivacy(camera.id, value) } })) {
+            Label(on ? "Private" : "Make Private", systemImage: on ? "eye.slash.fill" : "eye.slash")
+        }
+        .tint(.indigo)
+        .help(onCamera
+              ? "Its own privacy mode is on: turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app")"
+              : on ? "Private: not recorded, shown live or in the Home app. Click to record it again (at once)."
+              : "Make \(camera.name) private: not recorded, shown live or in the Home app until you turn it off (at once)")
+        .disabled(onCamera)
     }
 }

@@ -1,6 +1,8 @@
 // For development and the docs: with POND_SNAPSHOTS=<folder> set, the app saves a picture of each view of
 // the main window, of each page of the Settings window, and of a camera's settings panel, then quits. The app draws its own windows, so no
-// screen-recording permission is needed (though translucent glass comes out flatter than on screen).
+// screen-recording permission is needed (though translucent glass comes out flatter than on screen). With
+// POND_SNAPSHOTS_ONLY=<names> as well (comma separated: "cameras-settings,events"), only the pictures whose names
+// begin with one of them are taken, and the rest (their waits too) skipped: for checking one change quickly.
 import AppKit
 import QuartzCore
 import PondCore
@@ -8,6 +10,16 @@ import SwiftUI
 
 @MainActor
 enum Snapshots {
+    /// The pictures asked for (POND_SNAPSHOTS_ONLY), or nil for all.
+    static let only: [String]? = ProcessInfo.processInfo.environment["POND_SNAPSHOTS_ONLY"]?
+        .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+    /// Whether any of these pictures (or reports) is to be taken.
+    static func wants(_ names: String...) -> Bool {
+        guard let only else { return true }
+        return names.contains { name in only.contains { name.hasPrefix($0) } }
+    }
+
     static func take(into dir: String, model: AppModel) async {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try? await Task.sleep(for: .seconds(1))
@@ -31,7 +43,7 @@ enum Snapshots {
             NSApp.terminate(nil)
             return
         }
-        for mode in Mode.allCases {
+        for mode in Mode.allCases where wants(mode.rawValue) {
             model.mode = mode
             try? await Task.sleep(for: .seconds(2.5))
             save(mainWindow(), to: "\(dir)/\(mode.rawValue).png")
@@ -39,14 +51,15 @@ enum Snapshots {
         model.mode = .live
         // The Settings window, each kind of page: this Pond's settings, the recorder, every camera, the first camera's
         // doctor and settings, and another Pond's camera.
-        for (page, name) in [(SettingsPage.general, "general"), (.storage, "storage"), (.remote, "remote"), (.advanced, "advanced")] {
+        for (page, name) in [(SettingsPage.general, "general"), (.storage, "storage"), (.remote, "remote"), (.advanced, "advanced")]
+        where wants("settings-\(name)") {
             model.showSettings(page)
             try? await Task.sleep(for: .seconds(1.5))
             save(settingsWindow(), to: "\(dir)/settings-\(name).png")
         }
         // HomeKit, made up (the demo serves nothing to it): one camera in the Home app and recording to Secure Video,
         // one being watched, a doorbell that won't ring, one waiting to be added; the rest not in it.
-        if let cameras = model.config?.cameras, cameras.count >= 4 {
+        if wants("settings-homekit"), let cameras = model.config?.cameras, cameras.count >= 4 {
             var status = HomeKitStatus()
             var recording = HomeKitStatus.Recording()
             recording.on = true
@@ -64,12 +77,14 @@ enum Snapshots {
             try? await Task.sleep(for: .seconds(1.5))
             save(settingsWindow(), to: "\(dir)/settings-homekit.png")
         }
-        model.showSettings(.cameras)
-        try? await Task.sleep(for: .seconds(2))
-        save(settingsWindow(), to: "\(dir)/cameras.png")
+        if wants("cameras.png", "sidebar") {
+            model.showSettings(.cameras)
+            try? await Task.sleep(for: .seconds(2))
+            if wants("cameras.png") { save(settingsWindow(), to: "\(dir)/cameras.png") }
+        }
         // The sidebar as AppKit has it (SidebarBounds): its bounds, kept after changing pages, and held to as its
         // divider is moved past each end; and, closed, opened again.
-        if let view = settingsWindow()?.contentView?.superview, let split = firstSplitView(in: view),
+        if wants("sidebar"), let view = settingsWindow()?.contentView?.superview, let split = firstSplitView(in: view),
            let item = sidebarItem(in: view) {
             let frame = settingsWindow()?.frame ?? .zero
             var report = "window \(Int(frame.width)) x \(Int(frame.height))"
@@ -110,12 +125,15 @@ enum Snapshots {
             report += "first row: settings layer \(settingsTop.map { String(format: "%.1f", $0) } ?? "?"), cameras layer \(camerasTop.map { String(format: "%.1f", $0) } ?? "?")\n"
             try? report.write(toFile: "\(dir)/sidebar.txt", atomically: true, encoding: .utf8)
         }
-        model.showSettings(.recorder)
-        try? await Task.sleep(for: .seconds(1.5))
-        save(settingsWindow(), to: "\(dir)/cameras-recorder.png")
+        if wants("cameras-recorder.png") {
+            model.showSettings(.recorder)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(settingsWindow(), to: "\(dir)/cameras-recorder.png")
+        }
         // How long pages take to lay out and draw as the window and the sidebar are resized: 20 steps of each, every
         // step laid out and drawn at once (as a live resize does, frame by frame); each step's time listed.
-        if let window = settingsWindow(), let root = window.contentView?.superview, let split = firstSplitView(in: root) {
+        if wants("resize-timing", "cameras-recorder-least", "log-", "scrolling"),
+           let window = settingsWindow(), let root = window.contentView?.superview, let split = firstSplitView(in: root) {
             func step(_ change: () -> Void) -> Double {
                 let start = CACurrentMediaTime()
                 change()
@@ -194,20 +212,30 @@ enum Snapshots {
             window.setFrame(frame, display: true)
         }
         if let first = model.config?.cameras.first {
-            model.showCamera(first.id, tab: .doctor)
-            try? await Task.sleep(for: .seconds(1.5))
-            save(settingsWindow(), to: "\(dir)/cameras-doctor.png")
-            model.showCamera(first.id, tab: .settings)
-            try? await Task.sleep(for: .seconds(1.5))
-            save(settingsWindow(), to: "\(dir)/cameras-settings.png")
+            if wants("cameras-doctor") {
+                model.showCamera(first.id, tab: .doctor)
+                try? await Task.sleep(for: .seconds(1.5))
+                save(settingsWindow(), to: "\(dir)/cameras-doctor.png")
+            }
+            if wants("cameras-settings.png") {
+                model.showCamera(first.id, tab: .settings)
+                try? await Task.sleep(for: .seconds(1.5))
+                save(settingsWindow(), to: "\(dir)/cameras-settings.png")
+            }
         }
-        if let remote = model.remotePonds.lazy.compactMap({ $0.cameras?.first }).first {
+        // A private camera's page too (its toolbar's Private on).
+        if wants("cameras-settings-private"), let shy = model.config?.cameras.first(where: { model.isPrivate($0.id) }) {
+            model.showCamera(shy.id, tab: .settings)
+            try? await Task.sleep(for: .seconds(1.5))
+            save(settingsWindow(), to: "\(dir)/cameras-settings-private.png")
+        }
+        if wants("cameras-remote"), let remote = model.remotePonds.lazy.compactMap({ $0.cameras?.first }).first {
             model.showSettings(.camera(remote.id))
             try? await Task.sleep(for: .seconds(1.5))
             save(settingsWindow(), to: "\(dir)/cameras-remote.png")
         }
         // A camera's settings panel, over the main window.
-        if let first = model.config?.cameras.first {
+        if wants("camera-panel"), let first = model.config?.cameras.first {
             mainWindow()?.makeKeyAndOrderFront(nil)
             model.editCameraSettings(first.id)
             try? await Task.sleep(for: .seconds(2))
