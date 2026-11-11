@@ -67,6 +67,10 @@ Where a camera's recordings stop for two minutes or more (not while it's private
 
 Otherwise it's "Not recorded", with nothing to say why. On the **Timeline**, a gap is an orange dashed stretch of the lane, why on hover; on a camera's doctor page, the last 24 hours' gaps (or "Recorded without a gap"); and in **Copy Report**.
 
+## The daily summary
+
+Once a day, at an hour chosen in Settings › General (8 am by default), a notification says what was recorded since the day before: **All well** ("Everything recorded since 8:00 AM yesterday: 3 cameras, no gaps"), or what wasn't and why, a line each ("Yard not recorded 3:12 AM – 4:40 AM: the camera didn't answer"; a gap every camera had at once, such as this Mac asleep, said once: "Nothing recorded…"). It can be sent every day, only when something wasn't recorded, or not at all; the latest is shown either way at the top of the doctor's **Every camera** page and in the menu bar. If this Mac was asleep or Pond closed at the hour, it comes at the first chance after, the same day. Private cameras are said to be private, not counted.
+
 ## Where findings show
 
 - **The toolbar's state** says when anything needs attention, and its overview lists it with the fix (Doctor, for a camera, opens it here).

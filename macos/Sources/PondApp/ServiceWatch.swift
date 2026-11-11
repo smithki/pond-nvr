@@ -58,6 +58,61 @@ final class ServiceWatch {
     }
     private var told: Problem?
     private var task: Task<Void, Never>?
+
+    // MARK: The daily summary
+
+    /// When it's sent: every day ("All well", or what wasn't recorded), only when something wasn't, or never.
+    enum DailyMode: String, CaseIterable, Identifiable {
+        case always, problems, off
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .always: "Every day"
+            case .problems: "Only when something wasn\u{2019}t recorded"
+            case .off: "Off"
+            }
+        }
+    }
+    static let dailyModeKey = "dailySummary"
+    static let dailyHourKey = "dailySummaryHour"
+    static let dailySentKey = "dailySummarySent"
+    static let dailyLastKey = "dailySummaryLast"
+    static let dailyNotification = "pond.daily"
+
+    static var dailyMode: DailyMode { AppDefaults.store.string(forKey: dailyModeKey).flatMap(DailyMode.init) ?? .always }
+    static var dailyHour: Int { (AppDefaults.store.object(forKey: dailyHourKey) as? Int) ?? 8 }
+
+    /// The latest summary (whether it was sent or not), for the doctor and the menu bar.
+    private(set) var lastSummary: DailySummary? = AppDefaults.store.data(forKey: ServiceWatch.dailyLastKey)
+        .flatMap { try? JSONDecoder().decode(DailySummary.self, from: $0) }
+
+    /// Once a day, at its hour (or the first chance after it the same day, if this Mac was asleep or Pond closed
+    /// then): what was recorded since the last, made and kept, and sent as the setting says.
+    func checkDaily(_ model: AppModel, now: Date = Date()) async {
+        guard DemoSession.scenario == nil, Self.dailyMode != .off, let config = model.config, !config.cameras.isEmpty,
+              let due = Calendar.current.date(bySettingHour: Self.dailyHour, minute: 0, second: 0, of: now),
+              now >= due, now.timeIntervalSince(due) < 12 * 3600 else { return }
+        let sent = AppDefaults.store.object(forKey: Self.dailySentKey) as? Date
+        if let sent, sent >= due { return }
+        AppDefaults.store.set(now, forKey: Self.dailySentKey)
+        // The day's gaps, read afresh.
+        await model.doctor.refresh(config: config, recording: model.isRecorderRunning)
+        let since = max(sent ?? .distantPast, now.addingTimeInterval(-86400))
+        let summary = DailySummary.make(cameras: config.cameras.map { ($0.id, $0.name) }, gaps: model.doctor.gaps,
+                                        privateNow: Set(config.cameras.map(\.id).filter { model.isPrivate($0) }),
+                                        since: since, until: now)
+        lastSummary = summary
+        AppDefaults.store.set(try? JSONEncoder().encode(summary), forKey: Self.dailyLastKey)
+        guard Self.dailyMode == .always || !summary.allWell else { return }
+        let content = UNMutableNotificationContent()
+        content.title = summary.title
+        content.body = summary.body
+        // A good day's quietly (no sound); one with gaps as the other notifications are.
+        if !summary.allWell { content.sound = .default }
+        content.userInfo = ["doctor": "cameras"]
+        Self.center?.removeDeliveredNotifications(withIdentifiers: [Self.dailyNotification])
+        Self.center?.add(UNNotificationRequest(identifier: Self.dailyNotification, content: content, trigger: nil)) { _ in }
+    }
     static let notification = "pond.service"
     /// Notifications, in the app (not elsewhere, as in tests: outside an app bundle the centre throws).
     static var center: UNUserNotificationCenter? {
@@ -77,6 +132,7 @@ final class ServiceWatch {
                 model.refreshService()
                 let now = await Self.check(model)
                 self.update(now)
+                await self.checkDaily(model)
                 // The other Ponds every five minutes (each asked over a session of its own, closed after).
                 if round % 10 == 0, !model.otherPonds.isEmpty,
                    let found = await model.controlClient.ask(.init(camera: "", action: "remote.health"), timeout: 60).pondHealth {

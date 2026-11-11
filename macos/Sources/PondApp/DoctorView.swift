@@ -145,8 +145,30 @@ struct DoctorView: View {
                 Text("From what the recorder sees of each camera, kept for a week. Nothing more is asked of the cameras unless you run a check.")
                     .foregroundStyle(.secondary)
             }
+            dailySection
             macSection
             ThresholdsSection()
+        }
+    }
+
+    /// The latest daily summary (sent or not, as Settings › General says): all well, or what wasn't recorded.
+    @ViewBuilder
+    var dailySection: some View {
+        if let summary = model.watch.lastSummary {
+            Section {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: summary.allWell ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(summary.allWell ? .green : .orange)
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(summary.title).font(.headline)
+                        Text(summary.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("Daily summary, " + summary.at.formatted(.relative(presentation: .named)))
+            }
         }
     }
 

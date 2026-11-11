@@ -347,6 +347,8 @@ struct PondNameField: View {
 struct MenuBarSection: View {
     @AppStorage(MenuBarItem.key, store: AppDefaults.store) private var menuBarItem = true
     @State private var atLogin = OpenAtLogin.isOn
+    @AppStorage(ServiceWatch.dailyModeKey, store: AppDefaults.store) private var daily = ServiceWatch.DailyMode.always.rawValue
+    @AppStorage(ServiceWatch.dailyHourKey, store: AppDefaults.store) private var dailyHour = 8
     @State private var problem: String?
 
     var body: some View {
@@ -366,6 +368,27 @@ struct MenuBarSection: View {
             .disabled(DemoSession.scenario != nil)
             if let problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            Picker(selection: $daily) {
+                ForEach(ServiceWatch.DailyMode.allCases) { Text($0.title).tag($0.rawValue) }
+            } label: {
+                Text("Daily summary")
+                Text("What was recorded since the day before, as a notification: \u{201C}All well\u{201D}, or what wasn\u{2019}t and why.")
+            }
+            if daily != ServiceWatch.DailyMode.off.rawValue {
+                // Set in under the summary, as part of it.
+                LabeledContent {
+                    Picker("At", selection: $dailyHour) {
+                        ForEach(0 ..< 24, id: \.self) { hour in
+                            Text(Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())?
+                                .formatted(date: .omitted, time: .shortened) ?? "\(hour):00").tag(hour)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                } label: {
+                    Text("At").padding(.leading, FoldRow.indent)
+                }
             }
         } header: {
             Text("Watching the recorder")

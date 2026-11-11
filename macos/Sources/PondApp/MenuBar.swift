@@ -88,6 +88,10 @@ struct MenuBarMenu: View {
         let items = model.attention.filter { $0.level >= .warning }
         if items.isEmpty {
             Text(model.recorderWords)
+            // The latest daily summary, in a line: all well, or that something wasn't recorded (the doctor has it).
+            if let summary = model.watch.lastSummary, Date().timeIntervalSince(summary.at) < 36 * 3600 {
+                Text("\(summary.allWell ? "All well" : "Not everything recorded") at \(summary.at.formatted(date: .omitted, time: .shortened))")
+            }
         } else {
             ForEach(items.prefix(5)) { Text($0.title) }
             if items.count > 5 { Text("and \(items.count - 5) more") }
