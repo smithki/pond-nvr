@@ -1,0 +1,29 @@
+# Every commit in a pull request signed off: a "Signed-off-by:" line with its author's name and email, the Developer
+# Certificate of Origin's (developercertificate.org; CONTRIBUTING.md, Signing off). Reads the commits only (nothing of
+# the pull request's is run), so it needs no secrets and runs as well for a fork's. Commits by GitHub Apps (the
+# appcast's and the models' pull requests, by pond-nvr-bot) are their own: they're skipped.
+name: Sign-off
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  sign-off:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Every commit signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-sign-off.sh "$BASE" "$HEAD"

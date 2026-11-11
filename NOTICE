@@ -16,7 +16,8 @@ version 3 (LICENSE). The parts depend on each other in one direction only, from 
 nothing of the others, so it can be used on its own under the MIT License; the others use protocol/ under it.
 An app that speaks Pond's protocol, using protocol/ and none of the AGPL parts, needn't be under the AGPL.
 
-Contributions are accepted under the Pond Contributor License Agreement (CLA.md).
+Contributions are licensed under the licence of the part they go into, each commit signed off under the Developer
+Certificate of Origin (CONTRIBUTING.md); there's no contributor agreement.
 
 Pond's brand is not under these licences: the name "Pond" and "Pond NVR", the logo (brand/) and the app's icon
 (macos/app/AppIcon.icon) are Ian K Smith's, all rights reserved. The licences let anyone use, change and share the

@@ -37,7 +37,7 @@ before a job starts (required reviewers).
 ## pond-nvr-bot
 
 One GitHub App, "pond-nvr-bot", does what workflows can't with their own token (which reaches only its own repository):
-today, uploading search's models to `pond-models`; later perhaps the CLA check's comments or a downloads feed. It's
+today, uploading search's models to `pond-models`; later perhaps a downloads feed. It's
 meant to grow, so these hold for every job given to it:
 
 - **Each job asks for only what it needs.** A workflow mints its own token for the run (`actions/create-github-app-token`)
@@ -82,8 +82,8 @@ meant to grow, so these hold for every job given to it:
 - **CODEOWNERS** (`.github/CODEOWNERS`): what handles the keys, makes and publishes releases, and says what Pond
   downloads and trusts (the workflows, the release and model scripts, the locks, the manifest and appcast, the app's
   Info.plist): a pull request touching them needs the maintainer's review.
-- **Outside contributions**: not merged until the CLA's review and its check (CONTRIBUTING.md); an outside
-  contributor's pull request runs no workflow until approved, and none of them names an environment.
+- **Outside contributions**: each commit signed off (CONTRIBUTING.md; the Sign-off workflow, which only reads the
+  commits); an outside contributor's pull request runs no workflow until approved, and none of them names an environment.
 - **Required reviewers** on `release` and `models` (the maintainer): a job needing their keys waits for approval.
   (`scripts/ci-secrets.sh` keeps them, as whoever runs it.)
 - **GitHub's own checks**: Dependabot alerts, secret scanning with push protection, and private vulnerability
