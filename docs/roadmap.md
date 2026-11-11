@@ -94,13 +94,8 @@ A backlog: small, contained problems seen in use, each worth a fix but not a goa
 
 | Fix | Notes |
 | --- | --- |
-| Open at login off by default | Pond is a recorder that should be running; off by default contradicts the notifications that say when it isn't. On by default, or asked about on first run. |
-| "Something." as an event's description | The language model sometimes answers with nothing useful ("Something.") for a Person event; such answers fall back to one made from what's known ("A person in the garage"). |
 | Developer lines in the Recorder log | Timing lines meant for debugging ("on the recording's clock…", from CameraWatcher) and "Recording (process N)" are shown to everyone; kept for `pond` and the doctor's report, left out of the app's log. |
 | Recorder log: slow rewrap, last line cut | Below about 1014 pt wide the log is slow to rewrap while resizing, and its last line is cut off at the bottom. |
-| Empty doctor charts look broken | A chart with nothing in the last 24 hours shows as an empty frame; it says "None in the last 24 hours". |
-| The camera panel mixes immediate and saved | Private takes effect at once while the rest wait for Save; one way for the panel (each change at once, or Private set apart from what's saved). |
+| The camera panel mixes immediate and saved | Private takes effect at once while the rest wait for Save. Decided (2026-11-11): Private set apart, a control of its own at the panel's top, and the rest kept with Save. |
 | Remote Access's rough edges | Three buttons per device where one menu would do; "Reachable through 127.0.0.1" (an address that means nothing to the reader, and isn't how others reach it); a footer that sends readers to "deploy/ in Pond's source". |
-| Icon-only toolbar buttons | "+" and others have no label or tooltip; each gets a tooltip, and a label where there's room. |
-| An event's kind badge covers the camera's timestamp | On event pictures the badge sits over the camera's own clock overlay; moved to a corner it doesn't cover, or made smaller. |
 

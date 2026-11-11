@@ -69,7 +69,7 @@ targets.append(.testTarget(name: "WatchTests", dependencies: ["Watch", "Detectio
 targets.append(.testTarget(name: "SoakTests", dependencies: ["Watch", "HAPCamera", "PondCore"]))
 // Understanding what was seen: a sentence an event (the Mac's own language model), and embeddings of pictures and
 // words alike (SigLIP 2), for search.
-targets.append(.target(name: "Understanding"))
+targets.append(.target(name: "Understanding", dependencies: ["PondCore"]))
 targets.append(.testTarget(name: "UnderstandingTests", dependencies: ["Understanding"], resources: [.copy("Fixtures")]))
 commandDependencies += ["PondMac", "HAPCamera", "HAP", "Devices", "Health", "Detection", "Watch", "Understanding", "Remote", "Demo",
                         .product(name: "PondProtocol", package: "protocol")]

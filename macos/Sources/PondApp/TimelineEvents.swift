@@ -181,7 +181,8 @@ struct EventSource: Sendable {
         // Each one's sentence (the service's, once it's written one: what's in the picture, in words) stands for it;
         // until then, what was found.
         let understood = store.understanding(since: from)
-        let described = understood.compactMapValues { $0.description.flatMap { $0.isEmpty ? nil : $0 } }
+        // (Not one that says nothing, "Something.", kept from before such were left out.)
+        let described = understood.compactMapValues { $0.description.flatMap { EventDescription.saysNothing($0) ? nil : $0 } }
         // What the user's said of events, to judge these by: those like the dismissed, quieted.
         let judge = EventJudge(feedback: store.feedback())
         return store.events(since: from).filter { $0.event.start < to }.map { kept in

@@ -453,6 +453,7 @@ final class AppModel {
     /// Saves a new camera and its password. Returns false (with an alert) if either could not be saved.
     func add(_ camera: Config.Camera, password: String) -> Bool {
         guard let config else { return false }
+        let first = config.cameras.isEmpty
         if config.cameras.contains(where: { $0.id == camera.id }) {
             alert = "There is already a camera with the ID \(camera.id)."
             return false
@@ -466,6 +467,12 @@ final class AppModel {
             alert = "The password couldn\u{2019}t be saved: \(error)"
             return false
         }
+        // The first camera: Pond is a recorder now, and should be running after a restart (a power cut, an update),
+        // so it opens at login, once, as it's set up; turned off after, it stays off. (Not a demo's copy.)
+        if first, DemoSession.scenario == nil, !AppDefaults.store.bool(forKey: Self.openAtLoginOfferedKey) {
+            AppDefaults.store.set(true, forKey: Self.openAtLoginOfferedKey)
+            if !OpenAtLogin.isOn { _ = OpenAtLogin.set(true) }
+        }
         // Recorded from now (the running service takes it on with the settings' reload, the others going on), and
         // the live view says it is starting rather than that it isn't recording.
         recordingStarted[camera.id] = Date()
@@ -474,6 +481,9 @@ final class AppModel {
         Task { await identify(camera.id) }
         return true
     }
+
+    /// Open at login has been turned on for this Mac's first camera (once: what's chosen after is kept).
+    static let openAtLoginOfferedKey = "openAtLoginOffered"
 
     /// When a camera was added (and its recording began), for the time its first minute takes to be saved.
     var recordingStarted: [String: Date] = [:]

@@ -362,7 +362,7 @@ struct MenuBarSection: View {
                 atLogin = OpenAtLogin.isOn
             })) {
                 Text("Open at login")
-                Text("After a restart (a power cut, say), you\u{2019}re told if Pond isn\u{2019}t recording.")
+                Text("After a restart (a power cut, say), you\u{2019}re told if Pond isn\u{2019}t recording. On from the first camera added.")
             }
             // (Not the demo's copy of Pond: the real one is what opens at login.)
             .disabled(DemoSession.scenario != nil)

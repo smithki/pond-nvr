@@ -5,6 +5,7 @@
 // there are no sentences; everything else works, and events show what was found instead.
 import CoreGraphics
 import Foundation
+import PondCore
 import FoundationModels
 
 public struct Describer: Sendable {
@@ -56,7 +57,9 @@ public struct Describer: Sendable {
                 Attachment(closeUp).label("A closer look at what moved")
             }
         }
-        return Self.tidy(response.content)
+        let sentence = Self.tidy(response.content)
+        // An answer that says nothing ("Something.") is no description: the event's said from what was found instead.
+        return EventDescription.saysNothing(sentence) ? "" : sentence
     }
 
     /// Whether a failure's for good (the picture won't be described: declined, or it can't be read as asked), or

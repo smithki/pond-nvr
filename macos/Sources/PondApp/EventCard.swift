@@ -144,7 +144,8 @@ struct EventPicture: View {
                     }
                 }
             }
-            .overlay(alignment: .topLeading) { KindBadge(event: event).padding(8) }
+            // Small, in the top-right corner: the top-left is where many cameras print their clock.
+            .overlay(alignment: .topTrailing) { KindBadge(event: event, compact: true).padding(6) }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .task(id: event.snapshot) {
                 guard image == nil, let url = event.snapshot, event.pond == nil else { return }
@@ -160,19 +161,22 @@ struct EventPicture: View {
 
 struct KindBadge: View {
     let event: TimelineEvent
+    /// Its symbol only (its word on hover), covering as little of the picture as it can.
+    var compact = false
 
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: event.kind.symbol)
-            Text(event.kind.title)
+            if !compact { Text(event.kind.title) }
             if event.ongoing { Text("Now").foregroundStyle(.red) }
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.white)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, compact && !event.ongoing ? 5 : 8)
+        .padding(.vertical, compact && !event.ongoing ? 5 : 4)
         // A plain capsule, not glass: there's one on every card, and glass on each is costly to redraw as they move.
         .background(event.kind.color.opacity(0.85), in: Capsule())
+        .help(compact ? event.kind.title : "")
     }
 }
 

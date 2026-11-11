@@ -350,7 +350,7 @@ struct ContentView: View {
             // would rebuild Add Camera's glass each time), showing the cameras found when there are some.
             ToolbarItem(placement: .primaryAction) { FindCamerasButton() }
             ToolbarItem(placement: .primaryAction) {
-                Button {
+                let add = Button {
                     // Find Cameras' card closed: Add Camera lists the cameras on the network too.
                     withAnimation(.snappy(duration: 0.3)) { model.showingFoundCameras = false }
                     model.addingCamera = true
@@ -359,6 +359,13 @@ struct ContentView: View {
                 }
                 .help("Add a camera")
                 .disabled(model.config == nil)
+                // Its words beside its "+" until there's a camera (the first thing to do, said where it's done); a
+                // bare "+" after.
+                if model.config?.cameras.isEmpty == true {
+                    add.labelStyle(.titleAndIcon)
+                } else {
+                    add
+                }
             }
         }
         .toolbar(removing: .title)

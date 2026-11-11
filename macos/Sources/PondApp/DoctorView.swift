@@ -408,6 +408,7 @@ struct DayCharts: View {
                 .chartYScale(domain: .automatic(includesZero: true))
                 .chartXScale(domain: Self.day)
                 .chartXAxis { Self.hours }
+                .overlay { if !samples.contains(where: { $0.fps != nil }) { Self.empty("No video in the last 24 hours") } }
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Interruptions an hour").font(.caption).foregroundStyle(.secondary)
@@ -417,8 +418,21 @@ struct DayCharts: View {
                 }
                 .chartXScale(domain: Self.day)
                 .chartXAxis { Self.hours }
+                // None: said, rather than an empty frame that looks as if it failed to draw.
+                .overlay { if troubles.isEmpty { Self.empty("None in the last 24 hours") } }
             }
         }
+    }
+
+    /// What an empty chart says, over its middle (clear of its hour labels).
+    static func empty(_ words: String) -> some View {
+        Text(words)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            // (Clear of the hour lines behind it.)
+            .padding(.horizontal, 6)
+            .background(.background, in: RoundedRectangle(cornerRadius: 4))
+            .padding(.bottom, 18)
     }
 }
 
