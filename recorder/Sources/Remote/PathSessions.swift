@@ -138,19 +138,44 @@ public final class PathSessions: @unchecked Sendable {
         /// Each live stream's own, when a session carries several: by the stream's SSRC (in the clear in each packet: an
         /// RTP packet's at its 9th byte, a report about it, which its viewer sends as that SSRC, at its 5th).
         private var routes: [UInt32: @Sendable ([UInt8]) -> Void] = [:]
+        /// Media that came before anything took it: a stream's first packets (its keyframe, replayed from the camera's
+        /// latest) are sent as soon as `live.start` is answered, and can arrive before the answer has, so before the
+        /// viewer knows its SSRC. Kept a moment, by SSRC, and handed to the stream's route ahead of what comes next.
+        private var early: [UInt32: [(at: Date, bytes: [UInt8])]] = [:]
+        private var earlyCount = 0
+        /// How many are kept at most (a keyframe is a few hundred packets at most), and for how long.
+        static let earlyLimit = 1000, earlyFor: TimeInterval = 5
 
         /// A stream's packets (or the reports about it) to `take`, from now on; nil: no longer.
         public func route(_ ssrc: UInt32, to take: (@Sendable ([UInt8]) -> Void)?) {
             lock.withLock { routes[ssrc] = take }
         }
 
-        /// Whom a media packet is for: its stream's route, else whatever takes the session's media.
-        func taker(of bytes: [UInt8]) -> (@Sendable ([UInt8]) -> Void)? {
+        /// Whom a media packet is for (its stream's route, else whatever takes the session's media), with any of its
+        /// stream's that came before the route was set, to be taken first. Nil: nothing takes it yet (kept a moment).
+        func taker(of bytes: [UInt8], now: Date = Date()) -> (take: @Sendable ([UInt8]) -> Void, earlier: [[UInt8]])? {
             lock.withLock {
-                guard !routes.isEmpty, bytes.count >= 12 else { return _media }
+                guard bytes.count >= 12 else { return _media.map { ($0, []) } }
                 let at = (200 ... 204).contains(bytes[1]) ? 4 : 8
                 let ssrc = UInt32(bytes[at]) << 24 | UInt32(bytes[at + 1]) << 16 | UInt32(bytes[at + 2]) << 8 | UInt32(bytes[at + 3])
-                return routes[ssrc] ?? _media
+                if let route = routes[ssrc] {
+                    let kept = early.removeValue(forKey: ssrc) ?? []
+                    earlyCount -= kept.count
+                    return (route, kept.filter { now.timeIntervalSince($0.at) <= Self.earlyFor }.map(\.bytes))
+                }
+                if let _media { return (_media, []) }
+                if earlyCount >= Self.earlyLimit {
+                    // Full: what's too old to be wanted goes; if nothing is, this packet does.
+                    for (key, packets) in early {
+                        let fresh = packets.filter { now.timeIntervalSince($0.at) <= Self.earlyFor }
+                        earlyCount -= packets.count - fresh.count
+                        early[key] = fresh.isEmpty ? nil : fresh
+                    }
+                    guard earlyCount < Self.earlyLimit else { return nil }
+                }
+                early[ssrc, default: []].append((now, bytes))
+                earlyCount += 1
+                return nil
             }
         }
 
@@ -168,7 +193,9 @@ public final class PathSessions: @unchecked Sendable {
             case PathSessions.pong where bytes.count == 2:
                 lock.withLock { pongs[bytes[1]] = Date() }
             case 128 ... 191:
-                taker(of: bytes)?(bytes)
+                guard let (take, earlier) = taker(of: bytes) else { break }
+                for packet in earlier { take(packet) }
+                take(bytes)
             default:
                 break
             }

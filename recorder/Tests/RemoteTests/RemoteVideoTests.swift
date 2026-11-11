@@ -110,6 +110,7 @@ import Testing
                 seen.lock.withLock { seen.keyframeWithParameterSets = true }
             }
         }
+        viewer.start()
         // Three seconds of it: about 30 pictures, from its first keyframe on.
         try await Task.sleep(for: .seconds(3))
         let counts = viewer.received
@@ -196,6 +197,7 @@ import Testing
         viewer.picture = { nalus, keyframe, _ in
             if keyframe, let sps = nalus.first, let info = H264SPS(nal: sps) { size.lock.withLock { size.seen = (info.width, info.height) } }
         }
+        viewer.start()
         try await Task.sleep(for: .seconds(3))
         #expect(viewer.received.pictures >= 10, "\(viewer.received)")
         // Encoded again at the size asked for (the camera's is 160×120).

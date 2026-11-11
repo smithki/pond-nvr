@@ -166,7 +166,8 @@ public final class LiveViewer: @unchecked Sendable {
     /// Each RTP packet as it arrives, decrypted (for passing on as a camera's stream is: the app's live view).
     public var packet: (@Sendable (_ rtp: [UInt8]) -> Void)?
 
-    /// For a stream the other side's answered `live.start` with.
+    /// For a stream the other side's answered `live.start` with. Nothing's taken until `start`, so that what's set to
+    /// take its pictures and packets (`picture`, `packet`) is there for the first.
     public init?(session: PathSessions.Session, answer: LiveAnswer) {
         guard let keys = session.keys else { return nil }
         self.session = session
@@ -175,6 +176,11 @@ public final class LiveViewer: @unchecked Sendable {
         // The side being reached's video key, both ways (its stream, and these reports about it).
         srtp = SRTPReceiver(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
         reports = SRTPSender(masterKey: keys.videoReceive.key, masterSalt: keys.videoReceive.salt)
+    }
+
+    /// Taking the stream from now on (with what's come of it already: PathSessions keeps it a moment), and reporting
+    /// on it.
+    public func start() {
         session.route(answer.ssrc) { [weak self] bytes in self?.arrived(bytes) }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "pond.viewer"))
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
@@ -293,6 +299,7 @@ extension RemoteHost {
         }
         let keeper = VideoKeeper(file: file)
         viewer.picture = { nalus, keyframe, timestamp in keeper.add(nalus, keyframe: keyframe, timestamp: timestamp) }
+        viewer.start()
         try? await Task.sleep(for: .seconds(seconds))
         viewer.stop()
         _ = await session.ask("live.stop", timeout: 3)

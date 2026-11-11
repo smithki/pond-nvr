@@ -369,6 +369,7 @@ final class RemoteStream: PacketSource, @unchecked Sendable {
         video = SDP("m=video 0 RTP/AVP \(answer.payloadType)\r\na=rtpmap:\(answer.payloadType) \(answer.sent.encoding)/90000\r\na=fmtp:\(answer.payloadType) packetization-mode=1\r\n").video!
         depacketizer = VideoDepacketizer(codec: answer.sent)
         viewer.packet = { [weak self] rtp in self?.push(rtp) }
+        viewer.start()
     }
 
     private func push(_ rtp: [UInt8]) {
