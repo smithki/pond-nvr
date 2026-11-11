@@ -1,7 +1,8 @@
 Pond
 Copyright 2026 Ian K Smith
 
-Pond's own code is in four parts, each under its own licence (each folder has its LICENSE):
+Pond's own code is in four parts, and the website beside them, each under its own licence (each folder has its
+LICENSE):
 
   Folder       What it is                                              Licence
   -----------  ------------------------------------------------------  ----------
@@ -10,11 +11,13 @@ Pond's own code is in four parts, each under its own licence (each folder has it
   signaling/   pond-signal, the signaling service                      AGPL-3.0
   recorder/    the recorder and the pond command                       AGPL-3.0
   macos/       the Mac app, Pond NVR.app                               AGPL-3.0
+  web/         pond.camera: the website, its APIs, Sparkle's appcast   MIT
 
-Anything else in this repository (scripts, docs, the site) is under the GNU Affero General Public License,
+Anything else in this repository (scripts, docs) is under the GNU Affero General Public License,
 version 3 (LICENSE). The parts depend on each other in one direction only, from top to bottom: protocol/ uses
 nothing of the others, so it can be used on its own under the MIT License; the others use protocol/ under it.
-An app that speaks Pond's protocol, using protocol/ and none of the AGPL parts, needn't be under the AGPL.
+An app that speaks Pond's protocol, using protocol/ and none of the AGPL parts, needn't be under the AGPL. web/ uses
+none of the others.
 
 Contributions are licensed under the licence of the part they go into, each commit signed off under the Developer
 Certificate of Origin (CONTRIBUTING.md); there's no contributor agreement.

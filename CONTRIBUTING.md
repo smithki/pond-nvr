@@ -11,7 +11,8 @@ You keep the copyright in what you contribute, and license it under the licence 
 else's is there (each part's folder has its LICENSE; [NOTICE](NOTICE) has the table):
 
 - **`protocol/`**, Pond's network protocol: the MIT License. It's what lets any app speak Pond's protocol.
-- **Everything else** (`signaling/`, `recorder/`, `macos/`, the scripts, the docs, the site): the AGPL-3.0.
+- **`web/`**, pond.camera: the MIT License.
+- **Everything else** (`signaling/`, `recorder/`, `macos/`, the scripts, the docs): the AGPL-3.0.
 
 There's no agreement to sign. Pond's name, logo and icon aren't covered by these licences (NOTICE).
 

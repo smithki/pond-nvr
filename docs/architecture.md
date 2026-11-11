@@ -77,7 +77,7 @@ Everything else:
 | [`deploy/`](../deploy/README.md) | Running `pond-signal`, a relay (coturn) and a mesh (Headscale) on a server of one's own, with Docker |
 | [`scripts/`](../scripts/) | What `make` and CI run: releases, the models (fetching, converting, packaging, signing), the footage guard, CI's secrets |
 | [`models/`](../models/) | The lock files naming the models builds download (`detection.lock`, `search.lock`) and the search model's signing key; the models themselves are downloaded here, never committed |
-| [`web/`](../web/README.md) | pond.camera: the site, Sparkle's appcast, and the search model's signed manifest |
+| [`web/`](../web/README.md) | pond.camera: the site, Sparkle's appcast, and the search model's signed manifest. MIT, like `protocol/`; it uses none of the packages |
 | [`docs/`](./) | How Pond works and how it's made |
 | [`tests/`](../tests/README.md) | The Linux container `make test-docker` runs the tests in (the tests are in each package's `Tests/`) |
 | [`third-party/`](../third-party/) | Licence texts of what's built in or followed (copied into the app as `Licenses/`) |

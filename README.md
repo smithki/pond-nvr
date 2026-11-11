@@ -109,7 +109,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 
 ## License
 
-GNU Affero General Public License v3.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). The exception is Pond's network protocol, [`protocol/`](protocol/), which is under the MIT License ([protocol/LICENSE](protocol/LICENSE)) so that anything can speak it. It includes Ultralytics YOLO26 (AGPL-3.0) as its built-in detection model; other models can be used in its place ([docs/detection.md](docs/detection.md)).
+GNU Affero General Public License v3.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). The exceptions, under the MIT License: Pond's network protocol, [`protocol/`](protocol/) ([its LICENSE](protocol/LICENSE)), so that anything can speak it; and the website, [`web/`](web/) ([its LICENSE](web/LICENSE)). It includes Ultralytics YOLO26 (AGPL-3.0) as its built-in detection model; other models can be used in its place ([docs/detection.md](docs/detection.md)).
 
 Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) (each commit signed off, under the
 Developer Certificate of Origin). Security problems: [SECURITY.md](SECURITY.md), privately.

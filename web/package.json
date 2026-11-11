@@ -1,6 +1,7 @@
 {
   "name": "pond-site",
   "private": true,
+  "license": "MIT",
   "description": "pond.camera: Pond's website and the manifest Pond downloads its search model by",
   "scripts": {
     "dev": "next dev",
