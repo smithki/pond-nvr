@@ -111,7 +111,7 @@ final class ServiceWatch {
         if !summary.allWell { content.sound = .default }
         content.userInfo = ["doctor": "cameras"]
         Self.center?.removeDeliveredNotifications(withIdentifiers: [Self.dailyNotification])
-        Self.center?.add(UNNotificationRequest(identifier: Self.dailyNotification, content: content, trigger: nil)) { _ in }
+        try? await Self.center?.add(UNNotificationRequest(identifier: Self.dailyNotification, content: content, trigger: nil))
     }
     static let notification = "pond.service"
     /// Notifications, in the app (not elsewhere, as in tests: outside an app bundle the centre throws).

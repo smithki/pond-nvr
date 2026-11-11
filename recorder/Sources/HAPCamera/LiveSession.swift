@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import Ingest
 import PondCore
+import Synchronization
 
 /// Where a live stream's packets go, and its viewer's reports come from: a UDP socket to a HomeKit controller, or
 /// a remote session's path (Remote).
@@ -333,7 +334,9 @@ public final class LiveSession: @unchecked Sendable {
                     guard held + out.ahead >= out.settings.samplesPerPacket else { continue }
                     out.ahead += held - out.settings.samplesPerPacket
                     let packet = out.packetizer.packetize(aac: out.pending, timestamp: out.pendingTimestamp)
-                    out.socket.send(out.sender.protect(rtp: packet))
+                    // Held back as long as the picture is (PacedSender), so they keep together.
+                    let protected = out.sender.protect(rtp: packet), socket = out.socket
+                    pacer.enqueue(at: PacedSender.now + playout.withLock { $0.delay }) { socket.send(protected) }
                     out.sentPackets += 1
                     out.pending = []
                 }
@@ -358,6 +361,7 @@ public final class LiveSession: @unchecked Sendable {
             return (!stopped, budgetGrant)
         }
         grant?.release()
+        pacer.stop()
         if first { onEnd?() }
     }
 
@@ -365,9 +369,29 @@ public final class LiveSession: @unchecked Sendable {
         sendLock.withLock { socket.send(sender.protect(rtp: rtp)) }
     }
 
+    /// Sends to the viewer at set times: pictures on the camera's clock (`playout`), sound as far behind.
+    private let pacer = PacedSender()
+    /// When each picture goes out: on the camera's clock, a little behind the fastest its pictures have lately
+    /// arrived, so a camera's uneven delivery (a Wi-Fi camera's slow keyframes) doesn't reach the Home app as a burst
+    /// and a stall; learnt per camera stream, and kept for the next viewer.
+    private let playout = Mutex(PlayoutClock())
+
+    /// The time to send a live picture stamped `timestamp` (on the camera's clock) that came now.
+    private func sendTime(_ timestamp: UInt32) -> Double {
+        let url = source.url
+        return playout.withLock { clock in
+            let at = clock.time(arrival: PacedSender.now, timestamp: timestamp)
+            PlayoutClock.learnt(url, clock.delay)
+            return at
+        }
+    }
+
     private func stream() {
         defer { stop() }
         let base = UInt32.random(in: 0 ... .max)
+        // This camera stream's delay as last learnt (by an earlier viewer): its stalls covered from the start.
+        let learnt = PlayoutClock.learnt(source.url)
+        playout.withLock { $0 = PlayoutClock(delay: learnt) }
         // Timestamps carry on across reconnects, so the viewer sees one stream.
         var offset: UInt32 = 0
         var attempts = 0
@@ -437,7 +461,9 @@ public final class LiveSession: @unchecked Sendable {
                 let time = encoded.relative(frame.time)
                 let timestamp = base &+ startOffset &+ UInt32(truncatingIfNeeded: time)
                 let packets = self.sendLock.withLock { self.packetizer.packetize(frame.nalus, timestamp: timestamp) }
-                for p in packets { self.send(p) }
+                // (Its time on the camera's clock as the transcoder carries it, in 90 kHz ticks.)
+                let at = self.sendTime(UInt32(truncatingIfNeeded: frame.time))
+                self.pacer.enqueue(at: at) { for p in packets { self.send(p) } }
                 self.sendLock.withLock { self.lastTimestamp = timestamp }
                 encoded.count(packets.reduce(0) { $0 + $1.count })
             }
@@ -525,7 +551,9 @@ public final class LiveSession: @unchecked Sendable {
                     timestamp = base &+ offset &+ UInt32(truncatingIfNeeded: placed - first)
                 }
                 let packets = sendLock.withLock { packetizer.packetize(nalus, timestamp: timestamp) }
-                for p in packets { send(p) }
+                // Replayed: at once (a blink to catch up); live: on the camera's clock.
+                let at = packet.replayed ? PacedSender.now : sendTime(unit.timestamp)
+                pacer.enqueue(at: at) { [weak self] in for p in packets { self?.send(p) } }
                 sendLock.withLock { lastTimestamp = timestamp }
                 statsFrames += 1
                 statsBytes += packets.reduce(0) { $0 + $1.count }
@@ -604,6 +632,63 @@ private final class EncodedOutput: @unchecked Sendable {
         lock.withLock {
             defer { frames = 0; bytes = 0 }
             return (frames, bytes)
+        }
+    }
+}
+
+/// Sends things at set times (in `now`'s seconds), in time order, from a thread of its own: what's due goes at once.
+final class PacedSender: @unchecked Sendable {
+    static var now: Double { ProcessInfo.processInfo.systemUptime }
+
+    private let condition = NSCondition()
+    private var queue: [(at: Double, work: () -> Void)] = []
+    private var stopped = false
+
+    init() {
+        let thread = Thread { [weak self] in self?.run() }
+        thread.name = "pond homekit pacing"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+    }
+
+    deinit { stop() }
+
+    func enqueue(at: Double, _ work: @escaping () -> Void) {
+        condition.withLock {
+            guard !stopped else { return }
+            // After everything due no later (each stream's own are in order already).
+            let i = queue.lastIndex { $0.at <= at }.map { $0 + 1 } ?? 0
+            queue.insert((at, work), at: i)
+            condition.signal()
+        }
+    }
+
+    /// What's waiting is dropped (the viewer's gone).
+    func stop() {
+        condition.withLock {
+            stopped = true
+            queue = []
+            condition.signal()
+        }
+    }
+
+    private func run() {
+        while true {
+            condition.lock()
+            while !stopped, queue.first.map({ $0.at > Self.now }) ?? true {
+                if let next = queue.first {
+                    _ = condition.wait(until: Date().addingTimeInterval(next.at - Self.now))
+                } else {
+                    condition.wait()
+                }
+            }
+            if stopped {
+                condition.unlock()
+                return
+            }
+            let item = queue.removeFirst()
+            condition.unlock()
+            item.work()
         }
     }
 }

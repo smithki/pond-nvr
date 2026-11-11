@@ -6,6 +6,7 @@
 // last few seconds (the worst of them), up at once when they come later, down slowly when they don't, never past
 // `cap`. A camera that delivers evenly is shown almost as it arrives.
 import Foundation
+import Synchronization
 
 public struct PlayoutClock: Sendable {
     /// How far back lateness is looked at.
@@ -59,4 +60,12 @@ public struct PlayoutClock: Sendable {
         lastShown = shown
         return shown
     }
+}
+
+extension PlayoutClock {
+    private static let delays = Mutex<[String: Double]>([:])
+
+    /// A stream's delay as last learnt in this process (by its address): where its next view starts.
+    public static func learnt(_ url: String) -> Double { delays.withLock { $0[url] ?? 0 } }
+    public static func learnt(_ url: String, _ delay: Double) { delays.withLock { $0[url] = delay } }
 }
