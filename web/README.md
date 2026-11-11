@@ -6,7 +6,7 @@ built and served by Vercel from `main` (this folder is the project's root direct
 analytics.
 
 ```sh
-cd site
+cd web
 npm install
 npm run dev      # http://localhost:3000, reloading as you edit
 npm run build    # the site, as Vercel builds it (npm start serves it)

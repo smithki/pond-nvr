@@ -1,7 +1,7 @@
 #!/bin/sh
 # Publishes the model in models/search/ (just converted at REVISION) as the next version of search's picture model,
 # for the search model workflow: the lock says what it was made from, the archive goes to pond-models as a
-# release, and its signed entry goes first in pond.camera's manifest (site/data/search-models.json). What's
+# release, and its signed entry goes first in pond.camera's manifest (web/data/search-models.json). What's
 # published there is used by no Pond until the pull request with the manifest is merged.
 #
 #   GH_TOKEN=… MODEL_SIGNING_KEY=… scripts/search-model-publish.sh REVISION
@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 REVISION=${1:?usage: search-model-publish.sh REVISION}
 LOCK=models/search.lock
-MANIFEST=site/data/search-models.json
+MANIFEST=web/data/search-models.json
 MODELS_REPO=${MODELS_REPO:-smithki/pond-models}
 
 lock() { sed -n "s/^$1 = //p" "$LOCK"; }
@@ -52,7 +52,7 @@ EOF
 ENTRY=$(scripts/search-model-entry.sh)
 python3 - "$ENTRY" <<'EOF'
 import json, sys
-path = "site/data/search-models.json"
+path = "web/data/search-models.json"
 manifest = json.load(open(path))
 manifest["models"].insert(0, json.loads(sys.argv[1]))
 with open(path, "w") as f:

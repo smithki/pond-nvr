@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adds a published release to Pond's appcast (site/public/appcast.xml), the feed Sparkle reads for updates of the app
+"""Adds a published release to Pond's appcast (web/public/appcast.xml), the feed Sparkle reads for updates of the app
 (docs/release.md, Updates): its version and build number, Sparkle's signature of its disk image and its size (the
 release's Pond-VERSION.sparkle, made by make release), where to download it, and its notes (CHANGELOG.md's section,
 as HTML). Newest first; a version already there is replaced. Run by the appcast workflow when a release is published.

@@ -1,6 +1,6 @@
 # Signs the search model version models/search.lock names, for pond.camera's manifest: by hand, from the Actions tab,
 # on main (the models environment, which holds the model signing key, takes main only). The signed entry is
-# printed in the run's summary, to go into site/data/search-models.json; a signature isn't secret.
+# printed in the run's summary, to go into web/data/search-models.json; a signature isn't secret.
 # (docs/search.md, Published versions; docs/ci-security.md.)
 name: Sign a search model
 

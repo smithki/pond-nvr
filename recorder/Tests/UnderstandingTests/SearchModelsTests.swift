@@ -74,7 +74,7 @@ private let v1 = SearchModels.Entry(
     }
 
     @Test func pondCamerasManifestReadsAndOffersV1() throws {
-        let data = try Data(contentsOf: root.appendingPathComponent("site/data/search-models.json"))
+        let data = try Data(contentsOf: root.appendingPathComponent("web/data/search-models.json"))
         let manifest = try JSONDecoder().decode(SearchModels.Manifest.self, from: data)
         #expect(manifest.models.allSatisfy { $0.verifies() })
         #expect(SearchModels.choose(manifest, appVersion: "0.2.0")?.id == "siglip2-v1")

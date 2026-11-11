@@ -1,7 +1,7 @@
 #!/bin/sh
 # pond.camera's manifest entry for the version models/search.lock names, signed with the model signing key
 # (MODEL_SIGNING_KEY, base64: only the models environment has it, docs/ci-security.md) and checked against Pond's
-# public key (models/search-signing.pub) before it's printed, as JSON, for site/data/search-models.json.
+# public key (models/search-signing.pub) before it's printed, as JSON, for web/data/search-models.json.
 # Run by .github/workflows/search-model-sign.yml.
 set -eu
 cd "$(dirname "$0")/.."

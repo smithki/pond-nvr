@@ -1,4 +1,4 @@
-# Pond's appcast, the feed Sparkle offers updates of the app from (site/public/appcast.xml, served at
+# Pond's appcast, the feed Sparkle offers updates of the app from (web/public/appcast.xml, served at
 # pond.camera/appcast.xml): when a release is published on GitHub (its draft published by hand, after a look), its
 # entry is made from the release's own Pond-VERSION.sparkle (Sparkle's signature of its disk image, made by make
 # release) and the changelog, and pond-nvr-bot proposes it in a pull request. Merging it deploys pond.camera, and Pond
@@ -47,7 +47,7 @@ jobs:
             exit 0
           fi
           python3 scripts/appcast.py "$version" "$RUNNER_TEMP/Pond-$version.sparkle"
-          git diff --quiet site/public/appcast.xml || echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --quiet web/public/appcast.xml || echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: A token for this repository
         if: steps.entry.outputs.changed == 'true'
@@ -73,7 +73,7 @@ jobs:
           git config user.email "$id+$BOT@users.noreply.github.com"
           branch="appcast/$TAG"
           git checkout -b "$branch"
-          git add site/public/appcast.xml
+          git add web/public/appcast.xml
           git commit -m "Appcast: Pond $version"
           git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$branch"
           gh pr create --base main --head "$branch" --title "Appcast: Pond $version" --body "$(cat <<EOF

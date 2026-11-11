@@ -46,7 +46,7 @@ plist_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" m
 grep -q "^## $VERSION" CHANGELOG.md || fail "CHANGELOG.md has no \"## $VERSION\" section: say what's in it."
 # Sparkle offers an update by its build number (CFBundleVersion): higher than every release's in the appcast.
 BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" macos/app/Info.plist)
-LAST=$(grep -o '<sparkle:version>[0-9]*</sparkle:version>' site/public/appcast.xml 2>/dev/null | grep -o '[0-9]*' | sort -n | tail -1)
+LAST=$(grep -o '<sparkle:version>[0-9]*</sparkle:version>' web/public/appcast.xml 2>/dev/null | grep -o '[0-9]*' | sort -n | tail -1)
 [ -z "$LAST" ] || [ "$BUILD" -gt "$LAST" ] \
     || fail "macos/app/Info.plist's CFBundleVersion is $BUILD: it must be higher than the last release's, $LAST, for Sparkle to offer it."
 [ -n "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" macos/app/Info.plist 2>/dev/null)" ] \

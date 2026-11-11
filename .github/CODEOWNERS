@@ -11,8 +11,8 @@
 /scripts/search-model-*         @smithki
 /scripts/siglip-requirements.txt @smithki
 /models/                        @smithki
-/site/data/                     @smithki
-/site/public/appcast.xml        @smithki
+/web/data/                     @smithki
+/web/public/appcast.xml        @smithki
 /macos/app/Info.plist           @smithki
 /macos/app/Pond.entitlements    @smithki
 /recorder/Sources/Understanding/SearchModels.swift @smithki

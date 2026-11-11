@@ -63,7 +63,7 @@ differ slightly, and a version's embeddings must stay comparable with those ever
   its packages (`scripts/siglip-requirements.txt`, every one pinned, and its SHA-256), and the archive's URL, size
   and SHA-256.
 - **Where Pond learns of it**: pond.camera's manifest, `pond.camera/api/search-model`, built with the site from
-  `site/data/search-models.json`. Each entry (newest first) names a version, its format (the folder's layout) and the
+  `web/data/search-models.json`. Each entry (newest first) names a version, its format (the folder's layout) and the
   first Pond that reads it (`minimumApp`), its size and SHA-256, where to download it, and a signature.
 - **Why Pond trusts it**: the signature. Pond carries the model signing key's public half
   (`models/search-signing.pub`: `YElDtEdmCu8Lu4WWaU4RHAxrtd86pvwdd/p/BDSPuUk=`, Ed25519) and takes an entry only if

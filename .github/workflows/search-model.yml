@@ -136,7 +136,7 @@ jobs:
           git config user.email "$id+$BOT@users.noreply.github.com"
           branch="search-model/$VERSION"
           git checkout -b "$branch"
-          git add models/search.lock site/data/search-models.json
+          git add models/search.lock web/data/search-models.json
           git commit -m "Search model $VERSION" -m "$REASON"
           git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$branch"
           cat > "$RUNNER_TEMP/body.md" <<EOF
@@ -145,7 +145,7 @@ jobs:
           - **Made from:** \`$(lock source)\` at \`$(lock revision)\`, with $(lock packages).
           - **Checked:** SigLIPTests passed (its embeddings match SigLIP 2's own code).
           - **Compared with the published version:** lowest similarity $SIMILARITY (below 0.9995 counts as a real change).
-          - **Published to pond-models:** $(lock url) ($(lock size) bytes, SHA-256 \`$(lock sha256)\`), signed into \`site/data/search-models.json\`.
+          - **Published to pond-models:** $(lock url) ($(lock size) bytes, SHA-256 \`$(lock sha256)\`), signed into \`web/data/search-models.json\`.
 
           Merging deploys pond.camera's manifest: every Pond then downloads it within a week and **indexes all its events again** with it. If it isn't wanted, close this, and delete the \`$VERSION\` release from pond-models.
           EOF

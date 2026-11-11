@@ -121,7 +121,7 @@ and builds nothing (a minute on Linux, its *check* job). Publish the draft on Gi
 ## Updates
 
 Pond updates itself with [Sparkle](https://sparkle-project.org) (2.10.1, MIT): it asks pond.camera's appcast
-(`pond.camera/appcast.xml`, from `site/public/appcast.xml`) daily, or when asked (Pond › Check for Updates…, or
+(`pond.camera/appcast.xml`, from `web/public/appcast.xml`) daily, or when asked (Pond › Check for Updates…, or
 Settings › Advanced), and offers a newer version with its notes. It installs one only if its disk image is signed
 with Pond's update key (an EdDSA key; its public half is `SUPublicEDKey` in `macos/app/Info.plist`) and the app in it with
 the same Developer ID. Nothing about the Mac is sent with a check (`SUEnableSystemProfiling` off). After an update,

@@ -3,6 +3,6 @@
 recorder/Tests/HAPCameraTests/Fixtures/in-order.h264
 # A test pattern (ffmpeg's testsrc), five seconds, for the app's playback tests.
 macos/Tests/PondAppTests/Fixtures/five-seconds.mp4
-# The website's screenshots (site/): Pond's demo mode, made-up cameras and settings, no one's home.
-site/public/screenshots/homekit.jpg
-site/public/screenshots/doctor.jpg
+# The website's screenshots (web/): Pond's demo mode, made-up cameras and settings, no one's home.
+web/public/screenshots/homekit.jpg
+web/public/screenshots/doctor.jpg

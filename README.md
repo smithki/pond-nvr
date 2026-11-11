@@ -98,7 +98,7 @@ The log is `~/Library/Logs/Pond/pond.log`, also in Settings › Cameras › Reco
 - [docs/doctor.md](docs/doctor.md): the camera doctor: its findings, where they show, and Run Check.
 - [docs/demo.md](docs/demo.md): demo mode: made-up cameras to explore with, its scenarios, and using one in a bug report.
 - [docs/release.md](docs/release.md): making a release (signed, notarized, in a disk image)
-- [site/](site/README.md): pond.camera: the website, and the manifest and appcast Pond downloads by
+- [web/](web/README.md): pond.camera: the website, and the manifest and appcast Pond downloads by
 - [docs/remote.md](docs/remote.md): other Ponds, from away: pairing, how a connection is made, what each party sees; [deploy/](deploy/README.md): the signaling service (and an optional relay or mesh) to run yourself.
 - [docs/configuration.md](docs/configuration.md): the settings file and the commands that change it.
 - [docs/architecture.md](docs/architecture.md): the modules and how video travels through them.
