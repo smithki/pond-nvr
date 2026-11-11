@@ -216,6 +216,6 @@ final class RecordingSession: @unchecked Sendable {
             ? HomeKitStatus.Recording.Clip(at: began, seconds: Double(fragments * selected.fragmentLength) / 1000, bytes: bytes)
             : nil
         finished?(clip, reason)
-        log("HomeKit: recording stream \(streamID) closed\(reason.map { " (reason \($0))" } ?? ""): \(fragments) fragments, \(bytes / 1000) kB sent")
+        log("… HomeKit: recording stream \(streamID) closed\(reason.map { " (reason \($0))" } ?? ""): \(fragments) fragments, \(bytes / 1000) kB sent")
     }
 }

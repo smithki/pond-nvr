@@ -253,7 +253,7 @@ struct RecordingAndHomeKit: ServiceRunning {
         // A camera's stream that lost its framing, and was read on from its next packet (not reconnected): said.
         CameraSession.framingLost = { url, bytes in
             let camera = cameras.cameras.first { $0.main == url || $0.sub == url }
-            log.log(camera?.id ?? "pond", "· the stream lost its framing: \(bytes) bytes skipped to its next packet, without reconnecting")
+            log.log(camera?.id ?? "pond", "… the stream lost its framing: \(bytes) bytes skipped to its next packet, without reconnecting")
         }
         let relay = StreamRelayServer(path: StreamRelay.path(nextTo: statusPath), lookup: { url in
             // Another Pond's camera, shown beside this Mac's (no login: the session's its own).
@@ -275,7 +275,7 @@ struct RecordingAndHomeKit: ServiceRunning {
         // what the app's live views decode, counted as live viewing (until the app's been quiet half a minute).
         let budget = MediaBudget.shared
         budget.log = { line in log.log("pond", line) }
-        log.log("pond", "media engine: a budget of \(MediaBudget.words(budget.capacity)) (\(MediaBudget.chipName()))")
+        log.log("pond", "… media engine: a budget of \(MediaBudget.words(budget.capacity)) (\(MediaBudget.chipName()))")
         let appViews = AppLiveViews(budget: budget)
         controls.media = { request in
             switch request.action {

@@ -94,8 +94,6 @@ A backlog: small, contained problems seen in use, each worth a fix but not a goa
 
 | Fix | Notes |
 | --- | --- |
-| Developer lines in the Recorder log | Timing lines meant for debugging ("on the recording's clock…", from CameraWatcher) and "Recording (process N)" are shown to everyone; kept for `pond` and the doctor's report, left out of the app's log. |
 | Recorder log: slow rewrap, last line cut | Below about 1014 pt wide the log is slow to rewrap while resizing, and its last line is cut off at the bottom. |
-| The camera panel mixes immediate and saved | Private takes effect at once while the rest wait for Save. Decided (2026-11-11): Private set apart, a control of its own at the panel's top, and the rest kept with Save. |
-| Remote Access's rough edges | Three buttons per device where one menu would do; "Reachable through 127.0.0.1" (an address that means nothing to the reader, and isn't how others reach it); a footer that sends readers to "deploy/ in Pond's source". |
+| A flaky connection test | `PathFinderTests.aLossyNetworkStillConnects` (protocol/) passes alone in about a second, but failed once in a full `make test` after 16.6 s: its lossy network's timing is too tight when the Mac is busy. Its deadline made to suit a loaded machine, or its loss made deterministic. |
 

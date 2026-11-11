@@ -92,7 +92,7 @@ public final class VideoMemoryGuard: @unchecked Sendable {
         if now.timeIntervalSince(reported) >= Self.reportEvery {
             reported = now
             let (looks, taps) = CloserLook.Count.take()
-            log("video decoding: \(held) MB held, \(open) decoder\(open == 1 ? "" : "s") open; this hour, \(looks) closer look"
+            log("… video decoding: \(held) MB held, \(open) decoder\(open == 1 ? "" : "s") open; this hour, \(looks) closer look"
                 + "\(looks == 1 ? "" : "s") from \(taps) main stream\(taps == 1 ? "" : "s") opened; " + Self.describe(MediaBudget.shared.report))
         }
         if held >= stopAt {

@@ -296,7 +296,7 @@ public final class RecordingController: @unchecked Sendable {
         selected.onWrite = { [weak self] value throws(HAPStatus) in
             guard case let .tlv8(bytes) = value, let choice = SelectedRecording(bytes) else { throw .invalidValue }
             self?.change { $0.selected = bytes }
-            self?.log("HomeKit: the hub chose to record \(choice.width)×\(choice.height) at \(choice.fps) fps, \(choice.bitrate) kbit/s, a keyframe every \(choice.keyframeInterval) ms, \(choice.fragmentLength) ms fragments, profile \(choice.profile) level \(choice.level), sound codec \(choice.audioCodec) rate \(choice.sampleRate)")
+            self?.log("… HomeKit: the hub chose to record \(choice.width)×\(choice.height) at \(choice.fps) fps, \(choice.bitrate) kbit/s, a keyframe every \(choice.keyframeInterval) ms, \(choice.fragmentLength) ms fragments, profile \(choice.profile) level \(choice.level), sound codec \(choice.audioCodec) rate \(choice.sampleRate)")
             return nil
         }
         let audio = Characteristic(type: HAPType.recordingAudioActive, format: .uint8,
@@ -389,7 +389,7 @@ public final class RecordingController: @unchecked Sendable {
             }
             ending?.close(reason: message.body["reason"]?.int)
         case (.event, "ack"):
-            log("HomeKit: the hub acknowledged recording stream \(message.body["streamId"]?.int.map(String.init) ?? "?")")
+            log("… HomeKit: the hub acknowledged recording stream \(message.body["streamId"]?.int.map(String.init) ?? "?")")
         default:
             log("HomeKit: a dataSend \(message.topic) from the hub, not expected")
         }
@@ -466,7 +466,7 @@ public final class RecordingController: @unchecked Sendable {
             if mine { session.close(reason: nil) }
         }
         connection.send(message.response(status: 0, body: .dictionary([("status", .int(0))])))
-        log("HomeKit: the hub asked to record (\(message.body["reason"]?.string ?? "no reason given"))")
+        log("… HomeKit: the hub asked to record (\(message.body["reason"]?.string ?? "no reason given"))")
         session.start()
     }
 

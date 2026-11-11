@@ -33,7 +33,8 @@ struct RecorderView: View {
                                 .foregroundStyle(.orange)
                                 .help("Settings it works from changed since it started (process \(pid)). Restart it to use them.")
                         } else {
-                            Label("Recording (process \(pid))", systemImage: "record.circle.fill").foregroundStyle(.green)
+                            Label("Recording", systemImage: "record.circle.fill").foregroundStyle(.green)
+                                .help("The background recorder is running (process \(pid))")
                         }
                     case let .stopped(why):
                         Label("Not running: \(why)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)

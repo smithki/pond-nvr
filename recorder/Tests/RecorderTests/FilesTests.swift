@@ -111,7 +111,7 @@ final class TempFolder {
         #expect(!FileManager.default.fileExists(atPath: "\(dir.path)/continuous/porch/2026-01-07"))
         #expect(FileManager.default.fileExists(atPath: "\(dir.path)/continuous/porch/2026-01-09/13-00-00.mp4"))
         #expect(FileManager.default.fileExists(atPath: "\(dir.path)/.pond-storage"))
-        #expect(log.lines == ["retention: deleted 2 files, 0.0 GB"])
+        #expect(log.lines == ["retention: … deleted 2 files, 0.0 GB"])
         // A second pass has nothing to do and says nothing.
         #expect(RetentionSweeper(config: config, log: log).sweep(now: Self.now).deletedFiles == 0)
         #expect(log.lines.count == 1)

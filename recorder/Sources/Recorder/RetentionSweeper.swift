@@ -79,7 +79,7 @@ public struct RetentionSweeper {
             report.warnings += plan.warnings
         }
         if report.deletedFiles > 0 {
-            log.log("retention", String(format: "deleted %d file%@, %.1f GB", report.deletedFiles,
+            log.log("retention", String(format: "… deleted %d file%@, %.1f GB", report.deletedFiles,
                                         report.deletedFiles == 1 ? "" : "s", Double(report.freedBytes) / 1e9))
         }
         for line in report.warnings + report.failures { log.log("retention", line) }

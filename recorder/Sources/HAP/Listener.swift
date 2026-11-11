@@ -120,7 +120,7 @@ public final class HAPListener: @unchecked Sendable {
             switch state {
             case .ready:
                 self.port = listener.port?.rawValue
-                self.log?("HomeKit: \(self.name) listening on port \(listener.port?.rawValue ?? 0)")
+                self.log?("… HomeKit: \(self.name) listening on port \(listener.port?.rawValue ?? 0)")
             case let .failed(error):
                 self.log?("HomeKit: \(self.name) stopped: \(error)")
             default:

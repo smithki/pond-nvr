@@ -166,8 +166,11 @@ struct RemoteAccessView: View {
                 if showAdvanced {
                     Text(remote.mesh
                         ? "Connections are made over your mesh\u{2019}s tunnel alone: no public address is learned or offered, and no relay is used. Turn it on at both ends. Mesh ranges: Tailscale\u{2019}s (100.64.0.0/10, fd7a:115c:a1e0::/48) unless you give others, comma separated."
-                        : "Direct paths are tried first, IPv6 and IPv4. When none works, a fixed port forwarded on your router, or a relay of your own (coturn, in deploy/), gets through; the relay is used only then. Your own signaling server: deploy/ in Pond\u{2019}s source.")
+                        : "Direct paths are tried first, IPv6 and IPv4. When none works, a fixed port forwarded on your router, or a relay of your own, gets through; the relay is used only then.")
                         .foregroundStyle(.secondary)
+                    // Running one's own: the guide (not the source's folders, which mean nothing in the app).
+                    Link("Running your own signaling server or relay\u{2026}", destination: Self.guide)
+                        .font(.callout)
                 }
             }
         }
@@ -212,14 +215,20 @@ struct RemoteAccessView: View {
         }
     }
 
+    /// Remote access's guide: signaling, relays and meshes set up.
+    static let guide = URL(string: "https://github.com/smithki/pond-nvr/blob/main/docs/remote.md")!
+
     @ViewBuilder
     var statusLabel: some View {
+        // (The server that introduces devices is in the tooltip: its address says nothing about being reachable.)
         if let status, status.on, status.reachable {
-            Label("Reachable through \(status.signaling ?? "the signaling server")", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Label("Reachable from elsewhere", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                .help("Paired devices are introduced to this Mac by \(status.signaling ?? "the signaling server")")
         } else if let why = status?.problem {
             Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         } else if status?.on == true {
-            Label("Connecting to \(status?.signaling ?? "the signaling server")\u{2026}", systemImage: "circle.dotted").foregroundStyle(.secondary)
+            Label("Connecting\u{2026}", systemImage: "circle.dotted").foregroundStyle(.secondary)
+                .help("To \(status?.signaling ?? "the signaling server"), which introduces paired devices to this Mac")
         } else {
             Label("Starting\u{2026}", systemImage: "circle.dotted").foregroundStyle(.secondary)
         }
@@ -241,15 +250,28 @@ struct RemoteAccessView: View {
                 }
             }
             Spacer()
-            Button(testing == device.id ? "Trying\u{2026}" : "Try Connecting") { Task { await test(device) } }
-                .disabled(testing != nil)
-                .help("Finds a path to it now, and says how (or why not, and what would fix it).")
-            Button("Rename\u{2026}") {
-                newName = device.name
-                renaming = device
+            if testing == device.id {
+                ProgressView().controlSize(.small)
+                Text("Trying\u{2026}").foregroundStyle(.secondary)
             }
-            .help("What it\u{2019}s called here: in the toolbar, the camera rail and this list. (It keeps its own name.)")
-            Button("Remove\u{2026}") { removing = device }
+            // What can be done with it, in one menu (three buttons a row were a wall of them).
+            Menu {
+                Button("Try Connecting") { Task { await test(device) } }
+                    .disabled(testing != nil)
+                Button("Rename\u{2026}") {
+                    newName = device.name
+                    renaming = device
+                }
+                Divider()
+                Button("Remove\u{2026}", role: .destructive) { removing = device }
+            } label: {
+                Label("Actions", systemImage: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .labelStyle(.iconOnly)
+            .fixedSize()
+            .help("Try connecting to \(device.name) now (how, or why not), rename it here, or remove it")
         }
     }
 

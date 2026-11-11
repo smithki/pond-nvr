@@ -207,7 +207,7 @@ public final class CameraWatcher: @unchecked Sendable {
                         now = taken ?? arrived
                     }
                     if !toldDelay, let lag = arrivalLag, let recorded = StreamLatency.shared.recordedLag(camera) {
-                        say(String(format: "on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
+                        say(String(format: "… on the recording's clock: its pictures arrive %.2f s after their place there, detection's %.2f s after theirs; moved %+.2f s", recorded, lag, lag - recorded))
                         toldDelay = true
                     }
                     // The whole picture, and a closer look at what moves (at the main stream's resolution, once it's
