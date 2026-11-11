@@ -37,7 +37,7 @@ warning, offline as well. `make release` makes it from a clean commit, on a Mac 
 
 1. Say what's in it: a `## VERSION` section in `CHANGELOG.md` (the release's notes): what's been gathered under
    `## Unreleased` since the last one, under its version now.
-2. Set the version: `src/Sources/PondCore/Version.swift` (`"0.1.0"`, without `-dev`) and `app/Info.plist`
+2. Set the version: `recorder/Sources/PondCore/Version.swift` (`"0.1.0"`, without `-dev`) and `macos/app/Info.plist`
    (`CFBundleShortVersionString`, and `CFBundleVersion` one higher than the last release's). Commit.
 3. `make release VERSION=0.1.0`. It refuses, and says why, when anything above isn't so: changes not committed,
    versions that don't agree, no changelog section, no certificate or notarization login, no search model. Then it:
@@ -56,7 +56,7 @@ why.
 ## What goes in
 
 - **The hardened runtime**, which notarization requires, on every build (`make app` too), so what it stops shows in
-  everyday use first. The app asks for one entitlement (`app/Pond.entitlements`): the microphone, for talking through
+  everyday use first. The app asks for one entitlement (`macos/app/Pond.entitlements`): the microphone, for talking through
   a camera's speaker. `pond` and `pond-signal` ask for none.
 - **The detection model, built in** (YOLO26 small, about 18 MB): a release finds events from the first one, offline
   too. It's the published version `models/detection.lock` names, downloaded from pond-models and checked against the
@@ -64,7 +64,7 @@ why.
 - **Search's picture model, not built in**: Pond downloads it itself on first run (about 350 MB), the version
   pond.camera's signed manifest names, and keeps it up to date ([search.md](search.md#published-versions)). Until
   it's there, search goes by what was found and the descriptions. (`make app` builds it in, for development.)
-- **The licences**: `LICENSE`, `NOTICE` and `licenses/` (the texts the notices refer to) in the app's Resources.
+- **The licences**: `LICENSE`, `NOTICE` and `third-party/` (the texts the notices refer to, as `Licenses/`) in the app's Resources.
 - The bundle identifier `camera.pond` (from pond.camera): settings, the Keychain items and the login service are
   known by it, so it stays.
 
@@ -123,11 +123,11 @@ and builds nothing (a minute on Linux, its *check* job). Publish the draft on Gi
 Pond updates itself with [Sparkle](https://sparkle-project.org) (2.10.1, MIT): it asks pond.camera's appcast
 (`pond.camera/appcast.xml`, from `site/public/appcast.xml`) daily, or when asked (Pond › Check for Updates…, or
 Settings › Advanced), and offers a newer version with its notes. It installs one only if its disk image is signed
-with Pond's update key (an EdDSA key; its public half is `SUPublicEDKey` in `app/Info.plist`) and the app in it with
+with Pond's update key (an EdDSA key; its public half is `SUPublicEDKey` in `macos/app/Info.plist`) and the app in it with
 the same Developer ID. Nothing about the Mac is sent with a check (`SUEnableSystemProfiling` off). After an update,
 the app restarts the recorder on its new copy of pond (it was still running the old one). Not in a demo.
 
-- **The key**, once: `src/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account pond` makes it, keeps the private
+- **The key**, once: `macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account pond` makes it, keeps the private
   half in the login keychain and prints the public half, for `SUPublicEDKey`. Kept in the password manager too
   (`generate_keys --account pond -x FILE` exports it), and in the `release` environment as `SPARKLE_ED_KEY`
   (`scripts/ci-secrets.sh`).

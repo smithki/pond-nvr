@@ -1,6 +1,6 @@
 # What a Docker build of pond-signal (deploy/) doesn't need: local builds (macOS's, which would also confuse
 # Linux's), the app, the search model, and the history.
-src/.build
+*/.build
 .build
 dist
 models

@@ -40,14 +40,14 @@ swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks 
 **Trying it without a camera.** Demo mode (`make demo`, [demo.md](demo.md)) has made-up cameras recorded, watched and controlled like real ones, a second home to reach, H.265 cameras, and scenarios for what goes wrong, in a world of their own.
 
 **Probes against real recordings.** Two tests run only when pointed at a real setup, for questions the made-up streams can't answer:
-- `BoxTimingProbe` (Watch): how far detection's boxes are out from the recorded picture, by running the model again on recordings around each sighting. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> POND_PROBE_DB=<pond.sqlite> POND_MODELS=<models> swift test --package-path src --filter BoxTimingProbe`.
-- `RealLiveEdgeProbe` (the app): where the timeline's live edge sits on a camera's real recordings. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> swift test --package-path src --filter RealLiveEdgeProbe`.
+- `BoxTimingProbe` (Watch): how far detection's boxes are out from the recorded picture, by running the model again on recordings around each sighting. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> POND_PROBE_DB=<pond.sqlite> POND_MODELS=<models> swift test --package-path recorder --filter BoxTimingProbe`.
+- `RealLiveEdgeProbe` (the app): where the timeline's live edge sits on a camera's real recordings. `POND_PROBE_BASE=<recordings> POND_PROBE_CAMERA=<id> swift test --package-path macos --filter RealLiveEdgeProbe`.
 
 They read the recordings and database without changing them.
 
 **The soak, for video decoding's memory.** Decoded pictures live in macOS's video decoder service and the kernel, not in Pond's own memory, so a leak there doesn't show in Pond and isn't caught by the usual tests; one froze a 16 GB Mac in under an hour. After changing anything that decodes video (detection, the closer looks, HomeKit's re-encoding), run `scripts/soak.sh`: made-up cameras (8 at 4K by default, their video generated on the Mac, none needed) decoded as the service decodes them, for a few minutes, passing if the decoder service and wired memory stay flat. `--quick` is 2 cameras for 30 s; `--cameras`, `--size`, `--minutes`, `--recording` and `--taps` change the scene. A watchdog outside the test stops it at an eighth of the Mac's memory in the decoder service, and nothing it starts is left running, whatever happens. In the running service, `VideoMemoryGuard` does the same job (and logs the decoder service's size hourly).
 
-The package is in `src/`; `swift build --package-path src` and Xcode (open `src/Package.swift`) work too.
+The code is in four packages, one per part ([architecture.md](architecture.md)): `protocol/`, `signaling/`, `recorder/` and `macos/`. `swift build --package-path macos` builds them all, and Xcode works too (open `macos/Package.swift`, or a part's own).
 
 **Toolchain.** Swift Testing and the default build system need Xcode's toolchain. If `xcode-select -p` says `/Library/Developer/CommandLineTools`, the Makefile sets `DEVELOPER_DIR` to Xcode for its own commands. Running `swift` by hand, either do the same (`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`) or switch for good with `sudo xcode-select -s /Applications/Xcode.app`.
 
@@ -71,17 +71,17 @@ Learning from one's own feedback is a Pond's own business, tuned for its own cam
 
 - One module per responsibility; the table is in [architecture.md](architecture.md).
 - Code that needs only Foundation stays free of Apple frameworks, so it is tested on Linux too. Modules that need Apple frameworks are added to `Package.swift` inside `#if os(macOS)`.
-- Each module has a test target, `src/Tests/<Module>Tests/`.
-- The app's views are in `PondApp`; everything they change goes through `AppModel` (tested in `src/Tests/PondAppTests/`).
-- `pond` commands live in `PondCLI` (`CLI.swift`, `CameraCommands.swift`); `Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `src/Tests/PondCLITests/Fakes.swift`.
+- Each module has a test target, `<package>/Tests/<Module>Tests/`.
+- The app's views are in `PondApp`; everything they change goes through `AppModel` (tested in `macos/Tests/PondAppTests/`).
+- `pond` commands live in `PondCLI` (`CLI.swift`, `CameraCommands.swift`); `Sources/pond/main.swift` only wires in the real terminal, Keychain and network. Test a command with `Harness` in `recorder/Tests/PondCLITests/Fakes.swift`.
 - Code ported from HAP-NodeJS or HomeKitADK names its source file in a comment.
 
 ## Adding a setting
 
-1. The field in `Config` (`src/Sources/PondCore/Config.swift`). A new optional field needs a default when it is missing, so older files still load.
+1. The field in `Config` (`recorder/Sources/PondCore/Config.swift`). A new optional field needs a default when it is missing, so older files still load.
 2. Its check in `Config.problems()`, as a sentence.
-3. A test in `src/Tests/PondCoreTests/ConfigTests.swift`.
-4. A command to change it in `PondCLI`, its line in `CLI.help`, and a test in `src/Tests/PondCLITests/`.
+3. A test in `recorder/Tests/PondCoreTests/ConfigTests.swift`.
+4. A command to change it in `PondCLI`, its line in `CLI.help`, and a test in `recorder/Tests/PondCLITests/`.
 5. A row in [configuration.md](configuration.md) and a line in [CHANGELOG.md](../CHANGELOG.md).
 
 ## The app's conventions

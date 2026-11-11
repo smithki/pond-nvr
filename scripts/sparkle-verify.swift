@@ -1,4 +1,4 @@
-// Checks a disk image's Sparkle signature against Pond's update key's public half (app/Info.plist's SUPublicEDKey),
+// Checks a disk image's Sparkle signature against Pond's update key's public half (macos/app/Info.plist's SUPublicEDKey),
 // as every copy of Pond will before installing it: make release runs it, so a release signed with a key Pond doesn't
 // trust (a mixed-up key in the Keychain or in CI) never goes out. Sparkle's signature is Ed25519's, of the whole file.
 //

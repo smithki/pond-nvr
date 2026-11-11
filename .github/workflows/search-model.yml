@@ -69,7 +69,7 @@ jobs:
           "$RUNNER_TEMP/siglip/bin/python" scripts/convert-siglip.py
 
       - name: Check it
-        working-directory: src
+        working-directory: recorder
         run: swift test --filter SigLIPTests
 
       - name: Compare it with the published version

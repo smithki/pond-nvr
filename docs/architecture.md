@@ -14,7 +14,16 @@ camera's sub-stream (Watch) ──► Detection ──► events ──► Under
 
 Two programs come out of it: `pond`, the command and the background service (`pond run`, a launchd agent), which records, watches, serves HomeKit and answers other Ponds; and `Pond NVR.app`, which shows and sets it all, and asks `pond` for anything that needs a camera's password. A third, `pond-signal`, is the signaling service other Ponds meet through, run on a server of one's own ([deploy/](../deploy/README.md)).
 
-One SwiftPM package, `src/`, with a module per responsibility. Those marked Linux build there too (`make test-docker`); the rest need macOS's frameworks.
+Four SwiftPM packages, one per part, with a module per responsibility. Each depends only on the ones before it, so a part can't reach into one after it:
+
+| Package | What it is | Licence |
+|---|---|---|
+| [`protocol/`](../protocol/) | Pond's network protocol: what Ponds and their devices say to each other and to the signaling service (`Traversal`, `SignalProtocol`, `PondProtocol`). Depends on nothing of Pond's, so anything can speak it | MIT |
+| [`signaling/`](../signaling/) | `pond-signal`, the signaling service (`Signal`) | AGPL-3.0 |
+| [`recorder/`](../recorder/) | Everything Pond does on the Mac, and the `pond` command: the modules below, from `PondCore` to `Demo` | AGPL-3.0 |
+| [`macos/`](../macos/) | The Mac app (`PondApp`), its bundle's files (`app/`: Info.plist, entitlements, icon) and Sparkle. `make app` builds here, the rest with it | AGPL-3.0 |
+
+Modules marked Linux build there too (`make test-docker`); the rest need macOS's frameworks.
 
 | Module | Responsibility | Linux |
 |---|---|---|
@@ -32,11 +41,13 @@ One SwiftPM package, `src/`, with a module per responsibility. Those marked Linu
 | `Detection` | Detection models (Core ML, with a manifest: `ModelStore`), run on the Neural Engine (`Detector`), their answers in Pond's terms (people, vehicles, bikes, animals, packages, items) | no |
 | `Watch` | Each camera's sub-stream watched (`CameraWatcher`: motion first, then the model; a closer look at the main stream for what's small), what's seen followed (`Tracker`) and made into events (`EventBuilder`, `LeftItems`), kept with their pictures (`EventStore`) and clips (`ClipKeeper`); the video decoder's memory watched (`VideoMemoryGuard`); and search: `Understander` (each event described and embedded), `EventSearch` and `SearchService` (see [search.md](search.md)) | no |
 | `Understanding` | Event descriptions (`Describer`: Foundation Models, image input, on-device only), SigLIP 2 embeddings of pictures and words (`SigLIP`, `BPETokenizer`), and questions read (`QuestionReader`: Foundation Models, guided; `PlainReader`; `TimeWords`). SigLIP rather than MobileCLIP: Apple's MobileCLIP weights are licensed for research | no |
-| `Traversal` | Finding a way between two Ponds: STUN, TURN (a relay of one's own), candidates and the checks between them (`PathFinder`), and the UDP socket they use | yes |
-| `Signal` | `pond-signal`: a blind courier for sealed envelopes between paired devices, over WebSockets, and a STUN responder | yes |
-| `Remote` | Remote access: identities and pairing, sealed envelopes, paths and sessions (`PathSessions`), the encrypted channel (`SecureChannel`), live video over it (`RemoteVideo`), the remote API (`RemoteAPI`), and other Ponds' cameras for this Mac's app (`RemoteViewing`). See [remote.md](remote.md) | no |
+| `Traversal` (protocol) | Finding a way between two Ponds: STUN, TURN (a relay of one's own), candidates and the checks between them (`PathFinder`), and the UDP socket they use | yes |
+| `SignalProtocol` (protocol) | The signaling service's messages (`SignalMessage`) | yes |
+| `PondProtocol` (protocol) | Identities (`RemoteIdentity`, `RemotePeer`), sealed envelopes (`Envelope`), pairing codes and messages (`PairingCode`, `PairingGuest`), session keys (`SessionKeys`) and the encrypted control channel (`SecureChannel`). Uses CryptoKit | no |
+| `Signal` (signaling) | `pond-signal`: a blind courier for sealed envelopes between paired devices, over WebSockets, and a STUN responder | yes |
+| `Remote` | Remote access, over the protocol: identities kept (`RemoteKeys`, in the Keychain), pairing hosted (`PairingHost`), paths and sessions (`PathSessions`), live video over them (`RemoteVideo`), the remote API (`RemoteAPI`), and other Ponds' cameras for this Mac's app (`RemoteViewing`). See [remote.md](remote.md) | no |
 | `Demo` | Demo mode's made-up cameras: scenes drawn and encoded as a camera's stream (`DemoStream`), their controls (`DemoProvider`), sound, and history made on first start. See [demo.md](demo.md) | no |
-| `PondApp` | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and video depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`, `EventRail`, `EventCard`, `EventDetail`; search asked of the service), with other Ponds beside this Mac's; the Settings window; and the menu bar item, which watches the recorder (`ServiceWatch`). `AppModel` saves through `ConfigStore` and leaves reading passwords to `pond` | no |
+| `PondApp` (macos) | The SwiftUI app (`Pond NVR.app`, built by `make app`). The main window has Live (`LiveStream`: the RTSP client and video depacketizer feeding an `AVSampleBufferDisplayLayer` through a render synchronizer), Timeline (`TimelineModel`: segments at their recorded times in an `AVMutableComposition`) and Events (`EventGrid`, `EventRail`, `EventCard`, `EventDetail`; search asked of the service), with other Ponds beside this Mac's; the Settings window; and the menu bar item, which watches the recorder (`ServiceWatch`). `AppModel` saves through `ConfigStore` and leaves reading passwords to `pond` | no |
 
 The models sit behind small protocols (`DescriptionModel`, the query parser), so an MLX or cloud model could replace Apple's without touching the rest. The default is on-device only.
 

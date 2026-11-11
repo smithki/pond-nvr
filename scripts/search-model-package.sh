@@ -27,7 +27,7 @@ mkdir -p "$STAGE"
 
 for m in "$SRC"/*.mlpackage; do xcrun coremlcompiler compile "$m" "$STAGE" >/dev/null; done
 cp "$SRC/siglip2.json" "$SRC/siglip2-tokenizer.json" "$STAGE/"
-cp licenses/Apache-2.0.txt "$STAGE/LICENSE"
+cp third-party/Apache-2.0.txt "$STAGE/LICENSE"
 cat > "$STAGE/NOTICE" <<EOF
 $(lock name) ($VERSION), for Pond (https://pond.camera)
 

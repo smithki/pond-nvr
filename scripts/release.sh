@@ -38,19 +38,19 @@ notary() {
 [ -z "$(git status --porcelain)" ] || fail "There are changes not committed: a release is made from a commit as it is."
 
 # The version, the same everywhere it's shown: pond --version and Settings (PondCore/Version.swift), and Finder's Get
-# Info (app/Info.plist).
-grep -q "version = \"$VERSION\"" src/Sources/PondCore/Version.swift \
-    || fail "src/Sources/PondCore/Version.swift doesn't say $VERSION (no -dev): set it, commit, then release."
-plist_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" app/Info.plist)
-[ "$plist_version" = "$VERSION" ] || fail "app/Info.plist's CFBundleShortVersionString is $plist_version, not $VERSION."
+# Info (macos/app/Info.plist).
+grep -q "version = \"$VERSION\"" recorder/Sources/PondCore/Version.swift \
+    || fail "recorder/Sources/PondCore/Version.swift doesn't say $VERSION (no -dev): set it, commit, then release."
+plist_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" macos/app/Info.plist)
+[ "$plist_version" = "$VERSION" ] || fail "macos/app/Info.plist's CFBundleShortVersionString is $plist_version, not $VERSION."
 grep -q "^## $VERSION" CHANGELOG.md || fail "CHANGELOG.md has no \"## $VERSION\" section: say what's in it."
 # Sparkle offers an update by its build number (CFBundleVersion): higher than every release's in the appcast.
-BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" app/Info.plist)
+BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" macos/app/Info.plist)
 LAST=$(grep -o '<sparkle:version>[0-9]*</sparkle:version>' site/public/appcast.xml 2>/dev/null | grep -o '[0-9]*' | sort -n | tail -1)
 [ -z "$LAST" ] || [ "$BUILD" -gt "$LAST" ] \
-    || fail "app/Info.plist's CFBundleVersion is $BUILD: it must be higher than the last release's, $LAST, for Sparkle to offer it."
-[ -n "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" app/Info.plist 2>/dev/null)" ] \
-    || fail "app/Info.plist has no SUPublicEDKey: Pond's update key isn't set up (docs/release.md, Updates)."
+    || fail "macos/app/Info.plist's CFBundleVersion is $BUILD: it must be higher than the last release's, $LAST, for Sparkle to offer it."
+[ -n "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" macos/app/Info.plist 2>/dev/null)" ] \
+    || fail "macos/app/Info.plist has no SUPublicEDKey: Pond's update key isn't set up (docs/release.md, Updates)."
 
 IDENTITY=${DEVELOPER_ID:-$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')}
 [ -n "$IDENTITY" ] || fail "No Developer ID Application certificate in the keychain: Xcode › Settings › Accounts › Manage Certificates… › + › Developer ID Application."
@@ -102,8 +102,8 @@ spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG
 
 # Sparkle's signature of the disk image, by Pond's update key (from the Keychain, or SPARKLE_ED_KEY in CI), with
 # what the appcast says of it: published beside it, for the appcast entry made when the release is published.
-SIGN_UPDATE=src/.build/artifacts/sparkle/Sparkle/bin/sign_update
-[ -x "$SIGN_UPDATE" ] || swift package --package-path src resolve >/dev/null
+SIGN_UPDATE=macos/.build/artifacts/sparkle/Sparkle/bin/sign_update
+[ -x "$SIGN_UPDATE" ] || swift package --package-path macos resolve >/dev/null
 if [ -n "${SPARKLE_ED_KEY:-}" ]; then
     SPARKLE=$(printf '%s' "$SPARKLE_ED_KEY" | "$SIGN_UPDATE" --ed-key-file - "$DMG")
 else
@@ -112,8 +112,8 @@ fi
 [ -n "$SPARKLE" ] || fail "The disk image couldn't be signed for Sparkle (above)."
 # Signed with the key every copy of Pond trusts, as they'll check it (not one mixed up with it).
 ED_SIGNATURE=$(printf '%s' "$SPARKLE" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
-swift scripts/sparkle-verify.swift "$DMG" "$ED_SIGNATURE" "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" app/Info.plist)" >/dev/null \
-    || fail "The disk image's Sparkle signature doesn't verify with app/Info.plist's SUPublicEDKey: the update key isn't Pond's."
+swift scripts/sparkle-verify.swift "$DMG" "$ED_SIGNATURE" "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" macos/app/Info.plist)" >/dev/null \
+    || fail "The disk image's Sparkle signature doesn't verify with macos/app/Info.plist's SUPublicEDKey: the update key isn't Pond's."
 printf 'sparkle:version="%s" sparkle:shortVersionString="%s" %s\n' "$BUILD" "$VERSION" "$SPARKLE" > "$OUT/Pond-$VERSION.sparkle"
 
 (cd "$OUT" && shasum -a 256 "Pond-$VERSION.dmg" > "Pond-$VERSION.dmg.sha256")

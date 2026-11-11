@@ -101,7 +101,7 @@ meant to grow, so these hold for every job given to it:
 - **The Developer ID certificate**: revoke it (developer.apple.com › Certificates), which stops Macs trusting what
   it signed from then; make a new one and release again. Tell Apple (Developer Support) if software you didn't make
   was signed with it.
-- **Pond's update key**: make a new one, put its public half in `app/Info.plist` (`SUPublicEDKey`), and release Pond
+- **Pond's update key**: make a new one, put its public half in `macos/app/Info.plist` (`SUPublicEDKey`), and release Pond
   signed with the old one one last time, so copies already out there take the release that trusts the new key; until
   then the old one could sign a disk image, though it would still need Pond's Developer ID and to reach the appcast.
 - **The App Store Connect key**: revoke it in App Store Connect › Users and Access › Integrations and make another.

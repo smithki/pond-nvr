@@ -8,10 +8,10 @@ on:
   push:
     branches: [main]
     paths:
-      - src/Sources/Signal/**
-      - src/Sources/Traversal/**
-      - src/Sources/pond-signal/**
-      - src/Package.swift
+      - signaling/**
+      - protocol/Sources/Traversal/**
+      - protocol/Sources/SignalProtocol/**
+      - protocol/Package.swift
       - deploy/Dockerfile.signal
       - deploy/receive-signal.sh
       - .github/workflows/signal.yml

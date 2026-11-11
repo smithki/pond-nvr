@@ -1,24 +1,56 @@
 Pond
 Copyright 2026 Ian K Smith
 
-This product is licensed under the GNU Affero General Public License, version 3 (see LICENSE).
+Pond's own code is in four parts, each under its own licence (each folder has its LICENSE):
+
+  Folder       What it is                                              Licence
+  -----------  ------------------------------------------------------  ----------
+  protocol/    Pond's network protocol: what Ponds and their devices   MIT
+               say to each other and to the signaling service
+  signaling/   pond-signal, the signaling service                      AGPL-3.0
+  recorder/    the recorder and the pond command                       AGPL-3.0
+  macos/       the Mac app, Pond NVR.app                               AGPL-3.0
+
+Anything else in this repository (scripts, docs, the site) is under the GNU Affero General Public License,
+version 3 (LICENSE). The parts depend on each other in one direction only, from top to bottom: protocol/ uses
+nothing of the others, so it can be used on its own under the MIT License; the others use protocol/ under it.
+An app that speaks Pond's protocol, using protocol/ and none of the AGPL parts, needn't be under the AGPL.
+
 Contributions are accepted under the Pond Contributor License Agreement (CLA.md).
 
-Parts of the HomeKit implementation (the accessory protocol, camera streaming, HomeKit Secure Video and
-the HomeKit Data Stream) were written with reference to these projects, under the Apache License 2.0
-(licenses/Apache-2.0.txt):
-- HAP-NodeJS (https://github.com/homebridge/HAP-NodeJS)
-- HomeKitADK (https://github.com/apple/HomeKitADK)
-Source files that follow one of them closely name it in a comment.
+Pond's brand is not under these licences: the name "Pond" and "Pond NVR", the logo (brand/) and the app's icon
+(macos/app/AppIcon.icon) are Ian K Smith's, all rights reserved. The licences let anyone use, change and share the
+code; they don't let a copy or a fork present itself as Pond. Builds of your own may keep the icon for your own use; a
+copy you pass on under another name needs a name and icon of its own.
 
-The built-in detection model (models/yolo26s.mlpackage, compiled into the app) is Ultralytics YOLO26
-(https://github.com/ultralytics/ultralytics), Copyright Ultralytics, under the GNU Affero General Public
-License v3.0, exported to Core ML. Other models can be used in its place (docs/detection.md).
+Third-party work. The licence texts named are in third-party/ (in the app: Contents/Resources/Licenses).
 
-Search's picture model (models/search/, built into released copies of the app) is Google's SigLIP 2 base
-(google/siglip2-base-patch16-224, https://huggingface.co/google/siglip2-base-patch16-224), under the Apache License
-2.0 (licenses/Apache-2.0.txt). Pond converts it to Core ML and quantizes its weights (scripts/convert-siglip.py);
-the converted model is a modification of the original.
+  What                                    Where in Pond                              Licence
+  --------------------------------------  -----------------------------------------  ------------------------------
+  Sparkle (sparkle-project.org)           macos/: the app's updates (its framework,  MIT (Sparkle-LICENSE.txt)
+                                          in the app)
+  Ultralytics YOLO26                      the built-in detection model (downloaded   AGPL-3.0 (LICENSE)
+  (github.com/ultralytics/ultralytics)    by builds into models/detection/,
+                                          compiled into the app)
+  Google SigLIP 2 base                    search's picture model (models/search/;    Apache-2.0 (Apache-2.0.txt)
+  (google/siglip2-base-patch16-224)       released copies of the app download it)
+  HAP-NodeJS, HomeKitADK                  recorder/: written with reference to them  Apache-2.0 (Apache-2.0.txt)
+  reolink_aio                             recorder/: written with reference to it    MIT
+
+Sparkle: Copyright (c) 2006-2013 Andy Matuschak, and others named in third-party/Sparkle-LICENSE.txt, under the MIT
+License, with the external licences that file lists.
+
+Ultralytics YOLO26 (https://github.com/ultralytics/ultralytics), Copyright Ultralytics, under the GNU Affero General
+Public License v3.0, exported to Core ML. Other models can be used in its place (docs/detection.md).
+
+SigLIP 2 base (https://huggingface.co/google/siglip2-base-patch16-224), Google, under the Apache License 2.0. Pond
+converts it to Core ML and quantizes its weights (scripts/convert-siglip.py); the converted model is a modification
+of the original.
+
+Parts of the HomeKit implementation (the accessory protocol, camera streaming, HomeKit Secure Video and the HomeKit
+Data Stream) were written with reference to HAP-NodeJS (https://github.com/homebridge/HAP-NodeJS) and HomeKitADK
+(https://github.com/apple/HomeKitADK), under the Apache License 2.0. Source files that follow one of them closely name
+it in a comment.
 
 Reolink's own protocol (Baichuan) was written with reference to reolink_aio
 (https://github.com/starkillerOG/reolink_aio), under the MIT License, Copyright (c) 2023 starkillerOG.

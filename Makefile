@@ -1,6 +1,10 @@
 # Pond: build, check and test.   make help
 IMAGE := pond-tests
-PKG   := src
+# Four Swift packages, one per part (docs/architecture.md): the protocol (MIT), the signaling service, the recorder,
+# and the Mac app. The app's (macos/) depends on the rest, so the pond command, the app and pond-signal are all built
+# there, in one build folder; each package's own tests run in its own.
+PKG   := macos
+PKGS  := protocol signaling recorder macos
 
 # Swift Testing and the Swift Build backend need Xcode's toolchain. If xcode-select points at the Command
 # Line Tools but Xcode is installed, use Xcode for these commands only (the system setting is not changed).
@@ -19,7 +23,7 @@ endif
 APPLE_DEV := $(shell security find-identity -v -p codesigning 2>/dev/null | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
 SIGN := $(or $(APPLE_DEV),$(if $(shell security find-identity -p codesigning 2>/dev/null | grep '"Pond Local Signing"'),Pond Local Signing,-))
 # Every build under the hardened runtime, as a notarized release must be: what it stops (and the entitlements that
-# allow it again, app/Pond.entitlements) shows in everyday use, not first at release. A secure timestamp only for a
+# allow it again, macos/app/Pond.entitlements) shows in everyday use, not first at release. A secure timestamp only for a
 # release (it asks Apple's server; make release sets SIGN_TIMESTAMP=1). Ad hoc signing can't have the runtime.
 CODESIGN := codesign --force $(if $(filter -,$(SIGN)),,--options runtime $(if $(SIGN_TIMESTAMP),--timestamp,--timestamp=none))
 
@@ -43,7 +47,7 @@ help:
 	@echo "make publish VERSION=0.1.0  that release as a draft on GitHub, and its tag (when CI can't make it)"
 
 build:
-	swift build --package-path $(PKG) -c release
+	swift build --package-path $(PKG) -c release --product pond
 	@# A new file rather than overwriting: macOS kills programs started from a file rewritten in place
 	@# while another copy of it runs (the HomeKit accessory, the login service).
 	@mkdir -p dist && rm -f dist/pond && cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond" dist/pond
@@ -66,19 +70,19 @@ app: build
 	@# The signaling service, for a demo's Ponds to meet through (on this Mac, for them alone).
 	swift build --package-path $(PKG) -c release --product pond-signal
 	@cp "$$(swift build --package-path $(PKG) -c release --show-bin-path)/pond-signal" "$(APP)/Contents/MacOS/pond-signal"
-	@cp app/Info.plist "$(APP)/Contents/Info.plist"
-	@# The icon, from Icon Composer (app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
+	@cp macos/app/Info.plist "$(APP)/Contents/Info.plist"
+	@# The icon, from Icon Composer (macos/app/AppIcon.icon): compiled into Assets.car (its Liquid Glass looks) and an
 	@# AppIcon.icns, as Xcode would.
 	@mkdir -p "$(APP)/Contents/Resources"
 	@# The icon's own mark, for the menu bar (cropped to it and drawn as a template image by the app, so it follows
 	@# the icon when that changes).
-	@cp app/AppIcon.icon/Assets/mark.svg "$(APP)/Contents/Resources/Mark.svg"
-	@# Pond's licence and notices, and the licences of what's built in (the models), with every copy of the app.
+	@cp macos/app/AppIcon.icon/Assets/mark.svg "$(APP)/Contents/Resources/Mark.svg"
+	@# Pond's licence and notices, and the licences of what's built in (third-party/: the models, Sparkle), with every copy of the app.
 	@cp LICENSE NOTICE "$(APP)/Contents/Resources/" && rm -rf "$(APP)/Contents/Resources/Licenses" && \
-	  cp -R licenses "$(APP)/Contents/Resources/Licenses"
+	  cp -R third-party "$(APP)/Contents/Resources/Licenses"
 	@# (Every path whole: actool's helper can resolve a relative one against a folder of its own, and fail.)
 	@out="$$(cd "$(APP)/Contents/Resources" && pwd)" && \
-	  xcrun actool "$(CURDIR)/app/AppIcon.icon" --compile "$$out" --platform macosx --minimum-deployment-target 27.0 \
+	  xcrun actool "$(CURDIR)/macos/app/AppIcon.icon" --compile "$$out" --platform macosx --minimum-deployment-target 27.0 \
 	  --app-icon AppIcon --output-partial-info-plist "$$out/.icon-info.plist" \
 	  --output-format human-readable-text >/dev/null
 	@rm -f "$(APP)/Contents/Resources/.icon-info.plist"
@@ -114,7 +118,7 @@ app: build
 	  $(CODESIGN) --sign "$(SIGN)" "$$S/Autoupdate" && \
 	  $(CODESIGN) --sign "$(SIGN)" "$$S/Updater.app" && \
 	  $(CODESIGN) --sign "$(SIGN)" "$(APP)/Contents/Frameworks/Sparkle.framework"
-	@$(CODESIGN) --sign "$(SIGN)" --entitlements app/Pond.entitlements "$(APP)"
+	@$(CODESIGN) --sign "$(SIGN)" --entitlements macos/app/Pond.entitlements "$(APP)"
 	@echo "✓ $(APP)"
 	@# The login service may run the pond just replaced: macOS then stops letting the running copy reach the
 	@# network ("No route to host"), so it is restarted on the new one.
@@ -124,21 +128,23 @@ app: build
 
 check:
 	@scripts/check-private.sh
-	swift build --package-path $(PKG) --build-tests -Xswiftc -warnings-as-errors
+	@for p in $(PKGS); do echo "· $$p" && swift build --package-path $$p --build-tests -Xswiftc -warnings-as-errors || exit 1; done
 
 # A pre-commit hook of this checkout's own: what's staged is checked for footage, pictures and databases.
 hooks:
 	@printf '#!/bin/sh\nexec scripts/check-private.sh --staged\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 	@echo "✓ .git/hooks/pre-commit: no footage, pictures or databases in a commit"
 
+# (signaling has no tests of its own: the recorder's remote tests run it.)
 test:
-	swift test --package-path $(PKG)
+	@for p in protocol recorder macos; do echo "· $$p" && swift test --package-path $$p || exit 1; done
 
 # The source is mounted read-only and copied inside, so the container never writes into your checkout.
-# Only the modules without Apple frameworks are built there; Package.swift leaves the others out on Linux.
+# Only the modules without Apple frameworks are built there; the Package.swift files leave the others out on Linux.
 test-docker:
 	docker build -t $(IMAGE) tests
-	docker run --rm -v "$(CURDIR)":/src:ro $(IMAGE) sh -c 'cp -R /src /work && rm -rf /work/src/.build && cd /work && swift test --package-path src'
+	docker run --rm -v "$(CURDIR)":/src:ro $(IMAGE) sh -c 'cp -R /src /work && rm -rf /work/*/.build && cd /work && \
+	  swift test --package-path protocol && swift test --package-path recorder'
 
 # install copies pond to /usr/local/bin (asks for your password). update does the same, then restarts the
 # login service if it is installed, so it runs the new version.
@@ -182,4 +188,4 @@ demo:
 	open -n "dist/demo/Pond NVR.app" --args --demo $(SCENARIO)
 
 clean:
-	rm -rf dist $(PKG)/.build
+	rm -rf dist $(foreach p,$(PKGS),$(p)/.build)

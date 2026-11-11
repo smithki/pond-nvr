@@ -1,6 +1,6 @@
 #!/bin/bash
 # The soak: Pond's video decoding with many made-up cameras (4K by default) for minutes at a time, to check the
-# memory macOS's video decoder holds for it stays flat (src/Tests/SoakTests). Not part of the usual tests: run it
+# memory macOS's video decoder holds for it stays flat (recorder/Tests/SoakTests). Not part of the usual tests: run it
 # after changing anything that decodes video (detection, the closer looks, HomeKit's re-encoding).
 #
 #   scripts/soak.sh [--quick] [--cameras N] [--size WxH] [--fps N] [--minutes M] [--recording N] [--taps N]
@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
 done
 [ "$(uname)" = Darwin ] || { echo "✗ the soak needs macOS (VideoToolbox)" >&2; exit 64; }
 
-cd "$(dirname "$0")/../src" || exit 64
+cd "$(dirname "$0")/../recorder" || exit 64
 memory_mb=$(( $(sysctl -n hw.memsize) / 1048576 ))
 max_decoder=${max_decoder:-$(( memory_mb / 8 ))}
 seconds=$(awk -v m="$minutes" 'BEGIN { printf "%d", m * 60 }')
