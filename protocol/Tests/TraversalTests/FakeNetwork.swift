@@ -58,8 +58,13 @@ final class FakeNetwork: @unchecked Sendable {
 
     let lock = NSLock()
     let queue = DispatchQueue(label: "fake network")
+    /// The share of each host's packets lost: spread evenly (with 0.3, three in ten, never two in a row), not by
+    /// chance, so a test of getting through loss gets the same loss every run (random loss now and then lost a run of
+    /// packets long enough to use up a check's retries, and the test failed for no fault of what it tests).
     var loss = 0.0
     var latency = 0.003
+    /// Packets each host has sent, for spreading its loss.
+    private var sent: [String: Int] = [:]
     /// Every packet's path cut (as a network going away).
     var cut = false
     private var hosts: [Host] = []
@@ -90,7 +95,13 @@ final class FakeNetwork: @unchecked Sendable {
     func route(_ bytes: [UInt8], from host: Host, to destination: STUNAddress) {
         lock.lock()
         defer { lock.unlock() }
-        guard !cut, !host.closed, Double.random(in: 0 ..< 1) >= loss else { return }
+        guard !cut, !host.closed else { return }
+        if loss > 0 {
+            // The nth packet is lost when n × loss crosses a whole number: evenly spread, the same every run.
+            let key = "\(host.ip)/\(host.port)", n = sent[key, default: 0]
+            sent[key] = n + 1
+            if Int(Double(n + 1) * loss) > Int(Double(n) * loss) { return }
+        }
         // On the same home network: straight there.
         if let router = host.router, let peer = hosts.first(where: { $0.router === router && $0.ip == destination.ip && $0.port == destination.port }) {
             deliver(bytes, to: peer, from: host.address)

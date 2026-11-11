@@ -94,6 +94,5 @@ A backlog: small, contained problems seen in use, each worth a fix but not a goa
 
 | Fix | Notes |
 | --- | --- |
-| Recorder log: slow rewrap, last line cut | Below about 1014 pt wide the log is slow to rewrap while resizing, and its last line is cut off at the bottom. |
-| A flaky connection test | `PathFinderTests.aLossyNetworkStillConnects` (protocol/) passes alone in about a second, but failed once in a full `make test` after 16.6 s: its lossy network's timing is too tight when the Mac is busy. Its deadline made to suit a loaded machine, or its loss made deterministic. |
+| (none open) | |
 
