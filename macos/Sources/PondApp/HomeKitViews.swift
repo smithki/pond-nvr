@@ -14,6 +14,9 @@ struct HomeKitBadge: View {
     let state: HomeKitState
     var compact = false
     var height: Double
+    /// Told as its popover opens and closes, so the tile keeps its controls (and this badge) showing while it's open,
+    /// the pointer on the popover rather than the tile.
+    var popoverShown: (Bool) -> Void = { _ in }
     @State private var open = false
 
     var body: some View {
@@ -50,6 +53,7 @@ struct HomeKitBadge: View {
                 perform(action)
             }
         }
+        .onChange(of: open) { _, shown in popoverShown(shown) }
     }
 
     func perform(_ action: HomeKitText.Action) {

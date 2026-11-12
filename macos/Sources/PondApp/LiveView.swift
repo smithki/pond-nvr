@@ -1491,42 +1491,12 @@ struct CameraTile: View {
     /// The events popover is open: it has the pointer or the keyboard, so the tile's controls stay.
     @State private var popoverOpen = false
 
-    @Namespace private var glass
-    /// How close the name and gear glass must be to merge.
-    static let glassMerge = 9.0
-    /// Between the badges along the bottom of a tile (name, gear, REC, HomeKit, sound, resolution).
+    /// Between the badges along the bottom of a tile (name, gear, privacy, HomeKit, sound, resolution).
     static let badgeGap = 6.0
-    /// How close glass must be to merge once the gear has moved off: less than the gap, so it stays apart.
-    static let restingMerge = 3.0
     /// The height of the tile's glass controls along the bottom: the name pill and gear, the sound button
     /// and the resolution pill all line up.
     static let pillHeight = 32.0
     static let compactPillHeight = 26.0
-    /// The gear is on the tile, and moved off from the name.
-    @State private var gearShown = false
-    @State private var gearApart = false
-    @State private var gearSteps: Task<Void, Never>?
-    static let gearSpring = Animation.spring(duration: 0.45, bounce: 0.15)
-
-    /// Out: add (budding from the name), then move apart. Back: move together, then remove (melting in).
-    func showGear(_ show: Bool) {
-        gearSteps?.cancel()
-        gearSteps = Task {
-            // One spring for both steps, the second starting while the first is still moving, so they
-            // read as a single motion rather than one easing handing over to another.
-            if show {
-                withAnimation(Self.gearSpring) { gearShown = true }
-                try? await Task.sleep(for: .seconds(0.12))
-                guard !Task.isCancelled else { return }
-                withAnimation(Self.gearSpring) { gearApart = true }
-            } else {
-                withAnimation(Self.gearSpring) { gearApart = false }
-                try? await Task.sleep(for: .seconds(0.12))
-                guard !Task.isCancelled else { return }
-                withAnimation(Self.gearSpring) { gearShown = false }
-            }
-        }
-    }
 
     /// This camera's settings, on its page in the camera window.
     func openSettings() { model.editCameraSettings(camera.id) }
@@ -1637,7 +1607,7 @@ struct CameraTile: View {
                     // Its controls (moving it, its positions, day and night), under it on its own.
                     // Not when it's alone on the stage: its controls are under it there.
                     if hasDockControls, frozen == nil, canRemove {
-                        Button { openControls?() } label: { Image(systemName: "slider.horizontal.3") }
+                        Button { openControls?() } label: { cornerSymbol("slider.horizontal.3", compact: compact) }
                             .help("Controls for \(camera.name) (\u{2325}\u{2318}L)")
                             .opacity(hovering ? 1 : 0)
                             .allowsHitTesting(hovering)
@@ -1645,16 +1615,17 @@ struct CameraTile: View {
                     // Only with other cameras on the stage: alone, there is nothing to enlarge it over or
                     // take it off for.
                     Group {
-                        Button { solo?() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                        Button { solo?() } label: { cornerSymbol("arrow.up.left.and.arrow.down.right", compact: compact) }
                             .help("Watch only this camera")
-                        Button { remove?() } label: { Image(systemName: "xmark") }
+                        Button { remove?() } label: { cornerSymbol("xmark", compact: compact) }
                             .help("Take off the screen")
                     }
                     .opacity(hovering && solo != nil && canRemove ? 1 : 0)
                     .allowsHitTesting(hovering && solo != nil && canRemove)
                 }
                 .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
+                // Circles of one size (the name pill's height), whatever their symbol's width.
+                .buttonBorderShape(.circle)
                 .controlSize(compact ? .small : .regular)
                 .padding(compact ? 6 : 10)
                 .animation(.easeOut(duration: 0.15), value: hovering)
@@ -1706,75 +1677,74 @@ struct CameraTile: View {
         }
     }
 
-    func badges(compact: Bool) -> some View {
-        HStack(spacing: Self.badgeGap) {
-            // The name and, on hover, a gear for the camera's settings, in one glass container, which blends
-            // glass shapes that are close into one. Hidden, the gear is a small glass seed inside the name
-            // pill's rounded end (so the glass is just the pill). Shown, the seed gives way to the gear button
-            // with the same glass ID: Liquid Glass morphs one into the other (budding out of the pill's end),
-            // then the gear moves off (the glass pinches apart). Leaving runs the other way, melting back into
-            // the pill. See `showGear`. (Without the seed, an inserted gear grew out of the whole name pill.)
-            // Merging reaches far while the gear buds and pinches off, then shrinks below the badges' gap,
-            // so the gear rests as far from the name as every other badge without the glass joining them.
-            GlassEffectContainer(spacing: gearApart ? Self.restingMerge : Self.glassMerge) {
-                // The name pill and the gear are the same height, so the gear reads as part of it.
-                let size = compact ? Self.compactPillHeight : Self.pillHeight
-                let seed = size * 0.6
-                HStack(spacing: gearApart ? Self.badgeGap : gearShown ? 0 : -(size + seed) / 2) {
-                    // (Cameras of several Ponds together: which Pond, after its name.)
-                    Text("\(camera.name)\(Text(model.pondName(of: camera.id).map { "  \($0)" } ?? "").foregroundStyle(.secondary))")
-                        .font(compact ? .callout.weight(.semibold) : .headline)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .padding(.horizontal, compact ? 10 : 13)
-                        .frame(height: size)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .glassEffectID("name", in: glass)
-                    if gearShown {
-                        // A glass button, so its glass and its click are one control (glass painted onto a
-                        // plain button reacted to the pointer apart from the button underneath).
-                        Button(action: openSettings) {
-                            Image(systemName: "gearshape.fill")
-                                .font(compact ? .callout : .headline)
-                                // The glass button adds 4 pt round its label: the circle is then `size` across,
-                                // the name pill's height.
-                                .frame(width: size - 8, height: size - 8)
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .controlSize(.regular)
-                        .glassEffectID("gear", in: glass)
-                        .help("\(camera.name) settings")
-                    } else {
-                        Color.clear
-                            .frame(width: seed, height: seed)
-                            .glassEffect(.regular, in: .circle)
-                            .glassEffectID("gear", in: glass)
-                            // Still ending where the name does, so what follows does not slide under the name.
-                            .padding(.trailing, (size - seed) / 2)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
+    /// A top-right button's symbol, framed so every button there is a circle of the name pill's height.
+    func cornerSymbol(_ name: String, compact: Bool) -> some View {
+        let diameter = compact ? Self.compactPillHeight : Self.pillHeight
+        return Image(systemName: name)
+            .font(compact ? .callout : .headline)
+            // The glass button adds 4 pt round its label.
+            .frame(width: diameter - 8, height: diameter - 8)
+    }
+
+    /// The badges beside a tile's name, always in this order: privacy (by the name), the gear, the doctor's mark,
+    /// HomeKit.
+    enum TileBadge: String, Identifiable, CaseIterable {
+        case privacy, gear, doctor, homeKit
+        var id: String { rawValue }
+    }
+
+    /// Those shown now, in their one order: each when it matters (private, a finding, a HomeKit problem), or for the
+    /// pointer. One order whatever's shown, so where each one is can be counted on; one that stays (a HomeKit
+    /// problem) slides along to make room as those for the pointer fade in before it.
+    var shownBadges: [TileBadge] {
+        guard frozen == nil else { return [] }
+        // Private, from here: this Mac's cameras (another Pond's are made private there), not while the camera's own
+        // privacy mode holds it.
+        let canPrivacy = AppModel.pond(of: camera.id) == nil && !model.isPrivateOnCameraOnly(camera.id)
+        let homeKit = model.homeKitState(for: camera)
+        return TileBadge.allCases.filter { badge in
+            switch badge {
+            case .privacy: canPrivacy && (hovering || model.isPrivate(camera.id))
+            case .gear: hovering
+            case .doctor: model.doctor.mark(camera.id) != nil
+            case .homeKit: homeKit.map { hovering || $0.needsAttention } ?? false
             }
-            .onChange(of: hovering && frozen == nil, initial: true) { _, show in showGear(show) }
-            // Not while it's private: it isn't being recorded. (Nor for another Pond's camera: this Mac doesn't record it.)
-            if model.isRecording, !model.isPrivate(camera.id), AppModel.pond(of: camera.id) == nil {
-                HStack(spacing: 5) {
-                    Circle().fill(.red).frame(width: compact ? 7 : 8, height: compact ? 7 : 8)
-                    if !compact { Text("REC").font(.callout.weight(.bold)) }
-                }
-                .padding(.horizontal, compact ? 9 : 12)
-                // As tall as the name pill, the gear and the HomeKit badge beside it.
-                .frame(minWidth: compact ? Self.compactPillHeight : nil,
-                       minHeight: compact ? Self.compactPillHeight : Self.pillHeight,
-                       maxHeight: compact ? Self.compactPillHeight : Self.pillHeight)
-                .glassEffect(.regular, in: .capsule)
-                .help("Recorded continuously")
+        }
+    }
+
+    @ViewBuilder
+    func tileBadge(_ badge: TileBadge, compact: Bool) -> some View {
+        let diameter = compact ? Self.compactPillHeight : Self.pillHeight
+        switch badge {
+        case .gear:
+            Button(action: openSettings) {
+                Image(systemName: "gearshape.fill")
+                    .font(compact ? .callout : .headline)
+                    // The glass button adds 4 pt round its label: a circle as tall as the name pill.
+                    .frame(width: diameter - 8, height: diameter - 8)
             }
-            // The doctor's mark: something wrong with it, or something to change (not notices, not ignored).
-            // Opens the doctor at the camera.
-            if frozen == nil, let finding = model.doctor.mark(camera.id) {
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.regular)
+            .help("\(camera.name) settings")
+        case .privacy:
+            let isPrivate = model.isPrivate(camera.id)
+            Button { Task { await model.setPrivacy(camera.id, !isPrivate) } } label: {
+                Image(systemName: isPrivate ? "eye.slash.fill" : "eye.slash")
+                    .font(compact ? .callout : .headline)
+                    .foregroundStyle(isPrivate ? AnyShapeStyle(CameraHealth.keptPrivate.tint) : AnyShapeStyle(.primary))
+                    .frame(width: diameter - 8, height: diameter - 8)
+            }
+            // Private: as the tile's Private badge at the top (HealthBadge), its glass tinted with the colour, the
+            // mark in it.
+            .buttonStyle(.glass(isPrivate ? .regular.tint(CameraHealth.keptPrivate.tint.opacity(0.25)) : .regular))
+            .buttonBorderShape(.circle)
+            .controlSize(.regular)
+            .help(isPrivate ? "Private: not recorded, shown live or in the Home app. Click to record \(camera.name) again."
+                            : "Make \(camera.name) private: not recorded, shown live or in the Home app until you turn it off")
+        case .doctor:
+            // Something wrong with it, or something to change (not notices, not ignored): the doctor, at the camera.
+            if let finding = model.doctor.mark(camera.id) {
                 Button {
                     model.showDoctor(camera: camera.id)
                 } label: {
@@ -1782,19 +1752,43 @@ struct CameraTile: View {
                         .font(compact ? .caption.weight(.semibold) : .callout.weight(.semibold))
                         .foregroundStyle(finding.severity == .problem ? .red : .orange)
                         .padding(.horizontal, compact ? 7 : 10)
-                        .frame(minHeight: compact ? Self.compactPillHeight : Self.pillHeight,
-                               maxHeight: compact ? Self.compactPillHeight : Self.pillHeight)
+                        .frame(minHeight: diameter, maxHeight: diameter)
                         .glassEffect(.regular, in: .capsule)
                 }
                 .buttonStyle(.plain)
                 .help("\(finding.headline): \(finding.evidence). Click for the doctor.")
-                .transition(.opacity)
             }
-            // HomeKit: shown only for a camera that is to be in the Home app.
-            if frozen == nil, let state = model.homeKitState(for: camera) {
-                HomeKitBadge(camera: camera, state: state, compact: compact,
-                             height: compact ? Self.compactPillHeight : Self.pillHeight)
+        case .homeKit:
+            if let state = model.homeKitState(for: camera) {
+                HomeKitBadge(camera: camera, state: state, compact: compact, height: diameter,
+                             popoverShown: { popoverOpen = $0 })
             }
+        }
+    }
+
+    func badges(compact: Bool) -> some View {
+        HStack(spacing: Self.badgeGap) {
+            // The name, always; then its badges in their one order (`shownBadges`): those that matter now always,
+            // those for the pointer faded in and out, and what stays sliding along to make room for them.
+            // (One row for the name and its badges, animated as a whole: badges coming and going fade, and those that
+            // stay slide along. On the badges alone, they came and went without fading.)
+            HStack(spacing: Self.badgeGap) {
+            Text("\(camera.name)\(Text(model.pondName(of: camera.id).map { "  \($0)" } ?? "").foregroundStyle(.secondary))")
+                .font(compact ? .callout.weight(.semibold) : .headline)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, compact ? 10 : 13)
+                .frame(height: compact ? Self.compactPillHeight : Self.pillHeight)
+                .glassEffect(.regular, in: .capsule)
+                .layoutPriority(1)
+            // (No REC badge: recording is the usual state, so said on every tile it was noise. When a camera isn't
+            // recorded, the tile says so: its problem badge and edge.)
+            ForEach(shownBadges) { badge in
+                tileBadge(badge, compact: compact)
+                    .transition(.opacity)
+            }
+            }
+            .animation(.easeOut(duration: 0.15), value: shownBadges)
             Spacer(minLength: 0)
             // The buttons on the right come and go with the pointer as the tile's other controls do.
             HStack(spacing: Self.badgeGap) {
@@ -2044,12 +2038,13 @@ struct EventsChip: View {
     @State private var overCard = false
     @State private var showingRecent = false
     @State private var hoverTask: Task<Void, Never>?
+    /// The pointer's on Latest: its highlight.
+    @State private var overLatest = false
 
     var body: some View {
         chip
-            .onHover { overChip = $0; updateRecent() }
-            // Hovering the chip for a moment shows the latest events; it stays while the pointer is over
-            // the chip or the card.
+            // Hovering the count for a moment shows the latest events; it stays while the pointer is over the count
+            // or the card. (Not over Latest: a click with the card open went to closing it, so Latest took two.)
             .popover(isPresented: $showingRecent, arrowEdge: .bottom) {
                 RecentEvents(events: events.recent, open: { event in
                     showingRecent = false
@@ -2087,15 +2082,42 @@ struct EventsChip: View {
                 }
             }
             .padding(.leading, compact ? 8 : 10)
+            .contentShape(Rectangle())
+            .onHover { overChip = $0; updateRecent() }
             if let latest = events.latest {
+                // The pill split in two, not glass in glass (which read as two layers): a hairline, then Latest as
+                // plain text, a soft highlight behind it on hover (a capsule inside the pill, the same margin all
+                // round, so their curves run together).
+                Rectangle()
+                    .fill(.white.opacity(0.18))
+                    .frame(width: 1, height: compact ? 12 : 14)
+                    // Midway: as far from the text as from Latest's symbol (whose button keeps room inside for its
+                    // highlight).
+                    .padding(.leading, compact ? 7 : 10)
+                    // Midway between the words and Latest's mark: as far from the words as Latest's own padding (for
+                    // its highlight) holds its mark from it.
+                    .padding(.leading, compact ? 7 : 10)
                 Button { open(latest) } label: {
-                    if compact { Image(systemName: "play.fill") } else { Label("Latest", systemImage: "play.fill") }
+                    Group {
+                        if compact { Image(systemName: "play.fill") } else { Label("Latest", systemImage: "play.fill") }
+                    }
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, compact ? 7 : 10)
+                    .padding(.vertical, compact ? 3 : 4)
+                    .background(Capsule().fill(.white.opacity(overLatest ? 0.14 : 0)))
+                    .contentShape(Capsule())
                 }
-                .buttonStyle(.glass)
-                // A capsule inside the pill, with the same margin all round, so their curves run together.
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
+                .buttonStyle(.plain)
                 .help("Watch the latest event on the timeline: \(latest.summary)")
+                // On it, the card goes at once, so the click is Latest's.
+                .onHover { over in
+                    withAnimation(.easeOut(duration: 0.12)) { overLatest = over }
+                    guard over else { return }
+                    hoverTask?.cancel()
+                    overChip = false
+                    overCard = false
+                    showingRecent = false
+                }
             }
         }
         .font(compact ? .caption : .callout)
@@ -2153,7 +2175,7 @@ struct TileMessage: View {
     /// What to do about it, as a button under the detail (smaller, or left to the tooltip, on small tiles).
     var action: (label: String, perform: () -> Void)?
 
-    /// Room kept clear above and below: the tile's badges (its state at the top; its name, REC and the rest at the
+    /// Room kept clear above and below: the tile's badges (its state at the top; its name and the rest at the
     /// bottom).
     static let clearTop = 44.0, clearBottom = 54.0
     static let detailWidth = 260.0
