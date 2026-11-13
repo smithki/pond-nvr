@@ -1070,7 +1070,11 @@ struct EventGrid: View {
         }
         switch request.kind {
         case .top:
-            if request.animated {
+            // Far down (the Now button): a far jump, as to a card far off. (Scrolled all the way, every card on the
+            // way flew by, made as it went.)
+            if request.animated, offset > Self.farJump * max(viewHeight, 1) {
+                jump(to: 0)
+            } else if request.animated {
                 speed.steered()
                 withAnimation(Self.bring) { position.scrollTo(edge: .top) }
             } else {

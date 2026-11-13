@@ -83,8 +83,13 @@ struct EventsView: View {
         var front: Bool
     }
 
-    /// The section a search's ranked answer is in (its own, not a day's).
+    /// The section a search's closest few are in, above the days (its own, not a day's).
     nonisolated static let bestMatches = Date.distantFuture
+    /// How many: a row's worth in most windows.
+    nonisolated static let topMatches = 4
+    /// The top row's cards are the same events as in their days: told apart by this before their ids.
+    nonisolated static let topPrefix = "top:"
+    nonisolated static func eventID(_ id: String) -> String { id.hasPrefix(topPrefix) ? String(id.dropFirst(topPrefix.count)) : id }
 
     /// Everything shown that's worked out from the events, worked out once for what it's of (`IndexKey`) and kept: the
     /// view's made again often (the panel opening, each step, the filters), and with a large library, going through
@@ -103,7 +108,7 @@ struct EventsView: View {
         /// The camera's new ones, and those of them shown.
         var newIDs: Set<String> = []
         var unseen: Set<String> = []
-        /// Shown, by day: newest day first (or a search's ranked answer, best first, as one).
+        /// Shown, by day: newest day first. (A search's ranked answer by day too, its closest few above, as one.)
         var days: [(day: Date, events: [TimelineEvent])] = []
         /// Shown, an hour at a time (the rail's shading), by the hour's start.
         var hourCounts: [Date: Int] = [:]
@@ -166,6 +171,11 @@ struct EventsView: View {
         guard newIDs != index.newIDs else { return }
         index.newIDs = newIDs
         index.unseen = Set(index.shown.lazy.filter { newIDs.contains($0.id) }.map(\.id))
+        // (And the top row's, by their own ids.)
+        if index.sections.first?.day == bestMatches {
+            let topUnseen = index.sections[0].ids.filter { newIDs.contains(eventID($0)) }
+            index.unseen.formUnion(topUnseen)
+        }
     }
 
     /// Worked out in one pass over the events (and one over those shown).
@@ -182,24 +192,33 @@ struct EventsView: View {
         var shown = index.forCamera.filter { event in
             !key.hidden.contains(event.kind) && (key.newOnly.map { $0.contains(event.id) || index.newIDs.contains(event.id) } ?? true)
         }
+        // A search's answer by time like any other (ranked, shown in the order it was ranked, it was a different
+        // view, with no days, the rail or the way back, depending on how the question was read); its closest few,
+        // ranked, in a row above.
+        var top: [TimelineEvent] = []
         if let ids = key.search {
             let rank = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
             shown = shown.filter { rank[$0.id] != nil }
-            if key.ranked { shown.sort { rank[$0.id]! < rank[$1.id]! } }
+            if key.ranked { top = Array(shown.sorted { rank[$0.id]! < rank[$1.id]! }.prefix(Self.topMatches)) }
         }
         index.shown = shown
         index.position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         index.unseen = Set(shown.lazy.filter { index.newIDs.contains($0.id) }.map(\.id))
         let calendar = Calendar.current
-        if key.ranked {
-            index.days = shown.isEmpty ? [] : [(Self.bestMatches, shown)]
-        } else {
-            var byDay: [Date: [TimelineEvent]] = [:]
-            for event in shown { byDay[calendar.startOfDay(for: event.start), default: []].append(event) }
-            index.days = byDay.map { (day: $0.key, events: $0.value) }.sorted { $0.day > $1.day }
-        }
+        var byDay: [Date: [TimelineEvent]] = [:]
+        for event in shown { byDay[calendar.startOfDay(for: event.start), default: []].append(event) }
+        index.days = byDay.map { (day: $0.key, events: $0.value) }.sorted { $0.day > $1.day }
         index.sections = index.days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) }
         index.byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // (Only worth a row when there's more than it: all of them in it, the days below were the same again.)
+        if !top.isEmpty, shown.count > top.count {
+            index.sections.insert(EventGridLayout.Section(day: Self.bestMatches, ids: top.map { Self.topPrefix + $0.id }), at: 0)
+            for event in top { index.byID[Self.topPrefix + event.id] = event }
+            // (Worked out first: read lazily while `unseen` was changed, `index` was read in the middle of its change.)
+            let newIDs = index.newIDs
+            let topUnseen = top.filter { newIDs.contains($0.id) }.map { Self.topPrefix + $0.id }
+            index.unseen.formUnion(topUnseen)
+        }
         for event in shown {
             if let hour = calendar.dateInterval(of: .hour, for: event.start)?.start { index.hourCounts[hour, default: 0] += 1 }
         }
@@ -257,13 +276,11 @@ struct EventsView: View {
 
     /// The cards faded away under the panel (a narrow window, an event open).
     var cardsHidden: Bool { selected != nil && panelCovers }
-    /// (Not for a search's best matches: ranked, not by time, they've no place on a rail of hours.)
-    var railShown: Bool { railFits && !(roomMade && railMakesRoom) && !ranked }
-    var ranked: Bool { index.days.first?.day == Self.bestMatches }
+    var railShown: Bool { railFits && !(roomMade && railMakesRoom) }
     /// Where the grid begins: beside the rail, when it's there.
     var gridLeading: Double { railShown ? ActivityRail.width + 14 : 0 }
     /// How much narrower the panel opening makes the grid (less the rail's room, when it goes as the panel comes).
-    var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom && !ranked ? ActivityRail.width + 14 : 0) }
+    var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom ? ActivityRail.width + 14 : 0) }
 
     var body: some View {
         // The grid runs the view's whole height: up under the filters' bar (glass over it, the window's width, once
@@ -779,7 +796,7 @@ struct EventsView: View {
                          panelOpen: open, leading: gridLeading, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
                          unseen: index.unseen, request: $request,
-                         name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
+                         name: names, title: { $0 == Self.bestMatches ? "Top Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
                          onVisible: { onScreen.tell($0) }, onTop: { atTop = $0 },
@@ -1332,7 +1349,8 @@ struct SeenOnScreen: View {
                 guard !new.isEmpty, looking else { return }
                 try? await Task.sleep(for: .seconds(EventsView.seenAfter))
                 guard !Task.isCancelled else { return }
-                model.seenEvents.saw(new.compactMap { position[$0].map { shown[$0] } })
+                // (A top match's card the same event as in its day: seen there too.)
+                model.seenEvents.saw(new.compactMap { position[EventsView.eventID($0)].map { shown[$0] } })
             }
     }
 }

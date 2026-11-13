@@ -170,3 +170,44 @@ import Testing
         #expect(short.leaveFor < short.arriveFor && abs(short.leaveFor + short.arriveFor - 1) < 1e-9)
     }
 }
+
+/// A search's answer: by day, as any other; ranked, its closest few in a row above as well, by ids of their own.
+@Suite struct SearchResultsLayoutTests {
+    func events(_ n: Int) -> [TimelineEvent] {
+        (0 ..< n).map { i in
+            let at = Date(timeIntervalSince1970: 1_800_000_000 - Double(i) * 20_000)
+            return TimelineEvent(id: "e\(i)", camera: "porch", kind: .person, start: at, end: at.addingTimeInterval(10), summary: "")
+        }
+    }
+
+    func key(_ ids: [String], ranked: Bool) -> EventsView.IndexKey {
+        EventsView.IndexKey(events: 1, camera: nil, hidden: [], quietedOnly: false, newOnly: nil, search: ids,
+                            ranked: ranked, seen: 0)
+    }
+
+    @Test func rankedHasTopRowThenDays() {
+        let all = events(10)
+        // Ranked oldest first: the top row's the four oldest, best first; the days still newest first.
+        let ids = all.reversed().map(\.id)
+        let index = EventsView.index(of: all, key: key(ids, ranked: true), isNew: { $0.id == "e9" || $0.id == "e0" })
+        #expect(index.sections.first?.day == EventsView.bestMatches)
+        #expect(index.sections.first?.ids == ["top:e9", "top:e8", "top:e7", "top:e6"])
+        #expect(index.sections.dropFirst().allSatisfy { $0.day != EventsView.bestMatches })
+        #expect(index.sections.dropFirst().flatMap(\.ids) == all.map(\.id))
+        #expect(index.byID["top:e9"]?.id == "e9")
+        #expect(index.unseen == ["e9", "e0", "top:e9"])
+        #expect(EventsView.eventID("top:e9") == "e9")
+    }
+
+    @Test func noTopRowWhenItWouldBeEverything() {
+        let all = events(3)
+        let index = EventsView.index(of: all, key: key(all.map(\.id), ranked: true), isNew: { _ in false })
+        #expect(index.sections.allSatisfy { $0.day != EventsView.bestMatches })
+    }
+
+    @Test func unrankedByDayOnly() {
+        let all = events(10)
+        let index = EventsView.index(of: all, key: key(all.map(\.id), ranked: false), isNew: { _ in false })
+        #expect(index.sections.allSatisfy { $0.day != EventsView.bestMatches })
+    }
+}
