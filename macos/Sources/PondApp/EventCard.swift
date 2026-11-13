@@ -9,6 +9,8 @@ struct EventCard: View, Equatable {
     let event: TimelineEvent
     let camera: String
     let selected: Bool
+    /// Its day said too, not just its time (a search's answer by best match: no days' headers over the cards).
+    var dated = false
     /// Just come in: glows a moment.
     var fresh = false
     /// Not seen yet: the card washed with the accent, and a dot at the end of its last line.
@@ -25,7 +27,7 @@ struct EventCard: View, Equatable {
 
     /// The same if it shows the same (its actions, made anew with each of the grid's, aren't compared).
     nonisolated static func == (a: EventCard, b: EventCard) -> Bool {
-        a.event == b.event && a.camera == b.camera && a.selected == b.selected && a.fresh == b.fresh && a.isNew == b.isNew && a.width == b.width
+        a.event == b.event && a.camera == b.camera && a.selected == b.selected && a.dated == b.dated && a.fresh == b.fresh && a.isNew == b.isNew && a.width == b.width
     }
 
     var body: some View {
@@ -103,7 +105,7 @@ struct EventCard: View, Equatable {
             // Not seen yet: a dot at the end of this line, in room kept for it whether it's there or not, so
             // nothing moves as it's seen (a dot leading the sentence, and the sentence in semibold, both reflowed
             // its words as it was read).
-            Text("\(camera) \u{00B7} \(event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(event.quieted?.words ?? EventCallout.length(event.seconds))")
+            Text("\(camera) \u{00B7} \(dated ? event.start.formatted(.dateTime.month(.abbreviated).day().hour().minute()) : event.start.formatted(date: .omitted, time: .shortened)) \u{00B7} \(event.quieted?.words ?? EventCallout.length(event.seconds))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

@@ -14,18 +14,13 @@ struct EventsView: View {
     /// The event whose details are open, one camera's events or all (nil), the kinds hidden: kept with the app's
     /// model, so coming back (the toolbar's back, say) finds the view as it was left.
     @State private var selected: TimelineEvent?
-    /// The drawer first (Settings › Advanced): the panel slides in over the cards at once, and the grid makes room
-    /// for it after (the cards reshaping once it's in, not as it comes); off, both at once, as one move.
-    @AppStorage(EventsView.drawerFirstKey, store: AppDefaults.store) private var drawerFirst = false
-    static let drawerFirstKey = "eventsDrawerFirst"
-    /// The grid's made room for the panel (with the drawer first: after it's in; otherwise, with it).
+    /// The grid's made room for the panel (with it, as one move).
     @State private var roomMade = false
     /// The panel opened just now (not stepped to another): its details come once it's in, placeholders until then.
     @State private var freshOpen = false
     /// Events read while scrolled down that would move the cards, waiting; and whether it's near the top.
     @State private var held: Read?
     @State private var near = true
-    @State private var making: Task<Void, Never>?
     var camera: String? {
         get { model.eventsState.camera }
         nonmutating set { model.eventsState.camera = newValue }
@@ -62,6 +57,11 @@ struct EventsView: View {
     /// being answered now.
     @State private var question = ""
     @State private var search: SearchResult?
+    /// A search's answer by best match (one that can be: how things looked asked about), else newest first. Its
+    /// own switch, under the search, says which; each answer begins by best match when it can be.
+    @State private var bestMatch = true
+    /// Shown by best match now: no days, the rail dimmed, each card dated.
+    var byBestMatch: Bool { index.days.first?.day == Self.bestMatches }
     /// Why the last question went unanswered (the service isn't running).
     @State private var searchProblem: EventSearcher.Problem?
     @State private var searching = false
@@ -83,13 +83,8 @@ struct EventsView: View {
         var front: Bool
     }
 
-    /// The section a search's closest few are in, above the days (its own, not a day's).
+    /// The section a search's answer is in shown by best match (its own, not a day's).
     nonisolated static let bestMatches = Date.distantFuture
-    /// How many: a row's worth in most windows.
-    nonisolated static let topMatches = 4
-    /// The top row's cards are the same events as in their days: told apart by this before their ids.
-    nonisolated static let topPrefix = "top:"
-    nonisolated static func eventID(_ id: String) -> String { id.hasPrefix(topPrefix) ? String(id.dropFirst(topPrefix.count)) : id }
 
     /// Everything shown that's worked out from the events, worked out once for what it's of (`IndexKey`) and kept: the
     /// view's made again often (the panel opening, each step, the filters), and with a large library, going through
@@ -108,7 +103,7 @@ struct EventsView: View {
         /// The camera's new ones, and those of them shown.
         var newIDs: Set<String> = []
         var unseen: Set<String> = []
-        /// Shown, by day: newest day first. (A search's ranked answer by day too, its closest few above, as one.)
+        /// Shown, by day: newest day first (or a search's answer by best match, best first, as one).
         var days: [(day: Date, events: [TimelineEvent])] = []
         /// Shown, an hour at a time (the rail's shading), by the hour's start.
         var hourCounts: [Date: Int] = [:]
@@ -141,7 +136,7 @@ struct EventsView: View {
     /// What the index would be of, for the events of `version`.
     func indexKey(events version: Int) -> IndexKey {
         IndexKey(events: version, camera: camera, hidden: hidden, quietedOnly: model.eventsState.quietedOnly,
-                 newOnly: model.eventsState.newOnly, search: search?.ids, ranked: search?.ranked ?? false,
+                 newOnly: model.eventsState.newOnly, search: search?.ids, ranked: (search?.ranked ?? false) && bestMatch,
                  // What's seen changes what's shown only with only the new shown; otherwise just which are new is
                  // worked out again (one seen after another, as they come on screen: the whole index each time was
                  // too much).
@@ -171,11 +166,6 @@ struct EventsView: View {
         guard newIDs != index.newIDs else { return }
         index.newIDs = newIDs
         index.unseen = Set(index.shown.lazy.filter { newIDs.contains($0.id) }.map(\.id))
-        // (And the top row's, by their own ids.)
-        if index.sections.first?.day == bestMatches {
-            let topUnseen = index.sections[0].ids.filter { newIDs.contains(eventID($0)) }
-            index.unseen.formUnion(topUnseen)
-        }
     }
 
     /// Worked out in one pass over the events (and one over those shown).
@@ -192,33 +182,24 @@ struct EventsView: View {
         var shown = index.forCamera.filter { event in
             !key.hidden.contains(event.kind) && (key.newOnly.map { $0.contains(event.id) || index.newIDs.contains(event.id) } ?? true)
         }
-        // A search's answer by time like any other (ranked, shown in the order it was ranked, it was a different
-        // view, with no days, the rail or the way back, depending on how the question was read); its closest few,
-        // ranked, in a row above.
-        var top: [TimelineEvent] = []
         if let ids = key.search {
             let rank = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
             shown = shown.filter { rank[$0.id] != nil }
-            if key.ranked { top = Array(shown.sorted { rank[$0.id]! < rank[$1.id]! }.prefix(Self.topMatches)) }
+            if key.ranked { shown.sort { rank[$0.id]! < rank[$1.id]! } }
         }
         index.shown = shown
         index.position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         index.unseen = Set(shown.lazy.filter { index.newIDs.contains($0.id) }.map(\.id))
         let calendar = Calendar.current
-        var byDay: [Date: [TimelineEvent]] = [:]
-        for event in shown { byDay[calendar.startOfDay(for: event.start), default: []].append(event) }
-        index.days = byDay.map { (day: $0.key, events: $0.value) }.sorted { $0.day > $1.day }
+        if key.ranked {
+            index.days = shown.isEmpty ? [] : [(Self.bestMatches, shown)]
+        } else {
+            var byDay: [Date: [TimelineEvent]] = [:]
+            for event in shown { byDay[calendar.startOfDay(for: event.start), default: []].append(event) }
+            index.days = byDay.map { (day: $0.key, events: $0.value) }.sorted { $0.day > $1.day }
+        }
         index.sections = index.days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) }
         index.byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // (Only worth a row when there's more than it: all of them in it, the days below were the same again.)
-        if !top.isEmpty, shown.count > top.count {
-            index.sections.insert(EventGridLayout.Section(day: Self.bestMatches, ids: top.map { Self.topPrefix + $0.id }), at: 0)
-            for event in top { index.byID[Self.topPrefix + event.id] = event }
-            // (Worked out first: read lazily while `unseen` was changed, `index` was read in the middle of its change.)
-            let newIDs = index.newIDs
-            let topUnseen = top.filter { newIDs.contains($0.id) }.map { Self.topPrefix + $0.id }
-            index.unseen.formUnion(topUnseen)
-        }
         for event in shown {
             if let hour = calendar.dateInterval(of: .hour, for: event.start)?.start { index.hourCounts[hour, default: 0] += 1 }
         }
@@ -303,7 +284,7 @@ struct EventsView: View {
                 .animation(nil, value: roomMade)
             if railShown {
                 OnScreenRail(shown: index.shown, position: index.position, hourCounts: index.hourCounts, days: keptDays,
-                             onScreen: onScreen, retention: {
+                             onScreen: onScreen, dimmed: byBestMatch, retention: {
                     model.showSettings(.storage)
                 }) { hour in
                     // The first card at or after that hour (newest first: the last one before the next hour).
@@ -358,25 +339,15 @@ struct EventsView: View {
                                 watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
                                 earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
                                 later: neighbour(of: selected, later: true).map { e in { choose(e) } },
-                                fillAfter: freshOpen ? (drawerFirst
-                                    ? EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer + EventGrid.reshapeTakes + 0.02
-                                    : EventGrid.reshapeTakes + 0.05) : nil)
+                                fillAfter: freshOpen ? EventGrid.reshapeTakes + 0.05 : nil)
                         .id(selected.id)
                         .transition(.identity)
                 }
-                // The drawer first, it's over the cards a moment as it comes and goes: glass, as what floats over
-                // them is, blurring them more than glass alone (a thick material under it), the words over it clear.
-                // In a narrow window too (the cards fade away under it), so the window going narrow doesn't change
-                // one surface into another as it moves. Otherwise the window's own, which hides them: its own
-                // surface is translucent, and the cards would show through it as it widens over them.
+                // The window's own surface, which hides the cards. (Its translucent kind, they showed through it as
+                // it widened over them. Tried and dropped: the drawer first, over the cards on glass, then the cards
+                // making room; one move, together, read better.)
                 .background {
-                    if drawerFirst {
-                        let shape = EventDetail.shape(covering: panelCovers)
-                        shape.fill(.thickMaterial)
-                            .glassEffect(.regular, in: shape)
-                    } else {
-                        EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor))
-                    }
+                    EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor))
                 }
                 .frame(width: panelCovers ? nil : EventDetail.width)
                 .frame(maxWidth: panelCovers ? .infinity : nil, maxHeight: .infinity, alignment: .top)
@@ -552,12 +523,14 @@ struct EventsView: View {
                 let added = others.events.filter { !known.contains($0.id) && !deleted.contains($0.id) }
                 let answer = EventSearcher.merged(result, others.results, includeMine: shown.includes(nil))
                 // The grid crossfades to the answer, at its top.
-                swap(top: true) {
+                // (Into a search from all of them: where they were kept, to come back to.)
+                swap(top: true, remember: search == nil) {
                     if !added.isEmpty {
                         events = (events + added).sorted { $0.start > $1.start }
                         eventsVersion += 1
                     }
                     search = answer
+                    bestMatch = true
                 }
             case let .failure(problem):
                 searchProblem = problem
@@ -571,13 +544,14 @@ struct EventsView: View {
         slow = false
         searchProblem = nil
         // Back to them all, the card at the top still there.
-        if search != nil { swap(top: false) { search = nil } }
+        // (Back where it was before the search.)
+        if search != nil { swap(top: false, restore: true) { search = nil } }
     }
 
     /// The events shown changed wholesale: by the grid, faded out and in, if it's shown (else at once).
-    func swap(top: Bool, _ change: @escaping @MainActor () -> Void) {
+    func swap(top: Bool, remember: Bool = false, restore: Bool = false, _ change: @escaping @MainActor () -> Void) {
         if loaded, !shown.isEmpty {
-            request = GridScroll(kind: .swap(top: top), change: change)
+            request = GridScroll(kind: .swap(top: top), change: changed(change), remember: remember, restore: restore)
         } else {
             withAnimation(.snappy(duration: 0.3)) { change() }
         }
@@ -607,29 +581,15 @@ struct EventsView: View {
     }
 
     /// Opens the panel on an event, or closes it (nil): the panel slides, the cards reshape and the chosen card's
-    /// row glides to the middle of the grid (the grid scrolls in it); the drawer first, then the rest, or all as one.
+    /// row glides to the middle of the grid (the grid scrolls in it), all as one move.
     func panel(_ event: TimelineEvent?) {
         focus = (event ?? selected)?.id
-        making?.cancel()
         let open = event != nil
-        // Over the cards (a narrow window), or the drawer not first: the panel and the grid as one move.
         freshOpen = open && selected == nil
-        guard drawerFirst, !panelCovers else {
-            // (One curve, the grid's zoom's: the panel and the rail move with the cards.)
-            return withAnimation(EventGrid.reshapeAnimation) {
-                selected = event
-                roomMade = open
-            }
-        }
-        // The drawer in (or out) at once, quickly, over the cards; the grid making room (or taking it back) as it
-        // settles, the chosen card's row brought to the middle then.
-        FrameTiming.shared.during(open ? "drawer in" : "drawer out", for: EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer)
-        withAnimation(EventGrid.drawerAnimation) { selected = event }
-        guard roomMade != open else { return }
-        making = Task {
-            try? await Task.sleep(for: .seconds(EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer))
-            guard !Task.isCancelled, (selected != nil) == open else { return }
-            withAnimation(EventGrid.reshapeAnimation) { roomMade = open }
+        // (One curve, the grid's zoom's: the panel and the rail move with the cards.)
+        withAnimation(EventGrid.reshapeAnimation) {
+            selected = event
+            roomMade = open
         }
     }
 
@@ -717,6 +677,15 @@ struct EventsView: View {
         }
     }
 
+    /// A change, made for the grid: told whether what it shows changed with it.
+    func changed(_ change: @escaping @MainActor () -> Void) -> GridChange {
+        { @MainActor in
+            let before = index.sections
+            change()
+            return index.sections != before
+        }
+    }
+
     /// Those held back, let in (the Now button, as the grid goes up).
     func letHeldIn() {
         guard let held else { return }
@@ -796,7 +765,7 @@ struct EventsView: View {
                          panelOpen: open, leading: gridLeading, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
                          unseen: index.unseen, request: $request,
-                         name: names, title: { $0 == Self.bestMatches ? "Top Matches" : Self.dayTitle($0) },
+                         name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
                          onVisible: { onScreen.tell($0) }, onTop: { atTop = $0 },
@@ -805,9 +774,15 @@ struct EventsView: View {
                              if now, let held { self.held = nil; take(held, animated: atTop) }
                          },
                          newWaiting: held.map { $0.arrived.count } ?? 0,
-                         letIn: held == nil ? nil : { @MainActor in letHeldIn() },
+                         letIn: held == nil ? nil : changed { letHeldIn() },
                          onScrolled: { scrolled = $0 },
-                         onUnderBottom: { underBottom = $0 })
+                         onUnderBottom: { underBottom = $0 },
+                         byBestMatch: byBestMatch,
+                         order: search.map { found in
+                             EventGrid.GridOrder(bestMatch: byBestMatch, canRank: found.ranked) { best in
+                                 swap(top: true) { bestMatch = best }
+                             }
+                         })
         }
     }
 
@@ -1349,8 +1324,7 @@ struct SeenOnScreen: View {
                 guard !new.isEmpty, looking else { return }
                 try? await Task.sleep(for: .seconds(EventsView.seenAfter))
                 guard !Task.isCancelled else { return }
-                // (A top match's card the same event as in its day: seen there too.)
-                model.seenEvents.saw(new.compactMap { position[EventsView.eventID($0)].map { shown[$0] } })
+                model.seenEvents.saw(new.compactMap { position[$0].map { shown[$0] } })
             }
     }
 }

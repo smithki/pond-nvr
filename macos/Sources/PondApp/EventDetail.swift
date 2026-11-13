@@ -54,9 +54,14 @@ struct EventDetail: View {
     var aspect: Double { CameraAspect.known(event.camera) ?? 16.0 / 9.0 }
     @Environment(\.panelCovers) private var covers
 
-    /// Its corners: 18 pt, floating beside the cards; over them (a narrow window, down to its bottom edge), the bottom
-    /// two follow the window's curve.
-    static func shape(covering: Bool) -> ConcentricRectangle { .panel(radius: 18, byWindowBottom: covering) }
+    /// Its corners: 18 pt, but those by the window's own: beside the cards, down by the window's bottom right
+    /// corner, that one follows the window's curve; over them (a narrow window, the window's width), the bottom two.
+    static func shape(covering: Bool) -> ConcentricRectangle {
+        let floating = Edge.Corner.Style.fixed(18)
+        let window = Edge.Corner.Style.concentric(minimum: .fixed(8))
+        return ConcentricRectangle(topLeadingCorner: floating, topTrailingCorner: floating,
+                                   bottomLeadingCorner: covering ? window : floating, bottomTrailingCorner: window)
+    }
 
     var body: some View {
         ScrollView {
@@ -324,7 +329,7 @@ struct EventDetail: View {
     func prepare() async {
         // Not while the panel's sliding in and the grid making room (or the arrows are stepping through): the
         // player's made once they're still.
-        try? await Task.sleep(for: .seconds(EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer + EventGrid.panelSpring.duration + 0.05))
+        try? await Task.sleep(for: .seconds(EventGrid.reshapeTakes + 0.1))
         guard !Task.isCancelled else { return }
         let camera = event.camera, source = self.source
         // Another Pond's: its clip, played as it comes (fetched by the service); only its picture until it has one.

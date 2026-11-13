@@ -32,15 +32,22 @@ struct OnScreenRail: View {
     let hourCounts: [Date: Int]
     let days: Int
     let onScreen: GridOnScreen
+    /// The grid by best match, not by time: the rail kept (so nothing moves), but dimmed, unshaded and still,
+    /// having nothing to say of it.
+    var dimmed = false
     let retention: () -> Void
     let go: (Date) -> Void
 
     var body: some View {
         // (From the cards on screen, a few: not by going through every event.)
-        let onScreenEvents = onScreen.cards.compactMap { position[$0].map { shown[$0] } }
+        let onScreenEvents = dimmed ? [] : onScreen.cards.compactMap { position[$0].map { shown[$0] } }
         let starts = onScreenEvents.map(\.start)
-        ActivityRail(counts: hourCounts, days: days, onScreen: Set(onScreenEvents.map { Calendar.current.startOfDay(for: $0.start) }),
+        ActivityRail(counts: dimmed ? [:] : hourCounts, days: days,
+                     onScreen: Set(onScreenEvents.map { Calendar.current.startOfDay(for: $0.start) }),
                      window: starts.min().flatMap { low in starts.max().map { low ... $0 } }, retention: retention, go: go)
+            .opacity(dimmed ? 0.4 : 1)
+            .allowsHitTesting(!dimmed)
+            .animation(.smooth(duration: 0.3), value: dimmed)
     }
 }
 
