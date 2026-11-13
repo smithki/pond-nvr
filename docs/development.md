@@ -47,6 +47,8 @@ open -n -W --env POND_SNAPSHOTS=$(mktemp -d) --env POND_SNAPSHOTS_ONLY=transitio
 
 The step `panels` does only the detail panel, opened and closed 20 times (near the top, then far down), and writes `panels.txt`: with little else going on, it's the one to run under `sample`. Both steps keep macOS from napping the app while they run (a hidden window's timers are otherwise slowed, and the check timed its own naps), but a window behind others is still drawn less faithfully: compare two builds run the same way, one after the other, rather than against figures from another day.
 
+**The Events page in AppKit (while it's made).** `defaults write camera.pond eventsAppKitGrid -bool true` (the demo's: `camera.pond.demo`) draws the page with `EventsShell`: the grid (`EventGridAppKit`, layer-backed cards), the rail and the detail panel laid out and moved by one AppKit view, every move run by Core Animation on one curve; what's in the rail and the panel is SwiftUI's, hosted. Off (the default), the SwiftUI page as before. Compare the two with the `panels` step, one after the other.
+
 `POND_STALLS=1` (any run) logs each main-thread wait over 40 ms with what the grid was doing then (`/usr/bin/log stream --predicate 'subsystem == "camera.pond" AND category == "frames"'`). To find what a stall is, `/usr/bin/sample <pid> 30` during the check; for the main thread's own code, sum the samples under functions `in PondApp`.
 
 **Trying it without a camera.** Demo mode (`make demo`, [demo.md](demo.md)) has made-up cameras recorded, watched and controlled like real ones, a second home to reach, H.265 cameras, and scenarios for what goes wrong, in a world of their own.

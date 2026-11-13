@@ -14,6 +14,8 @@ struct EventsView: View {
     /// The event whose details are open, one camera's events or all (nil), the kinds hidden: kept with the app's
     /// model, so coming back (the toolbar's back, say) finds the view as it was left.
     @State private var selected: TimelineEvent?
+    /// The grid in AppKit (`EventGridAppKit`), while it's made: a hidden setting.
+    @AppStorage("eventsAppKitGrid", store: AppDefaults.store) private var appKitGrid = false
     /// The grid's made room for the panel (with it, as one move).
     @State private var roomMade = false
     /// The panel opened just now (not stepped to another): its details come once it's in, placeholders until then.
@@ -263,14 +265,19 @@ struct EventsView: View {
     /// How much narrower the panel opening makes the grid (less the rail's room, when it goes as the panel comes).
     var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom ? ActivityRail.width + 14 : 0) }
 
-    var body: some View {
-        // The grid runs the view's whole height: up under the filters' bar (glass over it, the window's width, once
-        // anything's under it) and down to the window's edge (under glass there too). The rail and the panel sit
-        // between the two.
-        // The grid given its room at once, as it will be (the rail's and the panel's taken off its sides, not
-        // animated): it moves its cards there itself, from where they were. Its room animated with the rail and the
-        // panel, it was laid out again at each width on the way, a row losing a card and getting it back as the rail
-        // went and the panel came. The rail slides over its side.
+    /// The page's surface: the cards, the rail beside them, the glass at the window's edge and the panel over it. In
+    /// AppKit (`EventsShell`, with the AppKit grid), one view moving them all as one; or SwiftUI's own.
+    @ViewBuilder
+    var layers: some View {
+        if appKitGrid {
+            shell
+        } else {
+            swiftUILayers
+        }
+    }
+
+    @ViewBuilder
+    var swiftUILayers: some View {
         ZStack(alignment: .topLeading) {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -302,24 +309,6 @@ struct EventsView: View {
             }
         }
         .padding(.horizontal, 16)
-        // (The toolbar without a backing of its own: with the window inactive, macOS 26 draws a hairline under its
-        // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
-        // out.png --inactive` without this, and look under the toolbar.)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        // New cards on screen a moment, the window in front and the cards not under the panel: seen. By a view of its
-        // own, which alone reads what's on screen: read here, every row the grid scrolled past made this whole view
-        // again (and its list of events gone through dozens of times), mid-scroll.
-        .background {
-            SeenOnScreen(onScreen: onScreen, unseen: index.unseen, shown: index.shown, position: index.position,
-                         looking: windowState == .key && !cardsHidden)
-        }
-        // And one opened.
-        .onChange(of: selected?.id) { if let selected { model.seenEvents.saw([selected]) } }
-        .onGeometryChange(for: Double.self) { $0.size.width } action: { new in
-            // Into another size class: the rail and the panel move to their new places, animated.
-            let next = SizeClass(new)
-            if next != sizeClass { withAnimation(EventGrid.panelAnimation) { sizeClass = next } }
-        }
         // Glass over the grid's edges, blurring the cards that scroll on under them, the window's width, while
         // anything's under it: under the filters, easing out just below; at the window's edge, easing in towards it.
         .overlay(alignment: .bottom) {
@@ -361,6 +350,86 @@ struct EventsView: View {
         // (Read by the panel's coming and going as it moves: a panel opened in one size class and closed in another
         // goes the way the window's class is now. A transition chosen here would be the one it came in with.)
         .environment(\.panelCovers, panelCovers)
+    }
+
+    /// The width the page has (the grid's room worked out from it, for the AppKit shell).
+    @State private var shellWidth = 0.0
+
+    var shell: some View {
+        let open = roomMade && !panelCovers
+        let gridWidth = max(200, shellWidth - 32 - gridLeading - (open ? EventDetail.width + 14 : 0))
+        let showsGrid = loaded && !shown.isEmpty
+        let placeholder: AnyView? = showsGrid ? nil : AnyView(content)
+        let rail: AnyView? = railShown ? AnyView(railView) : nil
+        return EventsShell(grid: showsGrid ? makeGrid(width: gridWidth) : nil, placeholder: placeholder,
+                           rail: rail,
+                           railKey: EventsShell.RailKey(hourCounts: index.hourCounts, days: keptDays, dimmed: byBestMatch, shown: index.shown.count),
+                           panel: selected.map { AnyView(panelView($0)) },
+                           panelKey: selected.map { s in
+                               EventsShell.PanelKey(event: s, camera: name(s.camera), fresh: freshOpen,
+                                                    earlier: neighbour(of: s, later: false)?.id, later: neighbour(of: s, later: true)?.id,
+                                                    covers: panelCovers)
+                           },
+                           glass: AnyView(EdgeGlass(fromTop: false)), glassShown: underBottom,
+                           barHeight: barHeight, gridLeading: gridLeading, roomMade: roomMade, panelCovers: panelCovers,
+                           cardsHidden: cardsHidden, model: model)
+    }
+
+    /// The rail, as it's drawn beside the cards.
+    var railView: some View {
+        OnScreenRail(shown: index.shown, position: index.position, hourCounts: index.hourCounts, days: keptDays,
+                     onScreen: onScreen, dimmed: byBestMatch, retention: {
+            model.showSettings(.storage)
+        }) { hour in
+            // The first card at or after that hour (newest first: the last one before the next hour).
+            let next = hour.addingTimeInterval(3600)
+            if let target = shown.last(where: { $0.start < next && $0.start >= hour }) ?? shown.first(where: { $0.start < next }) {
+                request = GridScroll(kind: .centre(target.id, always: true))
+            }
+        }
+    }
+
+    /// The panel's own: an event's details, on the window's surface.
+    func panelView(_ selected: TimelineEvent) -> some View {
+        EventDetail(event: selected, camera: name(selected.camera), recordings: model.config?.storage.recordingsPath ?? "",
+                    source: EventSource(config: model.config),
+                    watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
+                    earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
+                    later: neighbour(of: selected, later: true).map { e in { choose(e) } },
+                    fillAfter: freshOpen ? EventGrid.reshapeTakes + 0.05 : nil)
+            .id(selected.id)
+            .background { EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor)) }
+            .environment(\.panelCovers, panelCovers)
+    }
+
+    var body: some View {
+        // The grid runs the view's whole height: up under the filters' bar (glass over it, the window's width, once
+        // anything's under it) and down to the window's edge (under glass there too). The rail and the panel sit
+        // between the two.
+        // The grid given its room at once, as it will be (the rail's and the panel's taken off its sides, not
+        // animated): it moves its cards there itself, from where they were. Its room animated with the rail and the
+        // panel, it was laid out again at each width on the way, a row losing a card and getting it back as the rail
+        // went and the panel came. The rail slides over its side.
+        layers
+        // (The toolbar without a backing of its own: with the window inactive, macOS 26 draws a hairline under its
+        // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
+        // out.png --inactive` without this, and look under the toolbar.)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        // New cards on screen a moment, the window in front and the cards not under the panel: seen. By a view of its
+        // own, which alone reads what's on screen: read here, every row the grid scrolled past made this whole view
+        // again (and its list of events gone through dozens of times), mid-scroll.
+        .background {
+            SeenOnScreen(onScreen: onScreen, unseen: index.unseen, shown: index.shown, position: index.position,
+                         looking: windowState == .key && !cardsHidden)
+        }
+        // And one opened.
+        .onChange(of: selected?.id) { if let selected { model.seenEvents.saw([selected]) } }
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { new in
+            // Into another size class: the rail and the panel move to their new places, animated.
+            let next = SizeClass(new)
+            if next != sizeClass { withAnimation(EventGrid.panelAnimation) { sizeClass = next } }
+            shellWidth = new
+        }
         .overlay(alignment: .top) {
             EdgeGlass(fromTop: true)
                 .frame(height: barHeight + Self.glassEase)
@@ -759,9 +828,21 @@ struct EventsView: View {
         let names: (String) -> String = { named[$0] ?? name($0) }
         let index = index
         return GeometryReader { geo in
-            EventGrid(sections: index.sections, events: index.byID,
-                         width: max(200, geo.size.width),
-                         columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
+            makeGrid(width: max(200, geo.size.width), open: open, names: names, index: index)
+        }
+    }
+
+    /// The grid's inputs, for a grid `width` wide: the SwiftUI grid itself, or what the AppKit grid's told.
+    func makeGrid(width: Double, open: Bool? = nil, names: ((String) -> String)? = nil, index: EventsIndex? = nil) -> EventGrid {
+        let open = open ?? (roomMade && !panelCovers)
+        let index = index ?? self.index
+        let names = names ?? {
+            let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
+            return { named[$0] ?? name($0) }
+        }()
+        return EventGrid(sections: index.sections, events: index.byID,
+                         width: width,
+                         columns: Self.columnCount(width + (open ? panelTakes : 0)),
                          panelOpen: open, leading: gridLeading, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
                          unseen: index.unseen, request: $request,
@@ -783,7 +864,6 @@ struct EventsView: View {
                                  swap(top: true) { bestMatch = best }
                              }
                          })
-        }
     }
 
     /// As many as fit at least 300 wide in the width there is without the panel (the panel narrows them, it doesn't
