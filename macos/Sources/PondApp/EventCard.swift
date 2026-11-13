@@ -31,29 +31,18 @@ struct EventCard: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             EventPicture(event: event, aspect: aspect, frame: 16.0 / 9.0)
-            // Its words, as wide as the card's to be: as the card's width changes (the panel coming or going), those
-            // for the old width fade into those for the new, each still (reflowing, a frame at a time, they
-            // squirmed, and drawing them each frame was a quarter of the main thread's time).
-            ZStack(alignment: .topLeading) {
-                if let leaving {
-                    words(for: leaving).opacity(leavingOpacity)
-                }
-                words(for: width).opacity(1 - leavingOpacity)
-            }
-            .padding(.horizontal, 4)
-            .frame(maxWidth: .infinity, minHeight: EventGridLayout.textHeight, maxHeight: EventGridLayout.textHeight, alignment: .topLeading)
-            .clipped()
-            .onChange(of: width) { old, new in
-                // (Not for a window being resized a little at a time: there the words simply follow.)
-                guard abs(new - old) > 8 else { return }
-                leaving = old
-                leavingOpacity = 1
-                withAnimation(.easeInOut(duration: Self.crossfade)) { leavingOpacity = 0 } completion: {
-                    if leavingOpacity == 0 { leaving = nil }
-                }
-            }
+            // Its words, laid out for the card's width (a change of it, the panel opening or closing, under the
+            // grid's crossfade from the cards as they were), not animated: reflowing a frame at a time, they squirmed.
+            words(for: width)
+                .animation(nil, value: width)
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: EventGridLayout.textHeight, maxHeight: EventGridLayout.textHeight, alignment: .topLeading)
+                .clipped()
         }
         .padding(EventGridLayout.pad)
+        // Filling the grid's room for it, from its top left: what's in it a moment narrower than the room (its words
+        // laid out for another width as it resizes), it was centred in it, the gaps either side of it widening.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.quaternary.opacity(hovering || selected ? 0.9 : 0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         // Not seen yet: the card washed with the accent, fading as it's seen (no change to its size or words).
         .background(Color.accentColor.opacity(isNew ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -100,17 +89,10 @@ struct EventCard: View, Equatable {
     }
 
     /// Its sentence, and the line under it: camera, time, how long.
-    /// Laid out for a card `width` wide, at once (never a width on the way from one to another).
+    /// Its words, laid out for a card `width` wide.
     func words(for width: Double) -> some View {
-        words
-            .frame(width: max(0, width - 2 * EventGridLayout.pad - 8), alignment: .leading)
-            .animation(nil, value: width)
+        words.frame(width: max(0, width - 2 * EventGridLayout.pad - 8), alignment: .leading)
     }
-
-    /// The width its words were laid out for before, fading out (as those for its width now fade in), and how far.
-    @State private var leaving: Double?
-    @State private var leavingOpacity = 0.0
-    static let crossfade = 0.3
 
     var words: some View {
         VStack(alignment: .leading, spacing: 3) {

@@ -21,6 +21,10 @@ struct EventDetail: View {
     /// The event before and after it (in what's shown), if there are.
     var earlier: (() -> Void)?
     var later: (() -> Void)?
+    /// Opened just now (not stepped to from another): its own picture, what was seen, the facts and the actions
+    /// come this long after, once the panel's in and the cards have made room, placeholders until then (made with
+    /// the panel, they were a good part of its first frame).
+    var fillAfter: Double?
     /// The watch button's height (the menu beside it is drawn as tall), and the pointer over the menu.
     @State private var actionHeight = 0.0
     @State private var menuHovered = false
@@ -41,6 +45,8 @@ struct EventDetail: View {
     @State private var origin: Date?
     @State private var sightings: [Sighting] = []
     @State private var noRecording = false
+    /// The player's showing its first picture (the event's own picture faded away over it).
+    @State private var playing = false
     /// The recording file it begins in (or its clip, `isClip`).
     @State private var recording: String?
     @State private var isClip = false
@@ -56,10 +62,14 @@ struct EventDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
-                clip
-                seen
-                facts
-                actions
+                if filled {
+                    clip
+                    seen
+                    facts
+                    actions
+                } else {
+                    placeholders
+                }
             }
             .padding(16)
         }
@@ -69,6 +79,12 @@ struct EventDetail: View {
         .contentMargins(.vertical, 8, for: .scrollIndicators)
         .background(.quaternary.opacity(0.5), in: Self.shape(covering: covers))
         .task { await prepare() }
+        .task {
+            guard !filled else { return }
+            try? await Task.sleep(for: .seconds(fillAfter ?? 0))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { filled = true }
+        }
         .onDisappear {
             // Stopped at once, let go once the panel's gone (letting go of a player takes a while: as the panel
             // slid away, it held up its first frames).
@@ -81,6 +97,39 @@ struct EventDetail: View {
                 player?.removeAllItems()
             }
         }
+    }
+
+    /// Opened (not stepped to), filled once the drawer's in and the cards have made room.
+    @State private var filled = true
+
+    init(event: TimelineEvent, camera: String, recordings: String, source: EventSource?, watch: @escaping () -> Void,
+         close: @escaping () -> Void, delete: @escaping () -> Void, earlier: (() -> Void)? = nil, later: (() -> Void)? = nil,
+         fillAfter: Double? = nil) {
+        self.event = event
+        self.camera = camera
+        self.recordings = recordings
+        self.source = source
+        self.watch = watch
+        self.close = close
+        self.delete = delete
+        self.earlier = earlier
+        self.later = later
+        self.fillAfter = fillAfter
+        _filled = State(initialValue: fillAfter == nil)
+    }
+
+    /// Where the picture and the rest go, until they come: quiet blocks their size.
+    var placeholders: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.quaternary.opacity(0.6))
+                .aspectRatio(aspect, contentMode: .fit)
+            HStack(spacing: 10) {
+                ForEach(0 ..< 2, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary.opacity(0.4)).frame(height: 70)
+                }
+            }
+        }
+        .transition(.opacity)
     }
 
     /// What it was, in a sentence; where and how long ago; the way to the events either side, and out.
@@ -227,13 +276,16 @@ struct EventDetail: View {
 
     /// The recording round it, looping, with its boxes; its picture until the recording's ready (or if there's none).
     var clip: some View {
+        // The picture over the player until it has a picture of its own to show, then fading into it (shown as
+        // soon as it was made, it flashed: nothing a moment, then the clip).
         ZStack {
-            EventPicture(event: event, aspect: aspect).opacity(origin == nil ? 1 : 0)
             if origin != nil, let player {
-                PlayerLayerView(player: player)
+                PlayerLayerView(player: player, ready: {
+                    withAnimation(.easeInOut(duration: 0.3)) { playing = true }
+                })
                     .aspectRatio(aspect, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                if boxes, let origin {
+                if boxes, playing, let origin {
                     SwiftUI.TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
                         let seconds = player.currentTime().seconds
                         DetectionBoxes(boxes: seconds.isFinite ? TimelineModel.glide(in: sightings, at: origin.addingTimeInterval(seconds)) : [],
@@ -241,11 +293,15 @@ struct EventDetail: View {
                     }
                     .aspectRatio(aspect, contentMode: .fit)
                     .allowsHitTesting(false)
+                    .transition(.opacity)
                 }
             }
+            EventPicture(event: event, aspect: aspect)
+                .opacity(playing ? 0 : 1)
+                .allowsHitTesting(!playing)
         }
         .overlay(alignment: .bottomTrailing) {
-            if origin != nil {
+            if origin != nil, playing {
                 Button { boxes.toggle() } label: {
                     Image(systemName: "viewfinder").symbolVariant(boxes ? .fill : .none)
                         .font(.callout).frame(width: 26, height: 26).contentShape(Circle())
@@ -266,8 +322,9 @@ struct EventDetail: View {
     /// Its clip (its own, once the service has made it; until then, the recording from a little before to a little
     /// after), looping and muted, and what was found in it.
     func prepare() async {
-        // Not while the panel's sliding in (or the arrows are stepping through): the player's made once it's still.
-        try? await Task.sleep(for: .seconds(EventGrid.panelSpring.duration + 0.05))
+        // Not while the panel's sliding in and the grid making room (or the arrows are stepping through): the
+        // player's made once they're still.
+        try? await Task.sleep(for: .seconds(EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer + EventGrid.panelSpring.duration + 0.05))
         guard !Task.isCancelled else { return }
         let camera = event.camera, source = self.source
         // Another Pond's: its clip, played as it comes (fetched by the service); only its picture until it has one.

@@ -1486,6 +1486,9 @@ struct CameraTile: View {
     /// the picture never goes black between them. Each stream keeps its own view all along (moved to a new view, a stream was
     /// drawn for a frame at the tile's final size while the tile was still animating to it).
     @State private var incoming: LiveStream?
+    /// The incoming stream faded in over the current one (it then takes over).
+    @State private var incomingShown = false
+    static let crossfade = 0.3
     @State private var noPassword = false
     @State private var pointerInside = false
     /// The events popover is open: it has the pointer or the keyboard, so the tile's controls stay.
@@ -1546,14 +1549,16 @@ struct CameraTile: View {
                         .opacity(playing ? 1 : 0.35)
                 }
                 if frozen == nil {
-                    // The stream taking over underneath, drawing all along (unseen, a view doesn't draw, and one
-                    // shown later rose from black); the current one over it until the new one is ready.
+                    // The stream taking over over the current one, all but unseen and drawing all along (unseen
+                    // altogether, a view doesn't draw, and one shown later rose from black), until it's ready: then
+                    // faded in over it, the current one whole underneath (both fading, the picture dimmed by a
+                    // quarter halfway), which then goes.
                     // Made private: faded out where it is (then stopped); taken out at once, its view was drawn
                     // shrinking into a corner as the change animated.
                     let hidden = model.isPrivate(camera.id)
-                    ForEach([incoming, stream].compactMap { $0 }) { s in
+                    ForEach([stream, incoming].compactMap { $0 }) { s in
                         VideoLayerView(layer: s.layer, videoSize: s.size)
-                            .opacity(s.state == .playing && !hidden ? 1 : 0)
+                            .opacity(s.state == .playing && !hidden ? (s === incoming && !incomingShown ? 0.001 : 1) : 0)
                     }
                 }
             }
@@ -1903,6 +1908,7 @@ struct CameraTile: View {
         }
         incoming?.stop()
         incoming = nil
+        incomingShown = false
         if let previous {
             s.muted = true
             incoming = s
@@ -1915,18 +1921,22 @@ struct CameraTile: View {
             for _ in 0 ..< 100 where (s.state != .playing || Date().timeIntervalSince(started) < Self.settle) && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
             }
-            // A cut, not a fade: the same scene either way, and fading one video over another here dimmed the
-            // picture by a quarter halfway through.
+            // Faded in over the old one, whole underneath (fading both, the picture dimmed by a quarter halfway);
+            // then it takes over, the old one stopped.
             if incoming === s {
-                var instant = Transaction()
-                instant.disablesAnimations = true
-                withTransaction(instant) {
-                    s.muted = !audible
-                    stream = s
-                    incoming = nil
+                withAnimation(.easeInOut(duration: Self.crossfade)) { incomingShown = true } completion: {
+                    guard incoming === s else { return }
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) {
+                        s.muted = !audible
+                        stream = s
+                        incoming = nil
+                        incomingShown = false
+                    }
+                    model.liveFeeds[camera.id] = s
+                    previous.stop()
                 }
-                model.liveFeeds[camera.id] = s
-                previous.stop()
             }
         } else {
             stream?.stop()
@@ -1948,6 +1958,7 @@ struct CameraTile: View {
         incoming?.stop()
         stream = nil
         incoming = nil
+        incomingShown = false
     }
 }
 

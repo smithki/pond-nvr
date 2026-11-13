@@ -31,6 +31,7 @@ struct GeneralSettings: View {
 /// Advanced: beta and test features, and the app itself (its version, its settings file).
 struct AdvancedSettings: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(EventsView.drawerFirstKey, store: AppDefaults.store) private var drawerFirst = false
 
     var body: some View {
         Form {
@@ -55,6 +56,14 @@ struct AdvancedSettings: View {
                     Text("Made-up cameras, recorded, watched and found in like real ones, in a copy of Pond of its own: your settings, recordings and recorder aren\u{2019}t touched.")
                         .foregroundStyle(.secondary)
                 }
+            }
+            Section {
+                Toggle(isOn: $drawerFirst) {
+                    Text("Open an event\u{2019}s details over the cards first")
+                    Text("The details slide in at once, and the cards make room after. Off, both move together.")
+                }
+            } header: {
+                Text("Events")
             }
             if Updates.shared.available { UpdatesSection() }
             Section {

@@ -1960,11 +1960,14 @@ struct SplitGrip: View {
 /// Shows an AVPlayer's video, kept the size of the view.
 struct PlayerLayerView: NSViewRepresentable {
     let player: AVPlayer
+    /// Told once it has a picture to show (until then it shows nothing: what's over it can stay till this).
+    var ready: (@MainActor () -> Void)?
 
     func makeNSView(context: Context) -> NSView {
         let view = PlayerHost()
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
+        if let ready { view.whenReady(ready) }
         return view
     }
 
@@ -1983,6 +1986,24 @@ struct PlayerLayerView: NSViewRepresentable {
         }
 
         required init?(coder: NSCoder) { nil }
+
+        private var watching: NSKeyValueObservation?
+        private var ready: (@MainActor () -> Void)?
+
+        func whenReady(_ ready: @escaping @MainActor () -> Void) {
+            self.ready = ready
+            watching = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        // (Once.)
+                        let ready = self?.ready
+                        self?.ready = nil
+                        ready?()
+                    }
+                }
+            }
+        }
 
         override func makeBackingLayer() -> CALayer { playerLayer }
     }

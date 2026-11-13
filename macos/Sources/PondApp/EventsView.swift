@@ -14,6 +14,18 @@ struct EventsView: View {
     /// The event whose details are open, one camera's events or all (nil), the kinds hidden: kept with the app's
     /// model, so coming back (the toolbar's back, say) finds the view as it was left.
     @State private var selected: TimelineEvent?
+    /// The drawer first (Settings › Advanced): the panel slides in over the cards at once, and the grid makes room
+    /// for it after (the cards reshaping once it's in, not as it comes); off, both at once, as one move.
+    @AppStorage(EventsView.drawerFirstKey, store: AppDefaults.store) private var drawerFirst = false
+    static let drawerFirstKey = "eventsDrawerFirst"
+    /// The grid's made room for the panel (with the drawer first: after it's in; otherwise, with it).
+    @State private var roomMade = false
+    /// The panel opened just now (not stepped to another): its details come once it's in, placeholders until then.
+    @State private var freshOpen = false
+    /// Events read while scrolled down that would move the cards, waiting; and whether it's near the top.
+    @State private var held: Read?
+    @State private var near = true
+    @State private var making: Task<Void, Never>?
     var camera: String? {
         get { model.eventsState.camera }
         nonmutating set { model.eventsState.camera = newValue }
@@ -245,15 +257,33 @@ struct EventsView: View {
 
     /// The cards faded away under the panel (a narrow window, an event open).
     var cardsHidden: Bool { selected != nil && panelCovers }
-    var railShown: Bool { railFits && !(selected != nil && railMakesRoom) }
+    /// (Not for a search's best matches: ranked, not by time, they've no place on a rail of hours.)
+    var railShown: Bool { railFits && !(roomMade && railMakesRoom) && !ranked }
+    var ranked: Bool { index.days.first?.day == Self.bestMatches }
+    /// Where the grid begins: beside the rail, when it's there.
+    var gridLeading: Double { railShown ? ActivityRail.width + 14 : 0 }
     /// How much narrower the panel opening makes the grid (less the rail's room, when it goes as the panel comes).
-    var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom ? ActivityRail.width + 14 : 0) }
+    var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom && !ranked ? ActivityRail.width + 14 : 0) }
 
     var body: some View {
         // The grid runs the view's whole height: up under the filters' bar (glass over it, the window's width, once
         // anything's under it) and down to the window's edge (under glass there too). The rail and the panel sit
         // between the two.
-        HStack(alignment: .top, spacing: 14) {
+        // The grid given its room at once, as it will be (the rail's and the panel's taken off its sides, not
+        // animated): it moves its cards there itself, from where they were. Its room animated with the rail and the
+        // panel, it was laid out again at each width on the way, a row losing a card and getting it back as the rail
+        // went and the panel came. The rail slides over its side.
+        ZStack(alignment: .topLeading) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Under the panel in a narrow window: faded away while it's open (back as it closes).
+                .opacity(cardsHidden ? 0 : 1)
+                .allowsHitTesting(!cardsHidden)
+                .padding(.leading, gridLeading)
+                // (The panel's room: the panel's drawn over the glass at the window's edge, below.)
+                .padding(.trailing, roomMade && !panelCovers ? EventDetail.width + 14 : 0)
+                .animation(nil, value: gridLeading)
+                .animation(nil, value: roomMade)
             if railShown {
                 OnScreenRail(shown: index.shown, position: index.position, hourCounts: index.hourCounts, days: keptDays,
                              onScreen: onScreen, retention: {
@@ -268,16 +298,9 @@ struct EventsView: View {
                 .frame(width: ActivityRail.width)
                 .padding(.top, barHeight)
                 .zIndex(1)
+                // (Sliding with the grid's zoom, one curve: it goes as the cards take its room, and comes as they
+                // make it.)
                 .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Under the panel in a narrow window: faded away while it's open (back as it closes).
-                .opacity(cardsHidden ? 0 : 1)
-                .allowsHitTesting(!cardsHidden)
-            // The panel's room (the panel's drawn over the glass at the window's edge, below).
-            if selected != nil, !panelCovers {
-                Color.clear.frame(width: EventDetail.width)
             }
         }
         .padding(.horizontal, 16)
@@ -317,18 +340,32 @@ struct EventsView: View {
                                 source: EventSource(config: model.config),
                                 watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
                                 earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
-                                later: neighbour(of: selected, later: true).map { e in { choose(e) } })
+                                later: neighbour(of: selected, later: true).map { e in { choose(e) } },
+                                fillAfter: freshOpen ? (drawerFirst
+                                    ? EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer + EventGrid.reshapeTakes + 0.02
+                                    : EventGrid.reshapeTakes + 0.05) : nil)
                         .id(selected.id)
                         .transition(.identity)
                 }
-                // (Over the cards, it hides them: its own surface's translucent. Beside them too, where it looks the same,
-                // so the cards don't show through it as it widens over them, the window going narrow.)
-                .background(Color(nsColor: .windowBackgroundColor), in: EventDetail.shape(covering: panelCovers))
+                // The drawer first, it's over the cards a moment as it comes and goes: glass, as what floats over
+                // them is, blurring them more than glass alone (a thick material under it), the words over it clear.
+                // In a narrow window too (the cards fade away under it), so the window going narrow doesn't change
+                // one surface into another as it moves. Otherwise the window's own, which hides them: its own
+                // surface is translucent, and the cards would show through it as it widens over them.
+                .background {
+                    if drawerFirst {
+                        let shape = EventDetail.shape(covering: panelCovers)
+                        shape.fill(.thickMaterial)
+                            .glassEffect(.regular, in: shape)
+                    } else {
+                        EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor))
+                    }
+                }
                 .frame(width: panelCovers ? nil : EventDetail.width)
                 .frame(maxWidth: panelCovers ? .infinity : nil, maxHeight: .infinity, alignment: .top)
                 .padding(.top, barHeight)
-                // (Ending where the glass at the window's edge begins: clear of it. Over the cards, to the edge.)
-                .padding(.bottom, panelCovers ? 16 : Self.bottomFade)
+                // (Its full height, over the glass at the window's edge, to the edge.)
+                .padding(.bottom, 16)
                 .padding(.horizontal, 16)
                 .transition(.modifier(active: PanelComing(away: true), identity: PanelComing(away: false)))
             }
@@ -553,10 +590,30 @@ struct EventsView: View {
     }
 
     /// Opens the panel on an event, or closes it (nil): the panel slides, the cards reshape and the chosen card's
-    /// row glides to the middle of the grid, one animation (the grid scrolls in it).
+    /// row glides to the middle of the grid (the grid scrolls in it); the drawer first, then the rest, or all as one.
     func panel(_ event: TimelineEvent?) {
         focus = (event ?? selected)?.id
-        withAnimation(EventGrid.panelAnimation) { selected = event }
+        making?.cancel()
+        let open = event != nil
+        // Over the cards (a narrow window), or the drawer not first: the panel and the grid as one move.
+        freshOpen = open && selected == nil
+        guard drawerFirst, !panelCovers else {
+            // (One curve, the grid's zoom's: the panel and the rail move with the cards.)
+            return withAnimation(EventGrid.reshapeAnimation) {
+                selected = event
+                roomMade = open
+            }
+        }
+        // The drawer in (or out) at once, quickly, over the cards; the grid making room (or taking it back) as it
+        // settles, the chosen card's row brought to the middle then.
+        FrameTiming.shared.during(open ? "drawer in" : "drawer out", for: EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer)
+        withAnimation(EventGrid.drawerAnimation) { selected = event }
+        guard roomMade != open else { return }
+        making = Task {
+            try? await Task.sleep(for: .seconds(EventGrid.drawerSpring.duration * EventGrid.roomAfterDrawer))
+            guard !Task.isCancelled, (selected != nil) == open else { return }
+            withAnimation(EventGrid.reshapeAnimation) { roomMade = open }
+        }
     }
 
     /// The event shown just before or after this one (the grid is newest first).
@@ -569,6 +626,7 @@ struct EventsView: View {
 
     /// Another event's details (the arrows): its card's row brought to the middle if it isn't wholly in view.
     func choose(_ event: TimelineEvent) {
+        freshOpen = false
         selected = event
         focus = event.id
         request = GridScroll(kind: .centre(event.id, always: false))
@@ -600,6 +658,55 @@ struct EventsView: View {
         model.mode = .timeline
     }
 
+    /// Events read, and what's worked out from them, to show (or, scrolled down, held back until the Now button or
+    /// a scroll up lets them in).
+    struct Read: Sendable {
+        let found: [TimelineEvent]
+        /// Those there were when they were read, and those that weren't among them.
+        let before: [TimelineEvent]
+        let arrived: Set<String>
+        /// Whether any came or went (moving the cards), or only changed.
+        let moves: Bool
+        let version: Int
+        let key: IndexKey
+        let seen: Int
+        let index: EventsIndex
+    }
+
+    /// Shown (the grid moving with them at the top: `animated`), if those there are are still those they were
+    /// read beside (else read again).
+    func take(_ read: Read, animated: Bool) {
+        guard events == read.before else {
+            Task { await load() }
+            return
+        }
+        withAnimation(animated ? .snappy(duration: 0.4) : nil) {
+            events = read.found
+            eventsVersion = read.version
+        }
+        // (Kept for these events, unless what it's of changed meanwhile: then worked out again when asked.)
+        if indexKey(events: read.version) == read.key, model.seenEvents.version == read.seen {
+            indexKept.key = read.key
+            indexKept.seen = read.seen
+            indexKept.index = read.index
+        }
+        let arrived = read.arrived
+        if !arrived.isEmpty {
+            fresh.formUnion(arrived)
+            Task {
+                try? await Task.sleep(for: .seconds(NewEventGlow.lasts))
+                fresh.subtract(arrived)
+            }
+        }
+    }
+
+    /// Those held back, let in (the Now button, as the grid goes up).
+    func letHeldIn() {
+        guard let held else { return }
+        self.held = nil
+        take(held, animated: false)
+    }
+
     func load() async {
         guard let source = EventSource(config: model.config) else { return }
         let from = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-Double(keptDays - 1) * 86400)
@@ -618,39 +725,32 @@ struct EventsView: View {
         // read, every ten seconds, held up the grid's moving otherwise, tens of milliseconds with many events).
         let deleted = deleted, before = events, version = eventsVersion + 1, first = !loaded
         let key = indexKey(events: version), seen = model.seenEvents.version, isNew = model.seenEvents.newness
-        let read = await Task.detached { () -> (found: [TimelineEvent], arrived: Set<String>, index: EventsIndex)? in
+        let read = await Task.detached { () -> Read? in
             let found = (own + others)
                 .filter { $0.kind != .privacy && !deleted.contains($0.id) }
                 .sorted { $0.start > $1.start }
             guard found != before else { return nil }
             // New ones (after the first read) come in smoothly, the others making room, and glow a moment.
             let arrived = !first ? Set(found.map(\.id)).subtracting(before.map(\.id)) : []
-            return (found, arrived, Self.index(of: found, key: key, isNew: isNew))
+            return Read(found: found, before: before, arrived: arrived, moves: found.map(\.id) != before.map(\.id),
+                        version: version, key: key, seen: seen, index: Self.index(of: found, key: key, isNew: isNew))
         }.value
-        if let (found, arrived, index) = read, events == before {
-            // (Scrolled down, without animation: the grid keeps what's on screen where it is.)
-            withAnimation(loaded && atTop ? .snappy(duration: 0.4) : nil) {
-                events = found
-                eventsVersion = version
-            }
-            // (Kept for these events, unless what it's of changed meanwhile: then worked out again when asked.)
-            if indexKey(events: version) == key, model.seenEvents.version == seen {
-                indexKept.key = key
-                indexKept.seen = seen
-                indexKept.index = index
-            }
-            if !arrived.isEmpty {
-                fresh.formUnion(arrived)
-                Task {
-                    try? await Task.sleep(for: .seconds(NewEventGlow.lasts))
-                    fresh.subtract(arrived)
-                }
+        if let read, events == before {
+            // Further down than a short scroll from the top, those that would move the cards (come or gone) wait,
+            // counted on the Now button, which lets them in as it goes up (or they come in once it's near the top):
+            // the cards on screen not moved by them as they're read or as the panel reshapes them.
+            if loaded, read.moves, !near {
+                held = read
+            } else {
+                held = nil
+                take(read, animated: loaded && atTop)
             }
         }
         // The open one, as it is now (an ongoing one goes on); on coming back, the one that was open, in view.
         if let open = selected, let now = events.first(where: { $0.id == open.id }), now != open { selected = now }
         if !loaded, selected == nil, let id = model.eventsSelected, let was = events.first(where: { $0.id == id }) {
             selected = was
+            roomMade = true
             focus = id
             request = GridScroll(kind: .centre(id, always: true), animated: false)
         }
@@ -666,7 +766,7 @@ struct EventsView: View {
     /// panel, so the panel opening narrows the cards (smoothly) instead of changing how many there are a row.
     var grid: some View {
         // (Over the cards, the panel doesn't narrow them.)
-        let open = selected != nil && !panelCovers
+        let open = roomMade && !panelCovers
         // Each camera named once here, not as each card's made, frame after frame (each time asking for the list of
         // cameras anew).
         let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
@@ -676,13 +776,20 @@ struct EventsView: View {
             EventGrid(sections: index.sections, events: index.byID,
                          width: max(200, geo.size.width),
                          columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
-                         panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
+                         panelOpen: open, leading: gridLeading, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
                          unseen: index.unseen, request: $request,
                          name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
-                         onVisible: { onScreen.tell($0) }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },
+                         onVisible: { onScreen.tell($0) }, onTop: { atTop = $0 },
+                         onNear: { now in
+                             near = now
+                             if now, let held { self.held = nil; take(held, animated: atTop) }
+                         },
+                         newWaiting: held.map { $0.arrived.count } ?? 0,
+                         letIn: held == nil ? nil : { @MainActor in letHeldIn() },
+                         onScrolled: { scrolled = $0 },
                          onUnderBottom: { underBottom = $0 })
         }
     }
