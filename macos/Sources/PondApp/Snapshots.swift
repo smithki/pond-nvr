@@ -56,24 +56,34 @@ enum Snapshots {
         if wants("panels") {
             model.mode = .events
             try? await Task.sleep(for: .seconds(5))
-            var lates: [Double] = []
+            // Timed apart: while things move (the half second after each open or close), and after (what's made
+            // once it's still: a stall then holds nothing up that's seen moving).
+            var moving: [Double] = [], after: [Double] = []
+            func timed(_ action: EventsDrive.Action) async {
+                FrameTiming.shared.begin()
+                model.eventsDrive = EventsDrive(action: action)
+                try? await Task.sleep(for: .seconds(0.5))
+                moving += FrameTiming.shared.end()
+                FrameTiming.shared.begin()
+                try? await Task.sleep(for: .seconds(0.7))
+                after += FrameTiming.shared.end()
+            }
             for round in 0 ..< 20 {
                 let n = round % 2 == 0 ? 12 + round : 3000 + round * 100
                 if round == 1 || round % 2 == 0 {
                     model.eventsDrive = EventsDrive(action: .centre(n))
                     try? await Task.sleep(for: .seconds(1.5))
                 }
-                FrameTiming.shared.begin()
-                model.eventsDrive = EventsDrive(action: .open(n))
-                try? await Task.sleep(for: .seconds(1.2))
-                model.eventsDrive = EventsDrive(action: .close)
-                try? await Task.sleep(for: .seconds(1.2))
-                lates += FrameTiming.shared.end()
+                await timed(.open(n))
+                await timed(.close)
             }
-            let ms = lates.map { $0 * 1000 }.sorted()
-            let report = String(format: "panel open and close: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n",
-                                ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)],
-                                ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            func line(_ name: String, _ lates: [Double]) -> String {
+                let ms = lates.map { $0 * 1000 }.sorted()
+                return String(format: "%@: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n", name,
+                              ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)],
+                              ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            }
+            let report = line("panel open and close, moving", moving) + line("panel open and close, after", after)
             try? report.write(toFile: "\(dir)/panels.txt", atomically: true, encoding: .utf8)
         }
         // The Events view's transitions, timed (run on a large library: POND_DEMO_EVENTS): each kind's slowest frame,

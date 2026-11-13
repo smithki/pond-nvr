@@ -15,8 +15,11 @@ struct EventsShell: NSViewRepresentable {
     /// The rail, if it's shown, and what it shows (made again only when that changes).
     let rail: AnyView?
     let railKey: RailKey
-    /// The panel, if an event's open, and what it shows.
-    let panel: AnyView?
+    /// The event open in the panel, if one is; the panel for an event, and its skeleton (what slides in when it's
+    /// opened before the panel's been made: made on the pointer resting on its card, it's ready); and what it shows.
+    let selected: TimelineEvent?
+    let panelFor: (TimelineEvent) -> AnyView
+    let skeletonFor: (TimelineEvent) -> AnyView
     let panelKey: PanelKey?
     /// The glass at the window's edge, and whether anything's under it.
     let glass: AnyView
@@ -39,7 +42,6 @@ struct EventsShell: NSViewRepresentable {
     struct PanelKey: Equatable {
         var event: TimelineEvent
         var camera: String
-        var fresh: Bool
         var earlier: String?
         var later: String?
         var covers: Bool
@@ -56,7 +58,14 @@ final class EventsShellView: NSView {
     private let placeholder = NSHostingView(rootView: AnyView(EmptyView()))
     private let rail = NSHostingView(rootView: AnyView(EmptyView()))
     private let glass = PassThroughHosting(rootView: AnyView(EmptyView()))
-    private let panel = NSHostingView(rootView: AnyView(EmptyView()))
+    private var panel = NSHostingView(rootView: AnyView(EmptyView()))
+    /// The panel made ahead, off the window, for the card the pointer's resting on: swapped in for the panel when
+    /// that card's opened, ready.
+    private var ready = NSHostingView(rootView: AnyView(EmptyView()))
+    private var readyFor: String?
+    private var resting: UUID?
+    /// The skeleton's in, the panel to follow once it's slid in.
+    private var filling: UUID?
     private var shown: EventsShell?
     private var railKey: EventsShell.RailKey?
     private var panelKey: EventsShell.PanelKey?
@@ -71,19 +80,22 @@ final class EventsShellView: NSView {
         grid = GridHostView(model: model)
         super.init(frame: .zero)
         wantsLayer = true
-        for view in [placeholder, rail, panel] { view.sizingOptions = [] }
+        for view in [placeholder, rail, panel, ready] { view.sizingOptions = [] }
         // Bottom to top: the cards, the rail beside them, the glass at the window's edge, the panel over that.
-        for view in [grid, placeholder, rail, glass, panel] as [NSView] {
+        for view in [grid, placeholder, rail, glass, panel, ready] as [NSView] {
             view.wantsLayer = true
             view.isHidden = true
             addSubview(view)
         }
-        panel.layerUsesCoreImageFilters = true
-        let blur = CIFilter(name: "CIGaussianBlur")!
-        blur.name = "blur"
-        blur.setValue(0, forKey: kCIInputRadiusKey)
-        panel.layer?.filters = [blur]
+        for view in [panel, ready] {
+            view.layerUsesCoreImageFilters = true
+            let blur = CIFilter(name: "CIGaussianBlur")!
+            blur.name = "blur"
+            blur.setValue(0, forKey: kCIInputRadiusKey)
+            view.layer?.filters = [blur]
+        }
         glass.isHidden = false
+        grid.onHoverCard = { [weak self] event in self?.rested(on: event) }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -126,6 +138,8 @@ final class EventsShellView: NSView {
         placeholder.frame = g
         rail.frame = railFrame(s)
         panel.frame = panelFrame(s)
+        // (Off the window, at the panel's size: laid out as it will be.)
+        ready.frame = panelFrame(s).offsetBy(dx: bounds.width + 4000, dy: 0)
         glass.frame = glassFrame()
     }
 
@@ -139,14 +153,51 @@ final class EventsShellView: NSView {
             railKey = s.railKey
             rail.rootView = AnyView(content.environment(model))
         }
-        if let content = s.panel, s.panelKey != panelKey {
+        let opening = old?.selected == nil && s.selected != nil
+        if let event = s.selected, s.panelKey != panelKey {
             panelKey = s.panelKey
-            panel.rootView = AnyView(content.environment(model))
+            if opening, readyFor == event.id {
+                // Made ahead (the pointer rested on its card): it slides in as it is, nothing made now.
+                swap(&panel, &ready)
+                readyFor = nil
+                ready.isHidden = true
+                ready.rootView = AnyView(EmptyView())
+                addSubview(panel, positioned: .above, relativeTo: glass)
+                // (Brought up to date, though it's the same event: what's either side may have changed.)
+                panel.rootView = AnyView(s.panelFor(event).environment(model))
+            } else if opening {
+                // Not ready: its skeleton slides in, made in a moment; the panel in its place once it's in.
+                panel.rootView = AnyView(s.skeletonFor(event).environment(model))
+                let id = UUID()
+                filling = id
+                DispatchQueue.main.asyncAfter(deadline: .now() + spring("", from: nil, to: nil).duration) { [weak self] in
+                    guard let self, self.filling == id, let shown = self.shown, let now = shown.selected else { return }
+                    self.filling = nil
+                    self.panel.rootView = AnyView(shown.panelFor(now).environment(self.model))
+                }
+            } else if filling == nil {
+                // Stepped to another (the panel's in): at once.
+                panel.rootView = AnyView(s.panelFor(event).environment(model))
+            }
         }
         if let placeholderView = s.placeholder { placeholder.rootView = AnyView(placeholderView.environment(model)) }
         glass.rootView = s.glass
         // Where they go now (the cards' room given at once: the grid moves them there itself).
         place(s)
+        // The bars' room changed (a row under the filters come or gone): the rail and the panel eased down or up
+        // with it, as the cards are (`GridHostView.update`), on the bar's own curve.
+        if let old, old.barHeight != s.barHeight {
+            for view in [rail, panel] as [NSView] {
+                guard let layer = view.layer else { continue }
+                let a = CASpringAnimation(perceptualDuration: 0.35, bounce: 0)
+                a.keyPath = "transform"
+                a.fromValue = GridHostView.moving(layer, from: view.frame, to: view.frame.offsetBy(dx: 0, dy: old.barHeight - s.barHeight), scale: 1)
+                a.toValue = CATransform3DIdentity
+                a.isAdditive = true
+                a.duration = a.settlingDuration
+                layer.add(a, forKey: "inset")
+            }
+        }
         placeholder.isHidden = s.placeholder == nil
         grid.isHidden = s.grid == nil
         // All the moves of this change begin together, on the panel's curve.
@@ -165,8 +216,8 @@ final class EventsShellView: NSView {
         let railShown = s.rail != nil
         if first || (old?.rail != nil) != railShown { slideRail(in: railShown, animated: !first) }
         // The panel: in from the side (or up from the bottom, over the cards), out the same way.
-        let panelShown = s.panel != nil
-        if first || (old?.panel != nil) != panelShown { slidePanel(in: panelShown, covers: s.panelCovers, animated: !first) }
+        let panelShown = s.selected != nil
+        if first || (old?.selected != nil) != panelShown { slidePanel(in: panelShown, covers: s.panelCovers, animated: !first) }
         // The glass at the window's edge, while anything's under it.
         let glassAlpha: Float = s.glassShown && !s.cardsHidden ? 1 : 0
         if let layer = glass.layer, layer.opacity != glassAlpha {
@@ -174,6 +225,34 @@ final class EventsShellView: NSView {
         }
         CATransaction.commit()
     }
+
+    // MARK: The panel made ahead
+
+    /// The pointer on a card (or off them): resting there a moment, its panel's made, off the window, so opening it
+    /// only slides it in (its player readied too); off the cards a while, let go (its player with it).
+    private func rested(on event: TimelineEvent?) {
+        let id = UUID()
+        resting = id
+        guard let event else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.resting == id, self.readyFor != nil else { return }
+                self.readyFor = nil
+                self.ready.isHidden = true
+                self.ready.rootView = AnyView(EmptyView())
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.restFor) { [weak self] in
+            guard let self, self.resting == id, self.readyFor != event.id, self.shown?.selected == nil,
+                  let shown = self.shown else { return }
+            self.readyFor = event.id
+            self.ready.rootView = AnyView(shown.panelFor(event).environment(self.model))
+            self.ready.isHidden = false
+        }
+    }
+
+    /// How long the pointer rests on a card before its panel's made (passing over cards, none is).
+    static let restFor = 0.3
 
     // MARK: The moves
 

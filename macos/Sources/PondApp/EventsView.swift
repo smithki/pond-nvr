@@ -364,9 +364,14 @@ struct EventsView: View {
         return EventsShell(grid: showsGrid ? makeGrid(width: gridWidth) : nil, placeholder: placeholder,
                            rail: rail,
                            railKey: EventsShell.RailKey(hourCounts: index.hourCounts, days: keptDays, dimmed: byBestMatch, shown: index.shown.count),
-                           panel: selected.map { AnyView(panelView($0)) },
+                           selected: selected,
+                           panelFor: { AnyView(panelView($0)) },
+                           skeletonFor: { event in
+                               AnyView(EventDetail.skeleton(event: event, camera: name(event.camera), covers: panelCovers)
+                                   .background { EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor)) })
+                           },
                            panelKey: selected.map { s in
-                               EventsShell.PanelKey(event: s, camera: name(s.camera), fresh: freshOpen,
+                               EventsShell.PanelKey(event: s, camera: name(s.camera),
                                                     earlier: neighbour(of: s, later: false)?.id, later: neighbour(of: s, later: true)?.id,
                                                     covers: panelCovers)
                            },
@@ -395,8 +400,7 @@ struct EventsView: View {
                     source: EventSource(config: model.config),
                     watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
                     earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
-                    later: neighbour(of: selected, later: true).map { e in { choose(e) } },
-                    fillAfter: freshOpen ? EventGrid.reshapeTakes + 0.05 : nil)
+                    later: neighbour(of: selected, later: true).map { e in { choose(e) } })
             .id(selected.id)
             .background { EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor)) }
             .environment(\.panelCovers, panelCovers)

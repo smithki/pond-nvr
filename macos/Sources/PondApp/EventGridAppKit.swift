@@ -134,12 +134,20 @@ final class GridHostView: NSView {
         scroll.scrollerInsets = NSEdgeInsets(top: grid.topInset, left: 0, bottom: grid.bottomInset, right: 5)
         sizeDocument()
         if old == nil { motion.measured(panelOpen: grid.panelOpen, leading: grid.leading) }
-        if old?.leading != grid.leading, old?.panelOpen == grid.panelOpen { motion.moved(to: grid.leading, panelOpen: grid.panelOpen) }
+        let railChanged = old.map { $0.leading != grid.leading && $0.panelOpen == grid.panelOpen } ?? false
+        if railChanged { _ = motion.panelChanged(open: grid.panelOpen, leading: grid.leading) }
         if let old, let before, viewHeight > 0 {
             if old.panelOpen != grid.panelOpen {
                 scroll.frame = bounds
                 sizeDocument()
                 panelChanged(from: before)
+            } else if railChanged {
+                // The rail come or gone with the window's size (the panel open, it's the rail or the panel): the cards
+                // zoom to their new room, as when the panel opens, the rail sliding beside them. (Moved there at once,
+                // the rail slid in over the cards.)
+                scroll.frame = bounds
+                sizeDocument()
+                zoom(from: before, to: anchored(from: before), shiftX: old.leading - grid.leading)
             } else if old.sections != grid.sections, motion.waiting == nil {
                 eventsChanged(from: before)
             } else if old.width != grid.width || old.columns != grid.columns {
@@ -147,6 +155,21 @@ final class GridHostView: NSView {
             }
         }
         refresh()
+        // The bars' room above the cards changed (a row under the filters come or gone, a search's): the cards, the
+        // pinned day and the switch eased there, as the bar's row is (`EventsView.barHeight`), not put there at once.
+        if let old, old.topInset != grid.topInset, viewHeight > 0 {
+            let dy = old.topInset - grid.topInset
+            for view in [document, pinned, order] as [NSView] {
+                guard let layer = view.layer else { continue }
+                let a = CASpringAnimation(perceptualDuration: 0.35, bounce: 0)
+                a.keyPath = "transform"
+                a.fromValue = Self.moving(layer, from: view.frame, to: view.frame.offsetBy(dx: 0, dy: dy), scale: 1)
+                a.toValue = CATransform3DIdentity
+                a.isAdditive = true
+                a.duration = a.settlingDuration
+                layer.add(a, forKey: "inset")
+            }
+        }
         if let request = grid.request, request.id != performed {
             performed = request.id
             // (After this update: it changes the Events view's state.)
@@ -225,6 +248,8 @@ final class GridHostView: NSView {
             card.layer?.transform = CATransform3DIdentity
             card.layer?.opacity = 1
             card.layer?.filters = nil
+            card.layer?.zPosition = 0
+            card.layer?.shadowOpacity = 0
             CATransaction.commit()
             return card
         }
@@ -465,8 +490,9 @@ final class GridHostView: NSView {
             a.duration = a.settlingDuration
             return a
         }
-        func from(_ layer: CALayer?, frame: CGRect, drawnAt: CGRect, key: String, after delay: Double) {
+        func from(_ layer: CALayer?, frame: CGRect, drawnAt: CGRect, key: String, after delay: Double, lift: Bool = false) {
             guard let layer, drawnAt.origin != frame.origin else { return }
+            if lift { self.lift(layer, by: hypot(drawnAt.minX - frame.minX, drawnAt.minY - frame.minY), after: delay) }
             let a = spring()
             a.keyPath = "transform"
             a.fromValue = Self.moving(layer, from: frame, to: drawnAt, scale: 1)
@@ -492,7 +518,7 @@ final class GridHostView: NSView {
         for (id, card) in cards where !card.isHidden {
             if let at = was[id] {
                 // (Kept where it was on screen: the scroll moved under it.)
-                from(card.layer, frame: card.frame, drawnAt: at.offsetBy(dx: 0, dy: dy), key: "flip", after: moveAt)
+                from(card.layer, frame: card.frame, drawnAt: at.offsetBy(dx: 0, dy: dy), key: "flip", after: moveAt, lift: true)
             } else {
                 fade(card, in: true, after: inAt, over: Self.fadeIn)
             }
@@ -514,6 +540,32 @@ final class GridHostView: NSView {
             }
         }
         _ = config
+    }
+
+    /// A card lifted off the grid while it moves: over those it passes (higher the further it's going), a shadow
+    /// under it, set down as it lands. (Level with them, crossing, their glassy backgrounds ran into each other.)
+    fileprivate func lift(_ layer: CALayer, by distance: Double, after delay: Double) {
+        let lasts = CASpringAnimation(perceptualDuration: EventGrid.panelSpring.duration, bounce: 0).settlingDuration
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.zPosition = 1 + min(distance, 4000) / 4000
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowRadius = 10
+        // (Down, as SwiftUI's shadow(y: 3) is: up's positive in an unflipped layer.)
+        layer.shadowOffset = CGSize(width: 0, height: (layer.superlayer?.contentsAreFlipped() ?? true) ? 3 : -3)
+        layer.shadowPath = GridCardView.continuous(layer.bounds, radius: GridCardView.corner)
+        layer.shadowOpacity = 0
+        CATransaction.commit()
+        let shadow = CAKeyframeAnimation(keyPath: "shadowOpacity")
+        shadow.values = [0, 0.35, 0.35, 0]
+        shadow.keyTimes = [0, 0.15, 0.7, 1]
+        shadow.duration = lasts
+        shadow.beginTime = CACurrentMediaTime() + delay
+        layer.add(shadow, forKey: "lift")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + lasts) { [weak layer] in
+            guard let layer, layer.animation(forKey: "lift") == nil else { return }
+            layer.zPosition = 0
+        }
     }
 
     /// The fades either side of a move of the cards, and when the move's far enough on for those coming to fade in.
@@ -709,7 +761,9 @@ final class GridHostView: NSView {
             scrubLabel.animator().alphaValue = on ? 1 : 0
         }
         if let layer = scrubLabel.layer {
-            let small = CATransform3DMakeScale(0.94, 0.94, 1)
+            // (About its middle.)
+            let f = scrubLabel.frame
+            let small = Self.moving(layer, from: f, to: f.insetBy(dx: f.width * 0.03, dy: f.height * 0.03), scale: 0.94)
             let a = CABasicAnimation(keyPath: "transform")
             a.fromValue = on ? small : CATransform3DIdentity
             a.toValue = on ? CATransform3DIdentity : small
@@ -952,7 +1006,11 @@ final class GridHostView: NSView {
         if let hovered { cards[hovered]?.hovering = false }
         hovered = id
         if let id { cards[id]?.hovering = true }
+        onHoverCard?(id.flatMap { config?.events[$0] })
     }
+
+    /// The card under the pointer (its event), as it changes: for the Events shell to ready its panel.
+    var onHoverCard: ((TimelineEvent?) -> Void)?
 
     func menu(at point: NSPoint) -> NSMenu? {
         guard let config, let hit = card(at: point), let event = config.events[hit.id] else { return nil }
@@ -1271,10 +1329,7 @@ extension GridHostView {
             card.frame = f.offsetBy(dx: -stageRect.minX, dy: -stageRect.minY)
             staged.append(card)
         }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            scroll.verticalScroller?.animator().alphaValue = 0
-        }
+        scrollerFade(in: false)
 
         // At each point of the curve: each layer's cards (one transform a layer: the zoom's the same for every card
         // in it), faded and blurred; the headers going from where they were to where they are with the cards about
@@ -1414,13 +1469,29 @@ extension GridHostView {
             spare.append(g)
         }
         z.clip.removeFromSuperview()
-        // Its scroller back, once it's still: shown where it is now, then left to fade as it does.
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            scroll.verticalScroller?.animator().alphaValue = 1
-        }
+        // Its scroller back, once it's still: shown where it is now, fading in there, then left to fade as it does.
         scroll.flashScrollers()
+        scrollerFade(in: true)
         refresh()
+    }
+
+    /// The scroller faded out (the grid zooming: the scroll's put where it ends at once, and the scroller jumped
+    /// there alone), or in. (Its layer: an overlay scroller's own alpha is AppKit's, and it took no notice.)
+    fileprivate func scrollerFade(in coming: Bool) {
+        guard let scroller = scroll.verticalScroller else { return }
+        scroller.wantsLayer = true
+        guard let layer = scroller.layer else { return }
+        let to: Float = coming ? 1 : 0
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.fromValue = layer.presentation()?.opacity ?? layer.opacity
+        a.toValue = to
+        a.duration = coming ? 0.25 : 0.12
+        a.timingFunction = CAMediaTimingFunction(name: coming ? .easeOut : .easeIn)
+        layer.add(a, forKey: "fade")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = to
+        CATransaction.commit()
     }
 }
 

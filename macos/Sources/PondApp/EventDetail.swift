@@ -123,6 +123,42 @@ struct EventDetail: View {
         _filled = State(initialValue: fillAfter == nil)
     }
 
+    /// The panel as it slides in when it's opened before it's ready (`EventsShell`): its header's words and its
+    /// placeholders, laid out as the panel is, and nothing else (no scroll view, no glass buttons, no player), so
+    /// it's made in a moment. The panel itself in its place once it's in.
+    static func skeleton(event: TimelineEvent, camera: String, covers: Bool) -> some View {
+        let aspect = CameraAspect.known(event.camera) ?? 16.0 / 9.0
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    KindBadge(event: event)
+                    Spacer()
+                    HStack(spacing: 2) {
+                        ForEach(0 ..< 2, id: \.self) { _ in Circle().fill(.quaternary).frame(width: 28, height: 28) }
+                    }
+                    Circle().fill(.quaternary).frame(width: 28, height: 28)
+                }
+                Text(event.summary)
+                    .font(.title2.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(camera) \u{00B7} \(event.ongoing ? "now" : event.start.formatted(.relative(presentation: .named)))")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.quaternary.opacity(0.6))
+                .aspectRatio(aspect, contentMode: .fit)
+            HStack(spacing: 10) {
+                ForEach(0 ..< 2, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary.opacity(0.4)).frame(height: 70)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.quaternary.opacity(0.5), in: shape(covering: covers))
+    }
+
     /// Where the picture and the rest go, until they come: quiet blocks their size.
     var placeholders: some View {
         VStack(alignment: .leading, spacing: 16) {
