@@ -846,7 +846,9 @@ struct EventsView: View {
         }()
         return EventGrid(sections: index.sections, events: index.byID,
                          width: width,
-                         columns: Self.columnCount(width + (open ? panelTakes : 0)),
+                         // (One a row in a narrow window, whatever its width: two fit at its widest, and going between one
+                         // and two there, by a few points, the rows kept changing.)
+                         columns: sizeClass == .narrow ? 1 : Self.columnCount(width + (open ? panelTakes : 0)),
                          panelOpen: open, leading: gridLeading, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
                          unseen: index.unseen, request: $request,

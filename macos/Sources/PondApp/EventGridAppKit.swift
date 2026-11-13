@@ -57,6 +57,9 @@ final class GridHostView: NSView {
     fileprivate let scrubLabel = PassThroughHosting(rootView: AnyView(EmptyView()))
     private var performed: UUID?
     private var resizeStep: UUID?
+    /// The cards a row kept as they were through a zoom made by the window's size (the rail coming or going), the
+    /// new number taken up at once when it's done: zoomed with the rest as one surface, then the rows changed.
+    fileprivate var heldColumns: Int?
     /// Set by the Events shell before an update that's the window's size class changing (not the panel opening or
     /// closing, though the grid's told the panel's open or not: over the cards, it isn't).
     var sizeClassChanged = false
@@ -131,7 +134,7 @@ final class GridHostView: NSView {
         let before = laidOut
         // A far jump under way: events come meanwhile wait till it's settled (a swap's own, though, it lands).
         if let old, old.sections != grid.sections, motion.holdsEvents { motion.hold(old.sections) }
-        let now = cache.layout(sections: drawnSections, width: grid.width - gutter, columns: grid.columns)
+        let now = cache.layout(sections: drawnSections, width: grid.width - gutter, columns: heldColumns ?? grid.columns)
         laidOut = now
         // (Its scroller where SwiftUI's scroll view has it: in from the edge a little; measured, side by side.)
         scroll.scrollerInsets = NSEdgeInsets(top: grid.topInset, left: 0, bottom: grid.bottomInset, right: 5)
@@ -149,8 +152,20 @@ final class GridHostView: NSView {
         if let old, let before, viewHeight > 0, byWindow, old.panelOpen != grid.panelOpen || railChanged {
             if old.panelOpen != grid.panelOpen { _ = motion.panelChanged(open: grid.panelOpen, leading: grid.leading) }
             scroll.frame = bounds
-            sizeDocument()
-            land(at: anchored(from: before))
+            if railChanged, old.panelOpen == grid.panelOpen {
+                // The rail come or gone with the window's size: the cards zoom to their new room as one surface with
+                // it, as when the panel opens (moved there at once, or slid, they jumped to their new size first); the
+                // cards a row as they were till it's done, then the new number at once.
+                if before.columns != grid.columns {
+                    heldColumns = before.columns
+                    laidOut = cache.layout(sections: drawnSections, width: grid.width - gutter, columns: before.columns)
+                }
+                sizeDocument()
+                zoom(from: before, to: anchored(from: before), shiftX: old.leading - grid.leading)
+            } else {
+                sizeDocument()
+                land(at: anchored(from: before))
+            }
         } else if let old, let before, viewHeight > 0 {
             if old.panelOpen != grid.panelOpen {
                 scroll.frame = bounds
@@ -670,6 +685,8 @@ final class GridHostView: NSView {
 
     /// The window resized: the card at the top as it began kept where it was, every step.
     private func resized(from before: EventGridLayout) {
+        // (Mid-zoom, the window still being dragged: the zoom's own; its end puts the cards where they go.)
+        if zooming != nil { return }
         guard let laidOut, let anchor = motion.resizing(from: place(in: before)), let card = laidOut.cards[anchor.id] else { return }
         land(at: Double(card.minY) - anchor.y)
         let step = UUID()
@@ -1489,6 +1506,13 @@ extension GridHostView {
             spare.append(g)
         }
         z.clip.removeFromSuperview()
+        // The cards a row held through it: the new number now, at once, the top card kept where it is.
+        if heldColumns != nil, let config, let mid = laidOut {
+            heldColumns = nil
+            laidOut = cache.layout(sections: drawnSections, width: config.width - gutter, columns: config.columns)
+            sizeDocument()
+            land(at: anchored(from: mid))
+        }
         // Its scroller back, once it's still: shown where it is now, fading in there, then left to fade as it does.
         scroll.flashScrollers()
         scrollerFade(in: true)

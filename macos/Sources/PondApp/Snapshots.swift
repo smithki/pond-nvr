@@ -57,6 +57,16 @@ enum Snapshots {
         if wants("resizes"), let window = mainWindow() {
             model.mode = .events
             try? await Task.sleep(for: .seconds(5))
+            // No card open first: across the rail's size (it goes, and comes back).
+            let first = window.frame
+            for width in [900.0, 700, 900] {
+                var frame = window.frame
+                frame.size.width = width
+                window.setFrame(frame, display: true, animate: false)
+                try? await Task.sleep(for: .seconds(1.2))
+            }
+            window.setFrame(first, display: true, animate: false)
+            try? await Task.sleep(for: .seconds(1))
             model.eventsDrive = EventsDrive(action: .centre(400))
             try? await Task.sleep(for: .seconds(1.5))
             model.eventsDrive = EventsDrive(action: .open(400))

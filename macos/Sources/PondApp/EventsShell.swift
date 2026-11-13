@@ -220,17 +220,7 @@ final class EventsShellView: NSView {
         let railShown = s.rail != nil
         if first || (old?.rail != nil) != railShown {
             slideRail(in: railShown, animated: !first)
-            // The rail come or gone with the window's size (not the panel): the cards slide over beside it, into its
-            // room or out of it, the same move (the panel's, they zoom with it). (Put there at once, the rail slid
-            // over them as it went.)
-            if let old, old.roomMade == s.roomMade, old.panelCovers == s.panelCovers, let layer = grid.layer {
-                let was = gridFrame(old)
-                let now = gridFrame(s)
-                let a = spring("transform", from: GridHostView.moving(layer, from: now, to: now.offsetBy(dx: was.minX - now.minX, dy: 0), scale: 1),
-                               to: CATransform3DIdentity)
-                a.isAdditive = true
-                layer.add(a, forKey: "railSlide")
-            }
+            // (The cards zoom beside it, the same move: `GridHostView.update`.)
         }
         // The panel: in from the side (or up from the bottom, over the cards), out the same way.
         let panelShown = s.selected != nil
