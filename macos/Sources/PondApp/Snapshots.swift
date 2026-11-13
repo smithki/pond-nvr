@@ -43,6 +43,39 @@ enum Snapshots {
             NSApp.terminate(nil)
             return
         }
+        // The timed checks: not napped (macOS slows an app whose window is hidden, its timers and the main queue
+        // late; a check run behind other windows then timed its own naps, stalls of up to half a second with
+        // nothing going on).
+        let timing = wants("panels", "transitions")
+            ? ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleDisplaySleepDisabled],
+                                                    reason: "Timing the Events view's transitions")
+            : nil
+        defer { if let timing { ProcessInfo.processInfo.endActivity(timing) } }
+        // The panel alone, opened and closed over and over (near the top, then far down), for `sample` to see what
+        // its moves cost: little else going on, most of the main thread's busy time is theirs. Writes panels.txt.
+        if wants("panels") {
+            model.mode = .events
+            try? await Task.sleep(for: .seconds(5))
+            var lates: [Double] = []
+            for round in 0 ..< 20 {
+                let n = round % 2 == 0 ? 12 + round : 3000 + round * 100
+                if round == 1 || round % 2 == 0 {
+                    model.eventsDrive = EventsDrive(action: .centre(n))
+                    try? await Task.sleep(for: .seconds(1.5))
+                }
+                FrameTiming.shared.begin()
+                model.eventsDrive = EventsDrive(action: .open(n))
+                try? await Task.sleep(for: .seconds(1.2))
+                model.eventsDrive = EventsDrive(action: .close)
+                try? await Task.sleep(for: .seconds(1.2))
+                lates += FrameTiming.shared.end()
+            }
+            let ms = lates.map { $0 * 1000 }.sorted()
+            let report = String(format: "panel open and close: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n",
+                                ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)],
+                                ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            try? report.write(toFile: "\(dir)/panels.txt", atomically: true, encoding: .utf8)
+        }
         // The Events view's transitions, timed (run on a large library: POND_DEMO_EVENTS): each kind's slowest frame,
         // and how many missed one (16 ms at 60 Hz) or two, written to transitions.txt.
         if wants("transitions") {
