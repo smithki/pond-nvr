@@ -57,6 +57,9 @@ final class GridHostView: NSView {
     fileprivate let scrubLabel = PassThroughHosting(rootView: AnyView(EmptyView()))
     private var performed: UUID?
     private var resizeStep: UUID?
+    /// Set by the Events shell before an update that's the window's size class changing (not the panel opening or
+    /// closing, though the grid's told the panel's open or not: over the cards, it isn't).
+    var sizeClassChanged = false
 
     init(model: AppModel) {
         self.model = model
@@ -136,7 +139,19 @@ final class GridHostView: NSView {
         if old == nil { motion.measured(panelOpen: grid.panelOpen, leading: grid.leading) }
         let railChanged = old.map { $0.leading != grid.leading && $0.panelOpen == grid.panelOpen } ?? false
         if railChanged { _ = motion.panelChanged(open: grid.panelOpen, leading: grid.leading) }
-        if let old, let before, viewHeight > 0 {
+        // The window's size, not the panel: being resized (dragged), or into another size class (the panel over the
+        // cards now, or beside them; the rail come or gone). The top card's kept where it is, no centring, no jump
+        // (taken for the panel closing, going narrow had the grid scroll a long way to the card); the cards follow
+        // the window (a zoom, begun under it, went stale as it kept changing), the grid sliding beside the rail as it
+        // goes or comes (`EventsShell`).
+        let byWindow = window?.inLiveResize == true || sizeClassChanged
+        sizeClassChanged = false
+        if let old, let before, viewHeight > 0, byWindow, old.panelOpen != grid.panelOpen || railChanged {
+            if old.panelOpen != grid.panelOpen { _ = motion.panelChanged(open: grid.panelOpen, leading: grid.leading) }
+            scroll.frame = bounds
+            sizeDocument()
+            land(at: anchored(from: before))
+        } else if let old, let before, viewHeight > 0 {
             if old.panelOpen != grid.panelOpen {
                 scroll.frame = bounds
                 sizeDocument()
@@ -1263,9 +1278,11 @@ extension GridHostView {
     /// card both are drawn about; then the old are let go. (See `GridReshape`.) Run by Core Animation, by keyframes
     /// sampled from the SwiftUI grid's own curve and measures, begun in the same moment as the panel's and the rail's
     /// moves (`EventsShell`), on the same curve.
+    /// (The cards a row not as many as they were: there at once, no zoom: zoomed, the rows came apart; crossfaded, it
+    /// was heavy, for a change made by the window's size.)
     fileprivate func zoom(from before: EventGridLayout, to target: Double, shiftX dx: Double) {
         endZoom()
-        guard let laidOut, let config else { return land(at: target) }
+        guard let laidOut, let config, before.columns == laidOut.columns else { return land(at: target) }
         stopGlide()
         let beforeOffset = offset
         let onScreen = before.cards(in: (beforeOffset + EventGridLayout.headerHeight) ... (beforeOffset + max(viewHeight, EventGridLayout.headerHeight)))
@@ -1444,7 +1461,10 @@ extension GridHostView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        for host in headers.values { host.layer?.transform = CATransform3DIdentity }
+        for host in headers.values {
+            host.layer?.transform = CATransform3DIdentity
+            host.layer?.opacity = 1
+        }
         pinned.layer?.transform = CATransform3DIdentity
         order.layer?.transform = CATransform3DIdentity
         for layer in [z.old.layer, z.new.layer, pinned.layer, order.layer].compactMap({ $0 }) + headers.values.compactMap(\.layer) {

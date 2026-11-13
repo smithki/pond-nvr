@@ -51,6 +51,26 @@ enum Snapshots {
                                                     reason: "Timing the Events view's transitions")
             : nil
         defer { if let timing { ProcessInfo.processInfo.endActivity(timing) } }
+        // The window resized through the Events view's size classes with a card open far down (wide, the rail and
+        // the panel beside the cards; medium, the rail gone for the panel; narrow, the panel over the cards), for
+        // watching (recorded) that nothing jumps: the cards kept where they are, crossfading where their rows change.
+        if wants("resizes"), let window = mainWindow() {
+            model.mode = .events
+            try? await Task.sleep(for: .seconds(5))
+            model.eventsDrive = EventsDrive(action: .centre(400))
+            try? await Task.sleep(for: .seconds(1.5))
+            model.eventsDrive = EventsDrive(action: .open(400))
+            try? await Task.sleep(for: .seconds(1.2))
+            let start = window.frame
+            for width in [1300.0, 1000, 820, 700, 820, 1000, 1300] {
+                var frame = window.frame
+                frame.size.width = width
+                window.setFrame(frame, display: true, animate: false)
+                try? await Task.sleep(for: .seconds(1.2))
+            }
+            window.setFrame(start, display: true, animate: false)
+            try? "done".write(toFile: "\(dir)/resizes.txt", atomically: true, encoding: .utf8)
+        }
         // The panel alone, opened and closed over and over (near the top, then far down), for `sample` to see what
         // its moves cost: little else going on, most of the main thread's busy time is theirs. Writes panels.txt.
         if wants("panels") {
