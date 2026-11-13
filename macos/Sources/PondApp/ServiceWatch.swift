@@ -129,7 +129,7 @@ final class ServiceWatch {
             try? await Task.sleep(for: .seconds(20))
             var round = 0
             while !Task.isCancelled, let self, let model {
-                model.refreshService()
+                await model.refreshServiceInBackground()
                 let now = await Self.check(model)
                 self.update(now)
                 await self.checkDaily(model)

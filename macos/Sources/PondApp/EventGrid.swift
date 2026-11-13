@@ -9,6 +9,8 @@
 import AppKit
 import SwiftUI
 
+
+
 /// Where every card and header goes, for days of events at a width.
 struct EventGridLayout {
     struct Section: Equatable {
@@ -73,6 +75,15 @@ struct EventGridLayout {
     func centring(_ id: String, view height: Double) -> Double? {
         guard let frame = cards[id] else { return nil }
         return clamp(frame.midY - height / 2, view: height)
+    }
+
+    /// The least scroll from `offset` that has the card `margin` clear of the edges (`top` more at the top, for the
+    /// day pinned there); nil if it is already.
+    func revealing(_ id: String, offset: Double, view height: Double, top: Double, margin: Double) -> Double? {
+        guard let frame = cards[id] else { return nil }
+        if frame.minY < offset + top + margin { return clamp(frame.minY - top - margin, view: height) }
+        if frame.maxY > offset + height - margin { return clamp(frame.maxY + margin - height, view: height) }
+        return nil
     }
 
     /// An offset kept within the content.
@@ -203,10 +214,11 @@ struct EventGrid: View {
 
     /// The animation the panel opens and closes with, the cards moving with it (the spring's own, too, to tell where
     /// they are part way).
-    static let panelSpring = Spring(duration: 0.4, bounce: 0)
+    /// (A quarter slower than at first, 0.4 s: quicker, the cards' move didn't read as one.)
+    static let panelSpring = Spring(duration: 0.5, bounce: 0)
     static let panelAnimation = Animation.spring(panelSpring)
     /// The springy scroll a card's row is brought to the middle with.
-    static let bring = Animation.spring(duration: 0.5, bounce: 0.2)
+    static let bring = Animation.spring(duration: 0.62, bounce: 0.2)
     /// Further than this many screens, a card's brought there by a jump (the grid fading out and in) rather than a
     /// scroll: scrolling through days of cards made and read every one on the way (each new card's picture read and
     /// decoded as it came), which stuttered, and the rail's outline restarted with every day that passed.
@@ -214,13 +226,13 @@ struct EventGrid: View {
     /// Closing the panel, nearer than that: further than a screen, every card flying that far as it reshaped was
     /// too much; a jump instead.
     static let farPanel = 1.0
+    /// Closing the panel far from the card: the jump begun this far into the reshape's spring.
+    static let leaveAfterPanel = 0.65
     /// A far jump eases this far away the way it's going as it fades out, and lands this far short of where it's
     /// going and eases the rest as it fades in, so it's seen to leave and arrive that way.
     static let jumpLead = 180.0
     /// Leaving and arriving both, this long (shorter as the grid's ends shorten them).
-    static let jumpTakes = 0.675
-    /// After the panel's closed, quicker still (it's been moving already).
-    static let jumpAfterPanel = 0.6
+    static let jumpTakes = 0.85
     /// Scrolled faster than this many screens a second (the scroller dragged, or a long fling), for a few moments
     /// running, the cards are plain blocks, dimmed, and the day and hour they're at is shown over them; slower than
     /// the second, the cards are shown again (their pictures read first).
@@ -263,6 +275,11 @@ struct EventGrid: View {
 
     /// A far jump (or the panel's closing before one) under way: the cards not to be clicked until it's settled.
     @State private var settling = false
+    /// How far from where the scroll has them the cards are drawn, a far jump leaving and arriving: the grid's own
+    /// move, as the panel's is (one of SwiftUI's animations, like the fade it goes with), not a scroll. (As scrolls
+    /// eased by the scroll view, the lead-in was asked a moment after the landing's scroll at once, and now and then
+    /// was taken with it: there without easing. And every row passed on the way was told to the Events view.)
+    @State private var shift = 0.0
 
     /// The events drawn, while those come since wait: a far jump under way (their making room, a scroll at once,
     /// stopped its easing in, and it only faded in).
@@ -301,7 +318,7 @@ struct EventGrid: View {
                                     .transition(.opacity)
                             } else {
                                 EventCard(event: event, camera: name(event.camera), selected: selected == item.id,
-                                          fresh: fresh.contains(item.id), isNew: unseen.contains(item.id),
+                                          fresh: fresh.contains(item.id), isNew: unseen.contains(item.id), width: item.frame.width,
                                           choose: { choose(event) }, open: { open(event) }, delete: { delete(event) })
                                     // (Drawn again only when it changes: its actions, new each time, otherwise made
                                     // every card's body run again with every frame the grid scrolled.)
@@ -337,9 +354,12 @@ struct EventGrid: View {
                 }
             }
             .frame(width: layout.width, height: layout.height, alignment: .topLeading)
+            // A far jump's leaving and arriving (see `shift`).
+            .offset(y: shift)
             // Scrolling fast: nothing hovered, nor its help shown, as the cards fly under the pointer. Nor clicked
-            // while a far jump settles.
-            .allowsHitTesting(!scrubbing && !settling)
+            // while a far jump settles. Nor while the cards reshape (the panel opening or closing): each card's hover
+            // and help answered every move of the pointer as they went by, a good share of each frame's time.
+            .allowsHitTesting(!scrubbing && !settling && flip == nil)
             // Faded out while a far jump goes, and in again where it lands; dimmed scrolling fast (the days' headers
             // too, under the day and hour shown).
             .opacity(veiled ? 0 : scrubbing ? 0.5 : 1)
@@ -538,6 +558,7 @@ struct EventGrid: View {
     /// the panel goes, then the grid jumps to it (a far jump, as from the rail). Moved there with the panel,
     /// every card on screen flew thousands of points, and those around it were made and read on the way.
     func panelChanged(open: Bool) {
+        FrameTiming.shared.during(open ? "panel opening" : "panel closing", for: Self.panelSpring.duration)
         laidOutOpen = open
         guard viewHeight > 0 else { return }
         let before = laidOut(drawn, width: width + (open ? panelWidth : -panelWidth))
@@ -546,16 +567,17 @@ struct EventGrid: View {
         }
         let here = anchored(from: before)
         if abs(centred - here) > Self.farPanel * max(viewHeight, 1) {
-            // One after the other: the cards reshape where they are as the panel goes, then the grid jumps (both at
-            // once was far less smooth than a jump from the rail). Not clicked meanwhile.
+            // The cards reshape where they are as the panel goes, and the grid's jump leads out as they settle: begun
+            // before the reshape's spring is still, its lead-out's slow start overlapping the spring's slow end, so
+            // it reads as one move gathering pace as it leaves. (Begun once still, they stopped and set off again: a
+            // hitch. With no lead-out at all, too static. The lead-out is the grid's shift, apart from the cards'
+            // reshaping, so the two add up rather than fight, as scrolls did.) Not clicked meanwhile.
             holdClicks()
             move(from: before, to: here)
-            // As the panel's gone (its spring's time: its move says it's done only once the spring's quite still,
-            // a beat later than it looks).
             Task {
-                try? await Task.sleep(for: .seconds(Self.panelSpring.duration))
+                try? await Task.sleep(for: .seconds(Self.panelSpring.duration * Self.leaveAfterPanel))
                 guard laidOutOpen == open, jump == nil else { return settling = false }
-                jump(to: centred, pace: Self.jumpAfterPanel)
+                jump(to: centred)
             }
         } else {
             move(from: before, to: centred)
@@ -626,6 +648,9 @@ struct EventGrid: View {
             keep = []
             after?()
         }
+        // What's on screen where it's put, told in the turn the move begins in, not when the scroll view says it's
+        // there (a frame or two into the move, the rail and whatever else is told made again in its first frames).
+        tell()
     }
 
     /// Where a card's drawn: part way from where it was to where it goes, mid-move; where it goes, else.
@@ -650,15 +675,20 @@ struct EventGrid: View {
     /// There at once, no move under way, and the grid told so now (the scroll view says where it is only when that
     /// changes, and the cards made are those near where the grid thinks it is: left to it, a scroll that changed
     /// nothing it measures left the grid making cards somewhere else, none on screen until it was scrolled).
-    func land(at target: Double) {
+    /// `short`: drawn as if still there (a far jump's lead-in to come).
+    func land(at target: Double, drawnAt short: Double? = nil) {
+        FrameTiming.shared.during("landing", for: 0.1)
         var instant = Transaction(animation: nil)
         instant.disablesAnimations = true
         withTransaction(instant) {
             flip = nil
             keep = []
+            shift = short.map { target - $0 } ?? 0
             scroll(to: target)
             reading.contentOffset = metrics.contentOffset(showing: target)
         }
+        // (Told now, while it's unseen; see `move`.)
+        tell()
     }
 
     /// The pictures of the cards about a screen either side of `y`.
@@ -674,6 +704,7 @@ struct EventGrid: View {
             settling = false
             veiled = false
             loading = false
+            shift = 0
         }
         switch request.kind {
         case .top:
@@ -686,10 +717,22 @@ struct EventGrid: View {
         case let .swap(top):
             swap(request.change ?? {}, top: top)
         case let .centre(id, always):
-            guard always || !wholly(id), let target = layout.centring(id, view: viewHeight) else { return }
+            // Stepping from card to card (`always` false): scrolled only as far as keeps it clear of the edge, with
+            // part of the row beyond in sight (centring it moved far more than the step needed). Else, to the middle.
+            let target: Double
+            if always {
+                guard let centred = layout.centring(id, view: viewHeight) else { return }
+                target = centred
+            } else {
+                let margin = 0.4 * (layout.cards[id]?.height ?? 200)
+                guard let revealed = layout.revealing(id, offset: offset, view: viewHeight,
+                                                      top: EventGridLayout.headerHeight, margin: margin) else { return }
+                target = revealed
+            }
             if request.animated, abs(target - offset) > Self.farJump * max(viewHeight, 1) {
                 jump(to: target)
             } else if request.animated {
+                FrameTiming.shared.during("scroll to a card", for: 0.62)
                 withAnimation(Self.bring) { scroll(to: target) }
             } else {
                 scroll(to: target)
@@ -701,6 +744,8 @@ struct EventGrid: View {
     func letWaitingIn() {
         guard !settling, jump == nil, let was = waiting else { return }
         waiting = nil
+        // (Held since the jump began, whether or not any came.)
+        guard was != sections else { return }
         eventsChanged(from: was)
         tell()
     }
@@ -709,6 +754,8 @@ struct EventGrid: View {
     /// another, say, never saying it's done).
     func holdClicks() {
         settling = true
+        // Held from now, not from when new events come (by then they've been laid out once).
+        if waiting == nil { waiting = sections }
         speed.settleBy = CACurrentMediaTime() + 3
         Task {
             try? await Task.sleep(for: .seconds(3.05))
@@ -730,19 +777,21 @@ struct EventGrid: View {
         let out = abs(away - offset), in_ = abs(target - from)
         let ease = JumpEase.split(leaving: out, arriving: in_,
                                   over: pace * Self.jumpTakes * (0.5 + 0.5 * (out + in_) / (2 * lead)))
+        FrameTiming.shared.during("lead-out", for: ease.leaveFor)
         if let leave = ease.leave {
-            speed.steered(for: ease.leaveFor + 0.3)
-            withAnimation(leave) { scroll(to: away) }
+            // Leaving: the cards drawn moving off the way it's going (the scroll stays until it lands).
+            withAnimation(leave) { shift = offset - away }
         }
         holdClicks()
         veil(reading: pictures(around: target), fadingOut: ease.leave == nil ? 0.12 : ease.leaveFor) { current, landed in
             guard current else { return }
-            land(at: ease.arrive == nil ? target : from)
+            // There at once (the jump's one scroll), drawn as far short of it as it has left to ease.
+            land(at: target, drawnAt: ease.arrive == nil ? nil : from)
             landed([])
         } shown: {
             guard let arrive = ease.arrive else { return settling = false }
-            speed.steered(for: ease.arriveFor + 0.3)
-            withAnimation(arrive) { scroll(to: target) } completion: {
+            FrameTiming.shared.during("lead-in", for: ease.arriveFor)
+            withAnimation(arrive) { shift = 0 } completion: {
                 // (Unless another's begun since.)
                 if jump == nil { settling = false }
             }
@@ -878,7 +927,7 @@ struct EventGrid: View {
 
     /// Laid out at a width the grid's been given (less the scroller's gutter, if it takes room).
     func laidOut(_ sections: [EventGridLayout.Section], width: Double) -> EventGridLayout {
-        EventGridLayout(sections: sections, width: width - gutter, columns: columns)
+        cache.layout(sections: sections, width: width - gutter, columns: columns)
     }
 
     /// Room for a scroller that takes it (scroll bars always shown), and a little either side of it, so the cards
@@ -1025,14 +1074,18 @@ struct GridMetrics: Equatable {
 
 /// The last layout, kept while its inputs are the same (the grid's body runs each frame of a scroll).
 final class LayoutCache {
-    private var key: (sections: [EventGridLayout.Section], width: Double, columns: Int)?
-    private var last: EventGridLayout?
+    /// The last few (the panel opening or closing asks for the width before it as well as after: with many events,
+    /// each laid out again cost its first frame tens of milliseconds).
+    private var kept: [(sections: [EventGridLayout.Section], width: Double, columns: Int, layout: EventGridLayout)] = []
 
     func layout(sections: [EventGridLayout.Section], width: Double, columns: Int) -> EventGridLayout {
-        if let key, let last, key.width == width, key.columns == columns, key.sections == sections { return last }
+        if let i = kept.firstIndex(where: { $0.width == width && $0.columns == columns && $0.sections == sections }) {
+            if i != kept.count - 1 { kept.append(kept.remove(at: i)) }
+            return kept[kept.count - 1].layout
+        }
         let made = EventGridLayout(sections: sections, width: width, columns: columns)
-        key = (sections, width, columns)
-        last = made
+        kept.append((sections, width, columns, made))
+        if kept.count > 4 { kept.removeFirst() }
         return made
     }
 }

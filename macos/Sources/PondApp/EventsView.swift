@@ -29,6 +29,9 @@ struct EventsView: View {
     /// The cards on screen in the grid (the rail draws the hours they span and marks their days). Kept apart, read
     /// by the rail alone: they change as the grid scrolls, and this view needn't be made again each time.
     @State private var onScreen = GridOnScreen()
+    @State private var indexKept = IndexKept()
+    /// Counts up as the events change (each change, however small): what the index is of.
+    @State private var eventsVersion = 0
     /// The grid's at its top (new events slide in there; scrolled down, they're added without moving the view).
     @State private var atTop = true
     /// Events just come in (since the last read): they glow a moment, in their kind's colour.
@@ -62,50 +65,140 @@ struct EventsView: View {
     /// How far back events are kept.
     var keptDays: Int { model.config?.retention.events.days ?? 30 }
 
-    /// The camera's, newest first.
-    /// New cards on screen now.
-    var newOnScreen: Set<String> {
-        onScreen.cards.intersection(shown.lazy.filter(model.seenEvents.isNew).map(\.id))
-    }
-
     /// What's being looked at: which new cards, and whether the window's in front.
     struct Looking: Equatable {
         var cards: Set<String>
         var front: Bool
     }
 
-    /// The camera's (or every camera's): those shown, quieted or not as asked (only the quieted, or none of them).
-    var forCamera: [TimelineEvent] {
-        let quietedOnly = model.eventsState.quietedOnly
-        return events.filter { (camera == nil || $0.camera == camera) && ($0.quieted != nil) == quietedOnly }
-    }
-
-    /// How many of the camera's are quieted (probably nothing), for their chip.
-    var quietedCount: Int { events.count { (camera == nil || $0.camera == camera) && $0.quieted != nil } }
-    /// Shown: the camera's, of the kinds on; of a search, those it found (best first, when it ranks them).
-    var shown: [TimelineEvent] {
-        let newOnly = model.eventsState.newOnly
-        let all = forCamera.filter { event in
-            !hidden.contains(event.kind) && (newOnly.map { $0.contains(event.id) || model.seenEvents.isNew(event) } ?? true)
-        }
-        guard let search else { return all }
-        let rank = Dictionary(search.ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
-        let found = all.filter { rank[$0.id] != nil }
-        return search.ranked ? found.sorted { rank[$0.id]! < rank[$1.id]! } : found
-    }
     /// The section a search's ranked answer is in (its own, not a day's).
-    static let bestMatches = Date.distantFuture
-    /// The kinds there are (for the chips), in the timeline's order.
-    var kinds: [TimelineEvent.Kind] { TimelineEvent.Kind.allCases.filter { k in forCamera.contains { $0.kind == k } } }
+    nonisolated static let bestMatches = Date.distantFuture
 
-    /// Shown, by day: newest day first (or a search's ranked answer, best first, as one).
-    var days: [(day: Date, events: [TimelineEvent])] {
-        if search?.ranked == true { return shown.isEmpty ? [] : [(Self.bestMatches, shown)] }
-        let calendar = Calendar.current
-        return Dictionary(grouping: shown) { calendar.startOfDay(for: $0.start) }
-            .map { ($0.key, $0.value) }
-            .sorted { $0.day > $1.day }
+    /// Everything shown that's worked out from the events, worked out once for what it's of (`IndexKey`) and kept: the
+    /// view's made again often (the panel opening, each step, the filters), and with a large library, going through
+    /// every event each time (as these were, each its own pass, dozens a time) froze the panel's and the grid's moves.
+    struct EventsIndex: Sendable {
+        /// The camera's (or every camera's), quieted or not as asked; and how many of the camera's are quieted.
+        var forCamera: [TimelineEvent] = []
+        var quietedCount = 0
+        /// Shown: those of the kinds on (and new, if asked); of a search, those it found (best first, when ranked).
+        var shown: [TimelineEvent] = []
+        /// Each shown one's place in `shown` (the arrows' next and previous, at once).
+        var position: [String: Int] = [:]
+        /// The kinds there are (for the chips), in the timeline's order, and how many of each.
+        var kinds: [TimelineEvent.Kind] = []
+        var counts: [TimelineEvent.Kind: Int] = [:]
+        /// The camera's new ones, and those of them shown.
+        var newIDs: Set<String> = []
+        var unseen: Set<String> = []
+        /// Shown, by day: newest day first (or a search's ranked answer, best first, as one).
+        var days: [(day: Date, events: [TimelineEvent])] = []
+        /// Shown, an hour at a time (the rail's shading), by the hour's start.
+        var hourCounts: [Date: Int] = [:]
+        /// The grid's: its sections, and the shown by id. Made once here (made as the grid was, each time Events was
+        /// worked out, the grid's were new each time, and compared, event by event, many times a second).
+        var sections: [EventGridLayout.Section] = []
+        var byID: [String: TimelineEvent] = [:]
     }
+
+    /// What the index is of: compared each time it's asked for, cheaply (the events by their version, what's seen by
+    /// its own), so it's worked out again only once one of them has changed.
+    struct IndexKey: Equatable, Sendable {
+        var events: Int
+        var camera: String?
+        var hidden: Set<TimelineEvent.Kind>
+        var quietedOnly: Bool
+        var newOnly: Set<String>?
+        var search: [String]?
+        var ranked: Bool
+        var seen: Int
+    }
+
+    /// The index as last worked out, and what of (not watched: a cache).
+    final class IndexKept {
+        var key: IndexKey?
+        var seen: Int?
+        var index = EventsIndex()
+    }
+
+    /// What the index would be of, for the events of `version`.
+    func indexKey(events version: Int) -> IndexKey {
+        IndexKey(events: version, camera: camera, hidden: hidden, quietedOnly: model.eventsState.quietedOnly,
+                 newOnly: model.eventsState.newOnly, search: search?.ids, ranked: search?.ranked ?? false,
+                 // What's seen changes what's shown only with only the new shown; otherwise just which are new is
+                 // worked out again (one seen after another, as they come on screen: the whole index each time was
+                 // too much).
+                 seen: model.eventsState.newOnly != nil ? model.seenEvents.version : 0)
+    }
+
+    var index: EventsIndex {
+        let seen = model.seenEvents.version
+        let key = indexKey(events: eventsVersion)
+        if indexKept.key == key {
+            if indexKept.seen != seen {
+                Self.renew(&indexKept.index, isNew: model.seenEvents.newness)
+                indexKept.seen = seen
+            }
+            return indexKept.index
+        }
+        let made = Self.index(of: events, key: key, isNew: model.seenEvents.newness)
+        indexKept.key = key
+        indexKept.seen = seen
+        indexKept.index = made
+        return made
+    }
+
+    /// Which are new, worked out again (what's seen having changed).
+    nonisolated static func renew(_ index: inout EventsIndex, isNew: (TimelineEvent) -> Bool) {
+        let newIDs = Set(index.forCamera.lazy.filter(isNew).map(\.id))
+        guard newIDs != index.newIDs else { return }
+        index.newIDs = newIDs
+        index.unseen = Set(index.shown.lazy.filter { newIDs.contains($0.id) }.map(\.id))
+    }
+
+    /// Worked out in one pass over the events (and one over those shown).
+    nonisolated static func index(of events: [TimelineEvent], key: IndexKey, isNew: (TimelineEvent) -> Bool) -> EventsIndex {
+        var index = EventsIndex()
+        for event in events where key.camera == nil || event.camera == key.camera {
+            if event.quieted != nil { index.quietedCount += 1 }
+            guard (event.quieted != nil) == key.quietedOnly else { continue }
+            index.forCamera.append(event)
+            index.counts[event.kind, default: 0] += 1
+            if isNew(event) { index.newIDs.insert(event.id) }
+        }
+        index.kinds = TimelineEvent.Kind.allCases.filter { index.counts[$0] != nil }
+        var shown = index.forCamera.filter { event in
+            !key.hidden.contains(event.kind) && (key.newOnly.map { $0.contains(event.id) || index.newIDs.contains(event.id) } ?? true)
+        }
+        if let ids = key.search {
+            let rank = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+            shown = shown.filter { rank[$0.id] != nil }
+            if key.ranked { shown.sort { rank[$0.id]! < rank[$1.id]! } }
+        }
+        index.shown = shown
+        index.position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        index.unseen = Set(shown.lazy.filter { index.newIDs.contains($0.id) }.map(\.id))
+        let calendar = Calendar.current
+        if key.ranked {
+            index.days = shown.isEmpty ? [] : [(Self.bestMatches, shown)]
+        } else {
+            var byDay: [Date: [TimelineEvent]] = [:]
+            for event in shown { byDay[calendar.startOfDay(for: event.start), default: []].append(event) }
+            index.days = byDay.map { (day: $0.key, events: $0.value) }.sorted { $0.day > $1.day }
+        }
+        index.sections = index.days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) }
+        index.byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for event in shown {
+            if let hour = calendar.dateInterval(of: .hour, for: event.start)?.start { index.hourCounts[hour, default: 0] += 1 }
+        }
+        return index
+    }
+
+    var forCamera: [TimelineEvent] { index.forCamera }
+    var quietedCount: Int { index.quietedCount }
+    var shown: [TimelineEvent] { index.shown }
+    var kinds: [TimelineEvent.Kind] { index.kinds }
+    var days: [(day: Date, events: [TimelineEvent])] { index.days }
 
     /// The window's size class, from its width: what's beside the grid, and how the panel opens. Changes of class
     /// animate (the rail sliding away or back); the grid reflowing as the window's resized within one doesn't.
@@ -162,7 +255,8 @@ struct EventsView: View {
         // between the two.
         HStack(alignment: .top, spacing: 14) {
             if railShown {
-                OnScreenRail(events: shown, days: keptDays, onScreen: onScreen, retention: {
+                OnScreenRail(shown: index.shown, position: index.position, hourCounts: index.hourCounts, days: keptDays,
+                             onScreen: onScreen, retention: {
                     model.showSettings(.storage)
                 }) { hour in
                     // The first card at or after that hour (newest first: the last one before the next hour).
@@ -191,13 +285,12 @@ struct EventsView: View {
         // backing across the grid's top, the grid running up to it. Still needed? `swift scripts/capture-window.swift
         // out.png --inactive` without this, and look under the toolbar.)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        // New cards on screen a moment, the window in front and the cards not under the panel: seen.
-        .task(id: Looking(cards: newOnScreen, front: windowState == .key && !cardsHidden)) {
-            let ids = newOnScreen
-            guard !ids.isEmpty, windowState == .key, !cardsHidden else { return }
-            try? await Task.sleep(for: .seconds(Self.seenAfter))
-            guard !Task.isCancelled else { return }
-            model.seenEvents.saw(shown.filter { ids.contains($0.id) })
+        // New cards on screen a moment, the window in front and the cards not under the panel: seen. By a view of its
+        // own, which alone reads what's on screen: read here, every row the grid scrolled past made this whole view
+        // again (and its list of events gone through dozens of times), mid-scroll.
+        .background {
+            SeenOnScreen(onScreen: onScreen, unseen: index.unseen, shown: index.shown, position: index.position,
+                         looking: windowState == .key && !cardsHidden)
         }
         // And one opened.
         .onChange(of: selected?.id) { if let selected { model.seenEvents.saw([selected]) } }
@@ -251,11 +344,12 @@ struct EventsView: View {
         }
         .overlay(alignment: .top) {
             EventsFilterBar(model: model, cameras: cameras, railShown: railFits, kinds: kinds,
-                            counts: Dictionary(grouping: forCamera, by: \.kind).mapValues(\.count),
-                            newCount: model.eventsState.newOnly != nil ? shown.count : forCamera.count(where: model.seenEvents.isNew),
-                            newIDs: Set(forCamera.filter(model.seenEvents.isNew).map(\.id)), quietedCount: quietedCount,
+                            counts: index.counts,
+                            newCount: model.eventsState.newOnly != nil ? shown.count : index.newIDs.count,
+                            newIDs: index.newIDs, quietedCount: quietedCount,
                             question: $question, searching: searching, slow: slow, problem: searchProblem, result: search,
                             submit: { ask() }, clear: { clearSearch() }, remove: { remove($0) })
+                .equatable()
                 .padding(.top, 8)
                 .onGeometryChange(for: Double.self) { $0.size.height } action: { height in
                     // (The grid's top moving with the bar as a row under the filters comes or goes, at the row's pace.)
@@ -264,7 +358,18 @@ struct EventsView: View {
                 }
         }
 
-        .onChange(of: selected?.id) { _, id in model.eventsState.selected = id }
+        .onChange(of: selected?.id) { _, id in model.eventsSelected = id }
+        // (The snapshot mode's transition check, doing as the user would.)
+        .onChange(of: model.eventsDrive) { _, drive in
+            guard let drive else { return }
+            let list = shown
+            switch drive.action {
+            case let .open(n): if list.indices.contains(n) { panel(list[n]) }
+            case .close: panel(nil)
+            case let .step(later): if let selected, let next = neighbour(of: selected, later: later) { choose(next) }
+            case let .centre(n): if list.indices.contains(n) { request = GridScroll(kind: .centre(list[n].id, always: true)) }
+            }
+        }
         // Other Ponds shown or not: their events read again; a camera filtered by that's no longer shown let go.
         .onChange(of: model.shownPonds) { _, shown in
             if let camera = model.eventsState.camera, !shown.includes(AppModel.pond(of: camera)) { model.eventsState.camera = nil }
@@ -394,7 +499,10 @@ struct EventsView: View {
                 let answer = EventSearcher.merged(result, others.results, includeMine: shown.includes(nil))
                 // The grid crossfades to the answer, at its top.
                 swap(top: true) {
-                    if !added.isEmpty { events = (events + added).sorted { $0.start > $1.start } }
+                    if !added.isEmpty {
+                        events = (events + added).sorted { $0.start > $1.start }
+                        eventsVersion += 1
+                    }
                     search = answer
                 }
             case let .failure(problem):
@@ -453,9 +561,10 @@ struct EventsView: View {
 
     /// The event shown just before or after this one (the grid is newest first).
     func neighbour(of event: TimelineEvent, later: Bool) -> TimelineEvent? {
-        guard let i = shown.firstIndex(where: { $0.id == event.id }) else { return nil }
+        let index = self.index
+        guard let i = index.position[event.id] else { return nil }
         let j = later ? i - 1 : i + 1
-        return shown.indices.contains(j) ? shown[j] : nil
+        return index.shown.indices.contains(j) ? index.shown[j] : nil
     }
 
     /// Another event's details (the arrows): its card's row brought to the middle if it isn't wholly in view.
@@ -476,7 +585,10 @@ struct EventsView: View {
                 panel(nil)
             }
         }
-        withAnimation(EventGrid.panelAnimation) { events.removeAll { $0.id == event.id } }
+        withAnimation(EventGrid.panelAnimation) {
+            events.removeAll { $0.id == event.id }
+            eventsVersion += 1
+        }
         let source = EventSource(config: model.config)
         Task.detached { source?.delete([event.id]) }
     }
@@ -496,16 +608,37 @@ struct EventsView: View {
         let own = model.shownPonds.includes(nil) ? await Task.detached { source.events(from: from, to: to) }.value : []
         let others = await model.remoteEvents(since: from)
         // What's new among them, for the counts (another Pond's are known only as Events reads them).
-        if model.shownPonds.includes(nil) { model.seenEvents.found(own, elsewhere: false) }
-        model.seenEvents.found(others, elsewhere: true)
-        let found = (own + others)
-            .filter { $0.kind != .privacy && !deleted.contains($0.id) }
-            .sorted { $0.start > $1.start }
-        if found != events {
+        let after = model.seenEvents.before
+        let (ownRecent, othersRecent) = await Task.detached {
+            (EventsSeen.recent(own, after: after), EventsSeen.recent(others, after: after))
+        }.value
+        if model.shownPonds.includes(nil) { model.seenEvents.found(recent: ownRecent, elsewhere: false) }
+        model.seenEvents.found(recent: othersRecent, elsewhere: true)
+        // Sorted, compared with those there are, and the index of them worked out, away from the main thread (each
+        // read, every ten seconds, held up the grid's moving otherwise, tens of milliseconds with many events).
+        let deleted = deleted, before = events, version = eventsVersion + 1, first = !loaded
+        let key = indexKey(events: version), seen = model.seenEvents.version, isNew = model.seenEvents.newness
+        let read = await Task.detached { () -> (found: [TimelineEvent], arrived: Set<String>, index: EventsIndex)? in
+            let found = (own + others)
+                .filter { $0.kind != .privacy && !deleted.contains($0.id) }
+                .sorted { $0.start > $1.start }
+            guard found != before else { return nil }
             // New ones (after the first read) come in smoothly, the others making room, and glow a moment.
-            let arrived = loaded ? Set(found.map(\.id)).subtracting(events.map(\.id)) : []
+            let arrived = !first ? Set(found.map(\.id)).subtracting(before.map(\.id)) : []
+            return (found, arrived, Self.index(of: found, key: key, isNew: isNew))
+        }.value
+        if let (found, arrived, index) = read, events == before {
             // (Scrolled down, without animation: the grid keeps what's on screen where it is.)
-            withAnimation(loaded && atTop ? .snappy(duration: 0.4) : nil) { events = found }
+            withAnimation(loaded && atTop ? .snappy(duration: 0.4) : nil) {
+                events = found
+                eventsVersion = version
+            }
+            // (Kept for these events, unless what it's of changed meanwhile: then worked out again when asked.)
+            if indexKey(events: version) == key, model.seenEvents.version == seen {
+                indexKept.key = key
+                indexKept.seen = seen
+                indexKept.index = index
+            }
             if !arrived.isEmpty {
                 fresh.formUnion(arrived)
                 Task {
@@ -515,8 +648,8 @@ struct EventsView: View {
             }
         }
         // The open one, as it is now (an ongoing one goes on); on coming back, the one that was open, in view.
-        if let open = selected, let now = found.first(where: { $0.id == open.id }), now != open { selected = now }
-        if !loaded, selected == nil, let id = model.eventsState.selected, let was = found.first(where: { $0.id == id }) {
+        if let open = selected, let now = events.first(where: { $0.id == open.id }), now != open { selected = now }
+        if !loaded, selected == nil, let id = model.eventsSelected, let was = events.first(where: { $0.id == id }) {
             selected = was
             focus = id
             request = GridScroll(kind: .centre(id, always: true), animated: false)
@@ -538,18 +671,18 @@ struct EventsView: View {
         // cameras anew).
         let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
         let names: (String) -> String = { named[$0] ?? name($0) }
+        let index = index
         return GeometryReader { geo in
-            EventGrid(sections: days.map { EventGridLayout.Section(day: $0.day, ids: $0.events.map(\.id)) },
-                         events: Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            EventGrid(sections: index.sections, events: index.byID,
                          width: max(200, geo.size.width),
                          columns: Self.columnCount(geo.size.width + (open ? panelTakes : 0)),
                          panelOpen: open, topInset: barHeight, bottomInset: Self.bottomFade, panelWidth: panelTakes,
                          focus: focus, selected: selected?.id, fresh: fresh,
-                         unseen: Set(shown.lazy.filter(model.seenEvents.isNew).map(\.id)), request: $request,
+                         unseen: index.unseen, request: $request,
                          name: names, title: { $0 == Self.bestMatches ? "Best Matches" : Self.dayTitle($0) },
                          choose: { event in if selected == nil { panel(event) } else { choose(event) } },
                          open: { watch($0) }, delete: { deleting = $0 },
-                         onVisible: { onScreen.cards = $0 }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },
+                         onVisible: { onScreen.tell($0) }, onTop: { atTop = $0 }, onScrolled: { scrolled = $0 },
                          onUnderBottom: { underBottom = $0 })
         }
     }
@@ -587,7 +720,18 @@ struct EdgeGlass: View {
 }
 
 /// The filters, a bar over the top of the grid: the camera, and a chip a kind (how many there are of it), on or off.
-struct EventsFilterBar: View {
+struct EventsFilterBar: View, Equatable {
+    /// The same bar, from what it shows (not what's done on asking: closures, never equal, had it worked out again on
+    /// every change to Events, many times a second as the grid moves).
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        MainActor.assumeIsolated {
+            a.model === b.model && a.cameras == b.cameras && a.railShown == b.railShown && a.kinds == b.kinds
+                && a.counts == b.counts && a.newCount == b.newCount && a.newIDs == b.newIDs
+                && a.quietedCount == b.quietedCount && a.question == b.question && a.searching == b.searching
+                && a.slow == b.slow && a.problem == b.problem && a.result == b.result
+        }
+    }
+
     /// The camera filtered by, as the filter says it (its Pond's too, with several); else all of them.
     var cameraTitle: String {
         guard let id = model.eventsState.camera else { return "All Cameras" }
@@ -1060,6 +1204,28 @@ struct PanelComing: ViewModifier {
             .opacity(away ? 0 : 1)
             .visualEffect { view, proxy in
                 view.offset(x: away && !covers ? proxy.size.width + 16 : 0, y: away && covers ? proxy.size.height : 0)
+            }
+    }
+}
+
+/// The new cards on screen a moment, the window in front: seen. Reads what's on screen itself (as the rail does), so
+/// the grid scrolling makes this again, not the Events view; and from the cards on screen (a few), not every event.
+struct SeenOnScreen: View {
+    let onScreen: GridOnScreen
+    let unseen: Set<String>
+    let shown: [TimelineEvent]
+    let position: [String: Int]
+    let looking: Bool
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let new = onScreen.cards.intersection(unseen)
+        Color.clear
+            .task(id: EventsView.Looking(cards: new, front: looking)) {
+                guard !new.isEmpty, looking else { return }
+                try? await Task.sleep(for: .seconds(EventsView.seenAfter))
+                guard !Task.isCancelled else { return }
+                model.seenEvents.saw(new.compactMap { position[$0].map { shown[$0] } })
             }
     }
 }

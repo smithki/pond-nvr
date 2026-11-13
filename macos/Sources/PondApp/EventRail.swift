@@ -5,21 +5,41 @@ import SwiftUI
 /// The cards on screen in the grid.
 @Observable
 final class GridOnScreen {
-    var cards: Set<String> = []
+    private(set) var cards: Set<String> = []
+    @ObservationIgnored private var coming: Set<String>?
+
+    /// Told by the grid as it moves: taken up after it's done (set as the grid worked itself out, those watching were
+    /// worked out again there and then, inside it, a row at a time), and only the last of several.
+    @MainActor
+    func tell(_ cards: Set<String>) {
+        let waiting = coming != nil
+        coming = cards
+        guard !waiting else { return }
+        DispatchQueue.main.async { [self] in
+            guard let coming else { return }
+            self.coming = nil
+            if coming != self.cards { self.cards = coming }
+        }
+    }
 }
 
 /// The rail, given what's on screen: the days it marks, the hours it outlines.
 struct OnScreenRail: View {
-    let events: [TimelineEvent]
+    /// The events shown, each one's place among them, and how many an hour (the Events view's index: worked out once,
+    /// not each time the grid scrolls a row, as this is made again).
+    let shown: [TimelineEvent]
+    let position: [String: Int]
+    let hourCounts: [Date: Int]
     let days: Int
     let onScreen: GridOnScreen
     let retention: () -> Void
     let go: (Date) -> Void
 
     var body: some View {
-        let shown = events.filter { onScreen.cards.contains($0.id) }
-        let starts = shown.map(\.start)
-        ActivityRail(events: events, days: days, onScreen: Set(shown.map { Calendar.current.startOfDay(for: $0.start) }),
+        // (From the cards on screen, a few: not by going through every event.)
+        let onScreenEvents = onScreen.cards.compactMap { position[$0].map { shown[$0] } }
+        let starts = onScreenEvents.map(\.start)
+        ActivityRail(counts: hourCounts, days: days, onScreen: Set(onScreenEvents.map { Calendar.current.startOfDay(for: $0.start) }),
                      window: starts.min().flatMap { low in starts.max().map { low ... $0 } }, retention: retention, go: go)
     }
 }
@@ -30,7 +50,8 @@ struct OnScreenRail: View {
 /// wrapping from the end of one day's row to the start of the next. Laid out from fixed measures (no layout's
 /// guess), so the outline sits exactly on its cells.
 struct ActivityRail: View {
-    let events: [TimelineEvent]
+    /// Events an hour, by the hour's start.
+    let counts: [Date: Int]
     let days: Int
     let onScreen: Set<Date>
     /// The time the grid shows now.
@@ -55,14 +76,6 @@ struct ActivityRail: View {
     @State private var inset = 0.0
     /// The hours outlined as drawn: following what's in view, animated; shown first, grown out from its middle.
     @State private var drawn: RailSpan?
-
-    /// Events an hour, by the hour's start.
-    var counts: [Date: Int] {
-        let calendar = Calendar.current
-        return events.reduce(into: [:]) { counts, e in
-            if let hour = calendar.dateInterval(of: .hour, for: e.start)?.start { counts[hour, default: 0] += 1 }
-        }
-    }
 
     var body: some View {
         let counts = counts

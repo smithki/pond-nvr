@@ -43,6 +43,37 @@ enum Snapshots {
             NSApp.terminate(nil)
             return
         }
+        // The Events view's transitions, timed (run on a large library: POND_DEMO_EVENTS): each kind's slowest frame,
+        // and how many missed one (16 ms at 60 Hz) or two, written to transitions.txt.
+        if wants("transitions") {
+            model.mode = .events
+            try? await Task.sleep(for: .seconds(5))
+            var timings: [String: [Double]] = [:]
+            func measure(_ name: String, _ action: EventsDrive.Action, settle: Double = 1.4) async {
+                FrameTiming.shared.begin()
+                model.eventsDrive = EventsDrive(action: action)
+                try? await Task.sleep(for: .seconds(settle))
+                timings[name, default: []] += FrameTiming.shared.end()
+            }
+            for round in 0 ..< 3 {
+                let deep = 3000 + round * 4000
+                await measure("far jump", .centre(deep))
+                await measure("panel open", .open(deep))
+                for _ in 0 ..< 4 { await measure("arrow step", .step(later: false), settle: 1.0) }
+                await measure("panel close (far)", .close, settle: 2.2)
+                await measure("far jump", .centre(10 + round))
+                await measure("panel open", .open(12 + round))
+                await measure("panel close (near)", .close)
+            }
+            var report = "Slowest frame, frames over 16 ms and over 33 ms (main thread answers every 4 ms)\n"
+            for (name, lates) in timings.sorted(by: { $0.key < $1.key }) {
+                let ms = lates.map { $0 * 1000 }.sorted()
+                let p95 = ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)]
+                report += String(format: "%@: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n",
+                                 name, ms.last ?? 0, p95, ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            }
+            try? report.write(toFile: "\(dir)/transitions.txt", atomically: true, encoding: .utf8)
+        }
         for mode in Mode.allCases where wants(mode.rawValue) {
             model.mode = mode
             try? await Task.sleep(for: .seconds(2.5))

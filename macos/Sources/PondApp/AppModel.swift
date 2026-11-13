@@ -209,6 +209,12 @@ final class AppModel {
     var timelineJump: TimelineJump?
     /// The Events view as it was left (the event open in its panel, its filters): as it's come back to.
     var eventsState = EventsState()
+    /// The event open in its panel as it was left. Apart from `eventsState` and not watched: nothing's drawn from it,
+    /// and set as an event opened or closed, it made the Events view again in the panel's first frame.
+    @ObservationIgnored var eventsSelected: String?
+    /// Asked of the Events view by the snapshot mode's transition check (the panel, a step, a far scroll), as the user
+    /// would, so it's measured through the same code.
+    var eventsDrive: EventsDrive?
     var addingCamera = false
     /// The field a camera's settings page puts the cursor in when it next shows (a check's fix, from its doctor).
     var cameraSettingsFocus: CameraSettingsPage.Field?
@@ -615,7 +621,20 @@ final class AppModel {
     }
 
     func refreshService() {
-        serviceState = service.state
+        applyServiceState(service.state)
+    }
+
+    /// The same, the state read off the main thread: `launchctl`, asked and waited for, took up to a third of a second
+    /// at times, and on the main thread every few seconds it froze whatever was moving (the Events grid's jumps lost
+    /// their lead-in to it). For the regular checks; after a change the user's made, `refreshService`.
+    func refreshServiceInBackground() async {
+        let service = self.service
+        let state = await Task.detached(priority: .utility) { service.state }.value
+        applyServiceState(state)
+    }
+
+    private func applyServiceState(_ state: ServiceControl.State) {
+        serviceState = state
         // Running, and not known since when: it started with what is saved now (the app's launch).
         if case .running = serviceState {
             if recorderSettings == nil { recorderStarted() }
@@ -757,14 +776,12 @@ extension AppModel {
         if let camera = eventsState.camera, camera != event.camera { eventsState.camera = nil }
         eventsState.hidden.remove(event.kind)
         // (The Events view opens on the one chosen, in view, when it next loads.)
-        eventsState.selected = event.id
+        eventsSelected = event.id
         mode = .events
     }
 }
 
 struct EventsState: Equatable {
-    /// The event whose details are open.
-    var selected: String?
     /// One camera's, or all.
     var camera: String?
     var hidden: Set<TimelineEvent.Kind> = []
@@ -788,4 +805,19 @@ extension AppModel {
         demoHomeKitStatus = status
         homeKitStatus = status
     }
+}
+
+/// One thing for the Events view to do, as the user would (see `AppModel.eventsDrive`).
+struct EventsDrive: Equatable {
+    enum Action: Equatable {
+        /// The panel opened on the nth event shown.
+        case open(Int)
+        case close
+        /// The arrows: the next (or previous) event.
+        case step(later: Bool)
+        /// The nth event shown brought to the middle (a far jump, when far).
+        case centre(Int)
+    }
+    let id = UUID()
+    var action: Action
 }

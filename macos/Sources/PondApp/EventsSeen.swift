@@ -19,6 +19,8 @@ final class EventsSeen {
     private(set) var before: Date
     /// Those after it seen, by id, with when they began (to forget them once they're old).
     private(set) var seen: [String: Date]
+    /// Counts up as what's seen changes (for those working out from it to tell, cheaply, that it has).
+    private(set) var version = 0
     /// Events after `before` as last read: this Mac's (read now and then) and other Ponds' (as Events reads them).
     private var here: [String: Date] = [:]
     private var elsewhere: [String: Date] = [:]
@@ -40,9 +42,23 @@ final class EventsSeen {
     }
 
     func isNew(_ event: TimelineEvent) -> Bool { event.start > before && seen[event.id] == nil }
+    /// The same, for asking of many events at once: what's seen read once, not for each event (each read is noted
+    /// for the view asking, and the Events view asked thousands of times a pass).
+    var newness: @Sendable (TimelineEvent) -> Bool {
+        let before = self.before, seen = self.seen
+        return { $0.start > before && seen[$0.id] == nil }
+    }
 
     /// How many came in and haven't been seen (or, for trying the count's look, a made-up number: `--fake-new-events`).
-    var count: Int { fake ?? here.merging(elsewhere) { a, _ in a }.keys.count { seen[$0] == nil } }
+    var count: Int { fake ?? unseen }
+
+    /// The count, worked out as what it's from changes (asked often: by every view showing it, each time it's drawn).
+    private var unseen = 0
+
+    private func recount() {
+        let now = here.keys.count { seen[$0] == nil } + elsewhere.keys.count { seen[$0] == nil && here[$0] == nil }
+        if now != unseen { unseen = now }
+    }
 
     /// A made-up count, for development: set at launch, one more every few seconds, gone once Events is shown.
     var fake: Int?
@@ -52,10 +68,23 @@ final class EventsSeen {
 
     /// What's been read lately: this Mac's, or other Ponds'.
     func found(_ events: [TimelineEvent], elsewhere: Bool) {
+        found(recent: Self.recent(events, after: before), elsewhere: elsewhere)
+    }
+
+    /// Those of them that might be new, by id, with when they began (worked out wherever's handy: with many, not
+    /// cheap).
+    nonisolated static func recent(_ events: [TimelineEvent], after before: Date) -> [String: Date] {
         // (Not the quieted: probably nothing, they're not news.)
-        let recent = Dictionary(events.filter { $0.start > before && $0.kind != .privacy && $0.quieted == nil }.map { ($0.id, $0.start) },
-                                uniquingKeysWith: { a, _ in a })
+        Dictionary(events.filter { $0.start > before && $0.kind != .privacy && $0.quieted == nil }.map { ($0.id, $0.start) },
+                   uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The same, worked out already (those from before what's now all seen left out).
+    func found(recent: [String: Date], elsewhere: Bool) {
+        let before = self.before
+        let recent = recent.values.contains { $0 <= before } ? recent.filter { $0.value > before } : recent
         if elsewhere { if recent != self.elsewhere { self.elsewhere = recent } } else if recent != here { here = recent }
+        recount()
     }
 
     /// These have been seen.
@@ -63,6 +92,8 @@ final class EventsSeen {
         let new = events.filter(isNew)
         guard !new.isEmpty else { return }
         for event in new { seen[event.id] = event.start }
+        version += 1
+        recount()
         save()
     }
 
@@ -70,6 +101,11 @@ final class EventsSeen {
     func sawAll(at now: Date = Date()) {
         before = now
         seen = [:]
+        // (What was read before now is all seen too: not counted until it's read again.)
+        here = here.filter { $0.value > now }
+        elsewhere = elsewhere.filter { $0.value > now }
+        version += 1
+        recount()
         save()
     }
 
@@ -90,7 +126,9 @@ extension AppModel {
     func refreshNewEvents() async {
         guard let source = EventSource(config: config) else { return }
         let from = seenEvents.before
-        let found = await Task.detached { source.events(from: from, to: Date().addingTimeInterval(60)) }.value
-        seenEvents.found(found, elsewhere: false)
+        let recent = await Task.detached {
+            EventsSeen.recent(source.events(from: from, to: Date().addingTimeInterval(60)), after: from)
+        }.value
+        seenEvents.found(recent: recent, elsewhere: false)
     }
 }

@@ -69,6 +69,7 @@ and Settings kept for what one sets once.
 
 | Goal | Status | Notes |
 |---|---|---|
+| Brand colours in the app | later | The app's highlights (unread events' wash and dot, chosen cards, the rail's lit hours, toggles) follow the Mac's own accent colour (pink on one, blue on another); with the brand identity settled (the website's work: `web/DESIGN.md`), whether Pond's own colours take their place, the icon's teal for what can be acted on and its red for recording, as on pond.camera. Decided 2026-11-12: the Mac's accent for now. |
 | Other Ponds' new events | later | Other Ponds' new events counted while Events isn't open, and seen per viewer once there are phones. |
 | Notifications that fit the home | later | What tells one, and when, set where it belongs: per camera, per zone and per kind (people at the front door after 10 pm, not cars on the driveway), with quiet hours and the household's away and home (from HomeKit). One set of rules for this Mac's notifications, the Home app's and, later, the phone's. |
 

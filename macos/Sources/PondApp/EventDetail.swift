@@ -70,11 +70,16 @@ struct EventDetail: View {
         .background(.quaternary.opacity(0.5), in: Self.shape(covering: covers))
         .task { await prepare() }
         .onDisappear {
-            looper?.disableLooping()
+            // Stopped at once, let go once the panel's gone (letting go of a player takes a while: as the panel
+            // slid away, it held up its first frames).
+            let player = player, looper = looper
             player?.pause()
-            player?.removeAllItems()
-            looper = nil
-            player = nil
+            self.looper = nil
+            self.player = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + EventGrid.panelSpring.duration + 0.1) {
+                looper?.disableLooping()
+                player?.removeAllItems()
+            }
         }
     }
 
@@ -262,7 +267,7 @@ struct EventDetail: View {
     /// after), looping and muted, and what was found in it.
     func prepare() async {
         // Not while the panel's sliding in (or the arrows are stepping through): the player's made once it's still.
-        try? await Task.sleep(for: .seconds(0.45))
+        try? await Task.sleep(for: .seconds(EventGrid.panelSpring.duration + 0.05))
         guard !Task.isCancelled else { return }
         let camera = event.camera, source = self.source
         // Another Pond's: its clip, played as it comes (fetched by the service); only its picture until it has one.

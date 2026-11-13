@@ -210,6 +210,10 @@ struct RecordingAndHomeKit: ServiceRunning {
             log.log("pond", "detection: the demo's own (what each scene draws)")
             // Its first start: the last few hours made, so there's something to look back on at once.
             DemoHistory.makeIfNew(world: demoWorld, config: config, store: events, log: log)
+            // A large library, for measuring (POND_DEMO_EVENTS=20000).
+            if let events, let count = ProcessInfo.processInfo.environment["POND_DEMO_EVENTS"].flatMap(Int.init), count > 0 {
+                DemoHistory.fill(to: count, days: config.retention.events.days, store: events, log: log)
+            }
         } else if let model = ModelStore.choose(nil) {
             let detector = SharedDetector { line in log.log("pond", line) }
             do {

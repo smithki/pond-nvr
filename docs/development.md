@@ -37,6 +37,16 @@ swift scripts/capture-window.swift /tmp/inactive.png --inactive   # as it looks 
 
 **Trying animations.** Live behaviour is hard to describe, so reproduce it: a temporary environment switch that drives the motion in question, rapid `screencapture -l` frames of the window, and an ffmpeg contact sheet of them; exaggerating the duration or scale makes the geometry easy to measure. Take the switch out again afterwards.
 
+**Events' smoothness, timed.** The snapshot step `transitions` drives the Events view as someone would (far jumps, the panel opened and closed near the top and far down, arrow steps), three rounds, and writes `transitions.txt`: for each kind, the slowest wait on the main thread, the 95th percentile, and how many waits were over 16 ms (a frame missed at 60 Hz) and over 33 ms. Run it on a large library: `POND_DEMO_EVENTS=20000` fills the demo with that many events over the week first (once; kept after).
+
+```sh
+make app APP="dist/demo/Pond NVR.app"
+open -n -W --env POND_SNAPSHOTS=$(mktemp -d) --env POND_SNAPSHOTS_ONLY=transitions --env POND_DEMO_EVENTS=20000 \
+  "dist/demo/Pond NVR.app" --args --demo home
+```
+
+`POND_STALLS=1` (any run) logs each main-thread wait over 40 ms with what the grid was doing then (`/usr/bin/log stream --predicate 'subsystem == "camera.pond" AND category == "frames"'`). To find what a stall is, `/usr/bin/sample <pid> 30` during the check; for the main thread's own code, sum the samples under functions `in PondApp`.
+
 **Trying it without a camera.** Demo mode (`make demo`, [demo.md](demo.md)) has made-up cameras recorded, watched and controlled like real ones, a second home to reach, H.265 cameras, and scenarios for what goes wrong, in a world of their own.
 
 **Probes against real recordings.** Two tests run only when pointed at a real setup, for questions the made-up streams can't answer:

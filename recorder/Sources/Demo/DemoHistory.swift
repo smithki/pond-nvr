@@ -51,6 +51,43 @@ public enum DemoHistory {
         }
     }
 
+    /// For measuring how the app copes with a large library (`POND_DEMO_EVENTS=20000`): once the demo has made events
+    /// of its own, copies of them (their pictures and all) at times spread over the days kept, until there are
+    /// `count`. Once per demo (marked); in the background.
+    public static func fill(to count: Int, days: Int, store: EventStore, log: any EventLog) {
+        guard let folder = Demo.folder else { return }
+        let marked = (folder as NSString).appendingPathComponent("filled-\(count).json")
+        guard !FileManager.default.fileExists(atPath: marked) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            // (The demo's own first: up to ten minutes, its history being made meanwhile.)
+            var own: [CameraEvent] = []
+            for _ in 0 ..< 120 {
+                own = store.events(since: .distantPast).map(\.event).filter { $0.snapshot != nil && !$0.id.hasPrefix("fill-") }
+                if own.count >= 20 { break }
+                Thread.sleep(forTimeInterval: 5)
+            }
+            guard !own.isEmpty else { return log.log("pond", "! demo: no events of its own to fill the library with") }
+            let have = store.events(since: .distantPast).count
+            let needed = count - have
+            guard needed > 0 else { return }
+            log.log("pond", "demo: filling the library to \(count) events")
+            let now = Date(), span = Double(days) * 86400
+            for i in 0 ..< needed {
+                var event = own[i % own.count]
+                // Spread evenly back over the days kept, a little uneven (a few minutes either way).
+                let back = span * (Double(i) + 0.5) / Double(needed) + Double((i * 7919) % 600) - 300
+                let length = event.seconds
+                event.id = "fill-\(i)-\(event.id)"
+                event.start = now.addingTimeInterval(-max(60, back))
+                event.end = event.start.addingTimeInterval(length)
+                store.save(event, ongoing: false)
+            }
+            store.flush()
+            try? Data("{}".utf8).write(to: URL(fileURLWithPath: marked))
+            log.log("pond", "demo: the library filled to \(count) events")
+        }
+    }
+
     /// A camera's past, recorded as the recorder would have.
     static func record(_ camera: Config.Camera, world: DemoWorld, from: Date, to: Date, recordings: String, log: any EventLog) {
         guard let stream = try? DemoStream(url: camera.main, world: world, replaying: from, to: to, fps: 5) else { return }

@@ -466,7 +466,7 @@ struct ContentView: View {
             // The service's state every 4 s; HomeKit's (a small file) every 2 s, so "live in Home" is prompt.
             var tick = 0
             while !Task.isCancelled {
-                if tick % 2 == 0 { model.refreshService() }
+                if tick % 2 == 0 { await model.refreshServiceInBackground() }
                 model.refreshHomeKit()
                 model.refreshPrivacy()
                 // What the live views decode, for the media engine's budget, every 6 s.
