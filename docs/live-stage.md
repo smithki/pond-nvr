@@ -104,6 +104,16 @@ and the contents slide diagonally); its contents move with its animated size as 
 - **The adjustments' sidebar** (right): with the dock, sliding from the trailing edge and fading; floating over the
   stage instead when the window's too narrow.
 
+## Around the stage, in AppKit
+
+With the AppKit stage, the rail, the stage, the dock and the sidebar are one view (`LiveShell`, `LiveShell.swift`):
+each panel SwiftUI, hosted once and laid out at its size, never again frame by frame. A change to them (the rail
+shown or hidden, the dock opened or closed, the sidebar coming with it) sets each one's frame at once and carries it
+there from where it was drawn on the panels' curve (spring 0.42, bounce 0.12), fading what comes and goes; the
+stage's tiles move to their places for its new size on the same curve, so all of it moves on one clock. The dock's
+piece (its button and the dock) covers the stage's column and takes clicks only on what's in it (`chromeHit`), the
+other positions' panel reaching up over the stage included. The window resized, everything follows at once.
+
 ## The new stage, checked against
 
 The reference recording, side by side, change by change; the `live` timings, before and after; and each item above

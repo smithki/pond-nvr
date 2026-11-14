@@ -550,6 +550,8 @@ struct MorePositionsPanel: View {
                                 .padding(.bottom, Self.arrow)
                                 .fixedSize()
                                 .glassEffect(.regular, in: Callout(arrowX: 0, pointsDown: true, centred: true))
+                                // (Hosted over the stage in AppKit: clicks taken here.)
+                                .chromeHit()
                                 .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
                         }
                     }

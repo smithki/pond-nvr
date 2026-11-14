@@ -231,21 +231,24 @@ final class LiveStageView: NSView {
     /// badges only carried to their corners; laid out again for their size once it's stopped changing.
     override func layout() {
         super.layout()
+        // (Resized by the shell moving the panels: the tiles move to their new places on the panels' curve.)
+        let curve = resizeCurve
+        resizeCurve = nil
         guard bounds.size != laidOut, bounds.size != .zero, shell != nil else { return }
         let was = laidOut
         laidOut = bounds.size
         let frames = frames(for: lineup, in: bounds.size)
         let before = columns(lineup.count, in: was), after = columns(lineup.count, in: bounds.size)
         if was != .zero, before != after {
-            reflow(frames, from: before, to: after)
+            reflow(frames, from: before, to: after, curve: curve ?? Self.reflowCurve)
         } else {
             for (i, id) in lineup.enumerated() {
-                tiles[id]?.place(frames[i], curve: nil, following: true)
+                tiles[id]?.place(frames[i], curve: curve, following: curve == nil)
             }
         }
         let id = UUID()
         settling = id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + (curve.map { min($0.length, 0.5) } ?? 0.15)) { [weak self] in
             guard let self, self.settling == id else { return }
             self.settling = nil
             for tile in self.tiles.values { tile.settle() }
@@ -253,6 +256,8 @@ final class LiveStageView: NSView {
     }
 
     private var settling: UUID?
+    /// The next resize is the panels moving (`LiveShellView`): on this curve, not at once.
+    var resizeCurve: StageCurve?
 
     private func columns(_ count: Int, in size: CGSize) -> Int {
         Stage.layout(count: count, in: CGSize(width: size.width - 2 * Stage.padding, height: size.height - 2 * Stage.padding)).columns
@@ -261,14 +266,14 @@ final class LiveStageView: NSView {
     /// The stage's new size takes another number of columns (the rail coming or going, the window resized past
     /// a size): the tiles reflow, not snap, each moving to its new place as one piece (those changing rows over the
     /// others). On the side panels' curve; the frames after follow at once, carried on top.
-    private func reflow(_ frames: [CGRect], from before: Int, to after: Int) {
+    private func reflow(_ frames: [CGRect], from before: Int, to after: Int, curve: StageCurve) {
         CATransaction.begin()
         var crossers: [String] = []
         for (i, id) in lineup.enumerated() {
             if i / before != i / after { crossers.append(id) }
-            tiles[id]?.place(frames[i], curve: Self.reflowCurve)
+            tiles[id]?.place(frames[i], curve: curve)
         }
-        cross(crossers, for: Self.reflowCurve.length)
+        cross(crossers, for: curve.length)
         CATransaction.commit()
     }
 
@@ -302,6 +307,7 @@ final class LiveStageView: NSView {
     // MARK: A change
 
     private func change(from old: [String], to new: [String], _ s: LiveStageShell) {
+        resizeCurve = nil
         let size = bounds.size
         laidOut = size
         let oldFrames = frames(for: old, in: size)

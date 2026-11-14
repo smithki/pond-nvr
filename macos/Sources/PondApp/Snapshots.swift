@@ -136,6 +136,26 @@ enum Snapshots {
             }
             try? "done".write(toFile: "\(dir)/quickadd.txt", atomically: true, encoding: .utf8)
         }
+        // Live's dock with its adjustments moving to the sidebar and back (a wide window), for watching (recorded) that the
+        // dock slides over with its column, not jumps.
+        if wants("dockside"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .live
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1500, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(5))
+            model.liveDrive = LiveDrive(action: .adjustments(false))
+            model.liveDrive = LiveDrive(action: .solo(0))
+            try? await Task.sleep(for: .seconds(1))
+            model.liveDrive = LiveDrive(action: .controls(true))
+            try? await Task.sleep(for: .seconds(2))
+            for _ in 0 ..< 2 {
+                model.liveDrive = LiveDrive(action: .adjustments(true))
+                try? await Task.sleep(for: .seconds(1.5))
+                model.liveDrive = LiveDrive(action: .adjustments(false))
+                try? await Task.sleep(for: .seconds(1.5))
+            }
+            try? "done".write(toFile: "\(dir)/dockside.txt", atomically: true, encoding: .utf8)
+        }
         // Live's tiles reflowing as the stage's size changes their columns (2 cameras: one column with the rail, two
         // without; and the window resized past that size), for watching (recorded) that they move, not snap.
         if wants("reflow"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {

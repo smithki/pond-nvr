@@ -96,6 +96,10 @@ struct LiveView: View {
                     Button("Add Camera…") { model.addingCamera = true }.buttonStyle(.borderedProminent)
                 }
             } else {
+                Group {
+                if stageInAppKit {
+                    shellView(cameras)
+                } else {
                 HStack(spacing: 0) {
                     if railDrawn {
                         railView(cameras)
@@ -158,6 +162,8 @@ struct LiveView: View {
                             .padding(.vertical, 12)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
+                }
+                }
                 }
                 // What the dock will hold, asked before it opens (so it opens complete, then slides up); a slow
                 // camera (logging in, busy) holds it back only a moment, then it opens and fills in.
@@ -262,6 +268,7 @@ struct LiveView: View {
                     case .showAll: showAll(ids)
                     case let .rail(shown): showRail = shown
                     case let .controls(open): setControls(open: open)
+                    case let .adjustments(shown): dockAdjusting = shown
                     }
                 }
                 .onChange(of: model.soloRequest, initial: true) { _, asked in
@@ -352,6 +359,44 @@ struct LiveView: View {
         .controlSize(.large)
         .help(controlsOpen ? "Hide the controls (\u{2325}\u{2318}L)" : "Show this camera\u{2019}s controls (\u{2325}\u{2318}L)")
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { model.controlsButtonWidth = $0 }
+    }
+
+    /// The rail, the stage, the dock and the sidebar in AppKit (`LiveShell`): moved by Core Animation, together.
+    func shellView(_ cameras: [Config.Camera]) -> some View {
+        let docked = docked(cameras)
+        let onStage = cameras.filter { staged(cameras).contains($0.id) }
+        let sidebar = docked.flatMap { d -> AnyView? in
+            guard controlsOpen, model.adjustmentsInSidebar, !model.sidebarFloats else { return nil }
+            return AnyView(AdjustmentsView(camera: d.camera, controls: d.controls)
+                .frame(width: LiveLayout.sidebarWidth)
+                .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomTrailing))
+                .padding(.trailing, LiveLayout.sidebarInset)
+                .padding(.vertical, 12))
+        }
+        return LiveShell(
+            rail: AnyView(railView(cameras).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)),
+            railShown: railDrawn, railWidth: CGFloat(railKeptWidth.clamped(to: CameraRail.widths)),
+            stage: LiveStageShell(cameras: onStage, allCameras: cameras, snapshots: snapshots, activity: activity,
+                                  health: Dictionary(onStage.map { ($0.id, health($0.id, cameras: cameras)) }) { $1 },
+                                  justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
+                                  drag: reorderDrag, reorder: reorder, solo: solo, remove: { toggle($0) },
+                                  openControls: { openControls($0) }, openEvent: openEvent,
+                                  statuses: { if liveStatus != $0 { liveStatus = $0 } }, model: model),
+            dock: docked.map { AnyView(dockPiece($0)) }, dockOpen: controlsOpen,
+            dockOver: !(controlsOpen && model.morePositionsOpen == nil),
+            sidebar: sidebar, model: model)
+    }
+
+    /// The show and hide button, and under it the dock (open, or faded as it slides down out of sight).
+    func dockPiece(_ docked: (camera: Config.Camera, controls: Config.Controls)) -> some View {
+        VStack(spacing: 8) {
+            controlsButton.chromeHit()
+            LiveControlsDock(camera: docked.camera, controls: docked.controls, open: controlsOpen)
+                .opacity(controlsOpen ? 1 : 0)
+                .animation(Self.dockAnimation, value: controlsOpen)
+                .chromeHit(controlsOpen)
+        }
+        .padding(.horizontal, LiveLayout.dockInset)
     }
 
     /// The cameras' rail.

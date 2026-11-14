@@ -823,6 +823,8 @@ struct LiveDrive: Equatable {
         case rail(Bool)
         /// The camera watched alone's controls opened or closed.
         case controls(Bool)
+        /// Its adjustments shown or hidden (the dock's button: in the sidebar when there's room).
+        case adjustments(Bool)
     }
     let id = UUID()
     var action: Action
