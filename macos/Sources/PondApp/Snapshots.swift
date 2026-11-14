@@ -46,7 +46,7 @@ enum Snapshots {
         // The timed checks: not napped (macOS slows an app whose window is hidden, its timers and the main queue
         // late; a check run behind other windows then timed its own naps, stalls of up to half a second with
         // nothing going on).
-        let timing = wants("panels", "transitions", "live", "timeline")
+        let timing = wants("panels", "transitions", "live", "timeline", "timeline-loop")
             ? ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleDisplaySleepDisabled],
                                                     reason: "Timing the Events view's transitions")
             : nil
@@ -189,6 +189,33 @@ enum Snapshots {
             var report = "Timeline, \(cameras.count) cameras; while moving\n"
             for name in moving.keys.sorted() { report += line(name, moving[name]!) }
             try? report.write(toFile: "\(dir)/timeline.txt", atomically: true, encoding: .utf8)
+        }
+        // The Timeline doing one thing over and over (POND_TIMELINE_LOOP: zoom or seek) for 20 s, for a profiler to see
+        // that alone.
+        if wants("timeline-loop"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .timeline
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(6))
+            let timeline = model.timeline
+            let what = ProcessInfo.processInfo.environment["POND_TIMELINE_LOOP"] ?? "zoom"
+            let end = Date().addingTimeInterval(20)
+            var n = 0
+            FrameTiming.shared.begin()
+            while Date() < end {
+                n += 1
+                if what == "seek", let at = timeline.playhead {
+                    await timeline.seek(to: at.addingTimeInterval(n % 2 == 0 ? -1800 : 1800))
+                } else {
+                    timeline.zoom = n % 2 == 0 ? .hour : .sixHours
+                }
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            let ms = FrameTiming.shared.end().map { $0 * 1000 }.sorted()
+            let report = String(format: "%@: slowest %.0f ms, 95th %.0f ms, median %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n", what,
+                                ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)], ms.isEmpty ? 0 : ms[ms.count / 2],
+                                ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            try? report.write(toFile: "\(dir)/timeline-loop.txt", atomically: true, encoding: .utf8)
         }
         // Live's rail resized by its handle as a drag does (a step each frame, out and back), for watching (recorded) that
         // the rail and the tiles move together, the rail never under them.
