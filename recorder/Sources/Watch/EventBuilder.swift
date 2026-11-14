@@ -189,11 +189,16 @@ public struct EventBuilder: Sendable {
         return changes
     }
 
-    /// Whether something moving takes up the event that ended: one of its own tracks (followed all along), or
-    /// the same kind of thing soon after it ended.
+    /// Whether something moving takes up the event that ended: one of its own tracks (followed all along; parked
+    /// since, only soon after it ended), or the same kind of thing soon after it ended.
     static func resumes(_ event: CameraEvent, tracks: Set<Int>, by moving: [(track: Track, best: Bool)], at time: Date,
                         within: TimeInterval) -> Bool {
-        if moving.contains(where: { tracks.contains($0.track.id) }) { return true }
+        // (One of its own, parked since and gone again long after, begins a new one: a car parked an hour, pulling
+        // away, isn't the event of its arriving.)
+        if moving.contains(where: { s in
+            tracks.contains(s.track.id)
+                && (s.track.activeSince.map { $0 <= event.end } ?? true || time.timeIntervalSince(event.end) <= within)
+        }) { return true }
         // The same kind soon after: someone, or an animal, lost from view a moment. Not vehicles (a street's traffic
         // is car after car, each its own).
         guard event.category != .vehicle else { return false }

@@ -672,9 +672,10 @@ struct SplitMix {
         changes += Self.run(&tracker, &builder, from: 5, to: 135, x: { _ in 0.25 }, moving: false, t0: t0)
         #expect(changes.contains { if case .ended = $0 { true } else { false } })
         #expect(builder.current == nil)
-        // The same dog (its track never lost) moves again: the same event, taken up.
+        // The same dog (its track never lost) gets up and walks off, as it came: the same event, taken up. (Still a
+        // minute, it's parked: a step or two, a fraction of its size, moves it nowhere.)
         let first = changes.compactMap { if case let .began(e) = $0 { e.id } else { nil } }.first
-        changes = Self.run(&tracker, &builder, from: 137, to: 140, step: 0.5, x: { 0.25 + ($0 - 137) * 0.02 }, moving: true, t0: t0)
+        changes = Self.run(&tracker, &builder, from: 137, to: 142, step: 0.5, x: { 0.25 + ($0 - 137) * 0.05 }, moving: true, t0: t0)
         #expect(changes.contains { if case let .resumed(e) = $0 { e.id == first } else { false } })
     }
 
