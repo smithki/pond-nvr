@@ -78,6 +78,8 @@ struct LiveView: View {
     /// Cameras kept in front while others arrive (those already shown when Show All is clicked).
     @State private var inFront: Set<String> = []
     @State private var lastChange = Date.distantPast
+    /// The stage drawn in AppKit (`LiveStageShell`), while it's being built and checked against SwiftUI's (`Stage`).
+    @AppStorage("liveStageAppKit", store: AppDefaults.store) private var stageInAppKit = false
 
     static let railKey = "liveRail"
     static let defaultCount = 4
@@ -102,11 +104,23 @@ struct LiveView: View {
                     // The stage, and under it the controls of a camera watched on its own.
                     let docked = docked(cameras)
                     VStack(spacing: 0) {
-                        Stage(cameras: cameras.filter { staged(cameras).contains($0.id) }, allCameras: cameras, snapshots: snapshots,
-                              activity: activity, health: { health($0, cameras: cameras) }, openEvent: openEvent,
-                              drag: reorderDrag, reorder: reorder,
-                              justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
-                              solo: solo, remove: { toggle($0) }, openControls: { openControls($0) })
+                        Group {
+                            if stageInAppKit {
+                                let onStage = cameras.filter { staged(cameras).contains($0.id) }
+                                LiveStageShell(cameras: onStage, allCameras: cameras, snapshots: snapshots, activity: activity,
+                                               health: Dictionary(onStage.map { ($0.id, health($0.id, cameras: cameras)) }) { $1 },
+                                               justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
+                                               drag: reorderDrag, reorder: reorder, solo: solo, remove: { toggle($0) },
+                                               openControls: { openControls($0) }, openEvent: openEvent,
+                                               statuses: { if liveStatus != $0 { liveStatus = $0 } }, model: model)
+                            } else {
+                                Stage(cameras: cameras.filter { staged(cameras).contains($0.id) }, allCameras: cameras, snapshots: snapshots,
+                                      activity: activity, health: { health($0, cameras: cameras) }, openEvent: openEvent,
+                                      drag: reorderDrag, reorder: reorder,
+                                      justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
+                                      solo: solo, remove: { toggle($0) }, openControls: { openControls($0) })
+                            }
+                        }
                             // Above the dock: tiles growing back over its place (more cameras on the stage) pass
                             // over it as it goes, not under it.
                             .zIndex(1)
@@ -238,6 +252,18 @@ struct LiveView: View {
                 // The overview's Show These Cameras: those that need attention, alone on the stage (the rail filtered
                 // to them too).
                 // The camera window's Show in Live: that camera alone.
+                // (The snapshot mode's timing of Live, doing as the user would.)
+                .onChange(of: model.liveDrive) { _, drive in
+                    guard let drive else { return }
+                    let ids = model.liveCameras.map(\.id)
+                    switch drive.action {
+                    case let .toggle(n): if ids.indices.contains(n) { toggle(ids[n]) }
+                    case let .solo(n): if ids.indices.contains(n) { solo(ids[n]) }
+                    case .showAll: showAll(ids)
+                    case let .rail(shown): showRail = shown
+                    case let .controls(open): setControls(open: open)
+                    }
+                }
                 .onChange(of: model.soloRequest, initial: true) { _, asked in
                     guard let asked else { return }
                     if model.liveCameras.contains(where: { $0.id == asked }) { solo(asked) }
@@ -491,7 +517,9 @@ struct LiveView: View {
         justAdded = nil
         lastRemoved = false
         lastChange = .distantPast
-        let next: StageMotion = before.count == 1 ? .swap : before.contains(id) ? .focus(id) : .crossfade
+        // From one camera alone to another, as from several to one not among them: the one leaving recedes and fades
+        // (and goes out of focus), the other arriving.
+        let next: StageMotion = before.contains(id) ? .focus(id) : .crossfade
         // The motion first, in its own update: a removed tile leaves with the transition it was last drawn
         // with, so the tiles must be drawn with this one before they go.
         motion = next
@@ -2224,6 +2252,8 @@ struct TileMessage: View {
                     .buttonStyle(.glass)
                     .controlSize(.regular)
                     .fixedSize()
+                    // (Clicked in the AppKit stage's tile, not passed through to the tile under it.)
+                    .chromeHit()
                     .padding(.top, 4)
             }
         }
@@ -2238,6 +2268,7 @@ struct TileMessage: View {
                     .buttonStyle(.glass)
                     .controlSize(size)
                     .fixedSize()
+                    .chromeHit()
                     .padding(.top, 2)
             }
         }

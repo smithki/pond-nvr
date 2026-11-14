@@ -215,6 +215,8 @@ final class AppModel {
     /// Asked of the Events view by the snapshot mode's transition check (the panel, a step, a far scroll), as the user
     /// would, so it's measured through the same code.
     var eventsDrive: EventsDrive?
+    /// The snapshot mode's timing of Live: one thing for it to do, as the user would (see `LiveDrive`).
+    var liveDrive: LiveDrive?
     var addingCamera = false
     /// The field a camera's settings page puts the cursor in when it next shows (a check's fix, from its doctor).
     var cameraSettingsFocus: CameraSettingsPage.Field?
@@ -805,6 +807,25 @@ extension AppModel {
         demoHomeKitStatus = status
         homeKitStatus = status
     }
+}
+
+/// One thing for the Live view to do, as the user would (see `AppModel.liveDrive`): its cameras by their place in
+/// the rail's order.
+struct LiveDrive: Equatable {
+    enum Action: Equatable {
+        /// The nth camera added to the stage, or taken off it (a click on it in the rail).
+        case toggle(Int)
+        /// The nth camera watched alone (a double-click).
+        case solo(Int)
+        /// Every camera on the stage.
+        case showAll
+        /// The rail shown or hidden (the toolbar's button).
+        case rail(Bool)
+        /// The camera watched alone's controls opened or closed.
+        case controls(Bool)
+    }
+    let id = UUID()
+    var action: Action
 }
 
 /// One thing for the Events view to do, as the user would (see `AppModel.eventsDrive`).

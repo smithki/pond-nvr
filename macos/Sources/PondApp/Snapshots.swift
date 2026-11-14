@@ -46,14 +46,123 @@ enum Snapshots {
         // The timed checks: not napped (macOS slows an app whose window is hidden, its timers and the main queue
         // late; a check run behind other windows then timed its own naps, stalls of up to half a second with
         // nothing going on).
-        let timing = wants("panels", "transitions")
+        let timing = wants("panels", "transitions", "live")
             ? ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleDisplaySleepDisabled],
                                                     reason: "Timing the Events view's transitions")
             : nil
         defer { if let timing { ProcessInfo.processInfo.endActivity(timing) } }
+        // Live's moves, timed (as `panels`: while things move, the half second after each, and after): cameras added
+        // and taken off (one at a time; and two in quick succession, calmly), every camera at once, one grown to fill
+        // the stage, one camera for another, one not on the stage arriving as the rest recede, the rail, the dock.
+        // Each kind's frames written to live.txt.
+        if wants("live") {
+            model.mode = .live
+            // (On screen, whole, at one size: recordings of it framed alike, run to run.)
+            if let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+                let visible = screen.visibleFrame
+                window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            }
+            try? await Task.sleep(for: .seconds(6))
+            var moving: [String: [Double]] = [:], after: [String: [Double]] = [:]
+            func timed(_ name: String, _ action: LiveDrive.Action, settle: Double = 0.9) async {
+                FrameTiming.shared.begin()
+                model.liveDrive = LiveDrive(action: action)
+                try? await Task.sleep(for: .seconds(0.6))
+                moving[name, default: []] += FrameTiming.shared.end()
+                FrameTiming.shared.begin()
+                try? await Task.sleep(for: .seconds(settle))
+                after[name, default: []] += FrameTiming.shared.end()
+            }
+            let count = model.liveCameras.count
+            for _ in 0 ..< 3 {
+                await timed("show all", .showAll, settle: 1.4)
+                await timed("remove one", .toggle(count - 1))
+                await timed("add one", .toggle(count - 1))
+                // Two in quick succession: calm.
+                FrameTiming.shared.begin()
+                model.liveDrive = LiveDrive(action: .toggle(count - 1))
+                try? await Task.sleep(for: .seconds(0.2))
+                model.liveDrive = LiveDrive(action: .toggle(count - 2))
+                try? await Task.sleep(for: .seconds(0.6))
+                moving["quick changes", default: []] += FrameTiming.shared.end()
+                try? await Task.sleep(for: .seconds(1))
+                await timed("show all", .showAll, settle: 1.4)
+                await timed("focus (grow one)", .solo(0))
+                await timed("dock open", .controls(true))
+                await timed("dock close", .controls(false))
+                await timed("swap (one for another)", .solo(1))
+                await timed("show all", .showAll, settle: 1.4)
+                await timed("remove one", .toggle(count - 1))
+                await timed("crossfade (one not shown)", .solo(count - 1))
+                await timed("show all", .showAll, settle: 1.4)
+                await timed("rail hide", .rail(false))
+                await timed("rail show", .rail(true))
+            }
+            func line(_ name: String, _ lates: [Double]) -> String {
+                let ms = lates.map { $0 * 1000 }.sorted()
+                return String(format: "%@: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n", name,
+                              ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)],
+                              ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            }
+            var report = "While moving (the 0.6 s after each), then after; \(count) cameras\n"
+            for name in moving.keys.sorted() { report += line(name + ", moving", moving[name]!) }
+            for name in after.keys.sorted() { report += line(name + ", after", after[name]!) }
+            try? report.write(toFile: "\(dir)/live.txt", atomically: true, encoding: .utf8)
+        }
         // The window resized through the Events view's size classes with a card open far down (wide, the rail and
         // the panel beside the cards; medium, the rail gone for the panel; narrow, the panel over the cards), for
         // watching (recorded) that nothing jumps: the cards kept where they are, crossfading where their rows change.
+        // Live: a camera added, and another a moment later, before the first has arrived, moving it up a row (5 to 7
+        // cameras, 2 columns to 3; 1 to 3), for watching (recorded) that it carries on from where it's drawn.
+        if wants("quickadd"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .live
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(5))
+            func drive(_ action: LiveDrive.Action, wait: Double) async {
+                model.liveDrive = LiveDrive(action: action)
+                try? await Task.sleep(for: .seconds(wait))
+            }
+            for _ in 0 ..< 2 {
+                await drive(.solo(0), wait: 1)
+                for n in 1 ... 4 { await drive(.toggle(n), wait: 0.8) }
+                await drive(.toggle(5), wait: 0.25)
+                await drive(.toggle(6), wait: 1.5)
+            }
+            for _ in 0 ..< 2 {
+                await drive(.solo(0), wait: 1.2)
+                await drive(.toggle(1), wait: 0.25)
+                await drive(.toggle(2), wait: 1.5)
+            }
+            try? "done".write(toFile: "\(dir)/quickadd.txt", atomically: true, encoding: .utf8)
+        }
+        // Live's tiles reflowing as the stage's size changes their columns (2 cameras: one column with the rail, two
+        // without; and the window resized past that size), for watching (recorded) that they move, not snap.
+        if wants("reflow"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .live
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1500, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(5))
+            model.liveDrive = LiveDrive(action: .solo(0))
+            try? await Task.sleep(for: .seconds(1))
+            model.liveDrive = LiveDrive(action: .toggle(1))
+            try? await Task.sleep(for: .seconds(1.5))
+            for _ in 0 ..< 2 {
+                model.liveDrive = LiveDrive(action: .rail(false))
+                try? await Task.sleep(for: .seconds(1.2))
+                model.liveDrive = LiveDrive(action: .rail(true))
+                try? await Task.sleep(for: .seconds(1.2))
+            }
+            let start = window.frame
+            for width in [1800.0, 1300, 1800, 1500] {
+                var frame = window.frame
+                frame.size.width = width
+                window.setFrame(frame, display: true, animate: true)
+                try? await Task.sleep(for: .seconds(1.2))
+            }
+            window.setFrame(start, display: true, animate: false)
+            try? "done".write(toFile: "\(dir)/reflow.txt", atomically: true, encoding: .utf8)
+        }
         if wants("resizes"), let window = mainWindow() {
             model.mode = .events
             try? await Task.sleep(for: .seconds(5))
