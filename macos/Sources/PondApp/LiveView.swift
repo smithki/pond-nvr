@@ -259,9 +259,18 @@ struct LiveView: View {
                                    startedRecording: nil)
         }
         let asOf: Date? = model.isRecording ? Date() : nil
-        return CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
-                               lastRecorded: snapshots[id]?.time, recordingAsOf: asOf,
-                               startedRecording: [model.recordingStarted[id], model.serviceStarted].compactMap { $0 }.max())
+        let health = CameraHealth.of(live: staged(cameras).contains(id) ? liveStatus[id] : nil,
+                                     lastRecorded: snapshots[id]?.time, recordingAsOf: asOf,
+                                     startedRecording: [model.recordingStarted[id], model.serviceStarted].compactMap { $0 }.max())
+        // Whether it's being recorded is the service's word (it watches every camera's recordings as they're written,
+        // as the overview says): the newest picture read here (every 30 s, none yet as the app opens) only says since
+        // when. (By the picture's age alone, a tile said "Not recording" while the overview said all was recorded.)
+        let silent = model.notRecorded(id)
+        switch health {
+        case .notRecording where !silent: return .ok
+        case .ok where silent, .startingToRecord where silent: return .notRecording(since: snapshots[id]?.time)
+        default: return health
+        }
     }
 
     static let dockAnimation = Animation.spring(duration: 0.42, bounce: 0.12)

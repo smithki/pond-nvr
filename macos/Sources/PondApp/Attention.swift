@@ -136,5 +136,11 @@ extension AppModel {
     var attentionCount: Int { attention.count { $0.level >= .warning } }
 
     /// The cameras that need attention (any Pond's), for the rail's filter.
+    /// The service's watch says this camera's not being recorded (nothing written for a few minutes).
+    func notRecorded(_ id: String) -> Bool {
+        guard case let .notRecording(names)? = watch.problem, let camera = config?.cameras.first(where: { $0.id == id }) else { return false }
+        return names.contains(camera.name)
+    }
+
     var attentionCameras: Set<String> { Set(attention.filter { $0.level >= .warning }.compactMap(\.camera)) }
 }
