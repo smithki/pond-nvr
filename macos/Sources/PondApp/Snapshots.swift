@@ -46,7 +46,7 @@ enum Snapshots {
         // The timed checks: not napped (macOS slows an app whose window is hidden, its timers and the main queue
         // late; a check run behind other windows then timed its own naps, stalls of up to half a second with
         // nothing going on).
-        let timing = wants("panels", "transitions", "live")
+        let timing = wants("panels", "transitions", "live", "timeline")
             ? ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleDisplaySleepDisabled],
                                                     reason: "Timing the Events view's transitions")
             : nil
@@ -135,6 +135,60 @@ enum Snapshots {
                 await drive(.toggle(2), wait: 1.5)
             }
             try? "done".write(toFile: "\(dir)/quickadd.txt", atomically: true, encoding: .utf8)
+        }
+        // The Timeline, timed (as `live`): playing, a seek's glide, zooming, a two-finger pan, another day, another
+        // camera, a kind of event hidden and shown; written to timeline.txt.
+        if wants("timeline"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .timeline
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(6))
+            let timeline = model.timeline
+            var moving: [String: [Double]] = [:]
+            func timed(_ name: String, for seconds: Double = 0.6, _ action: () async -> Void) async {
+                FrameTiming.shared.begin()
+                await action()
+                try? await Task.sleep(for: .seconds(seconds))
+                moving[name, default: []] += FrameTiming.shared.end()
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            let cameras = model.liveCameras.map(\.id)
+            for round in 0 ..< 3 {
+                if let at = timeline.playhead {
+                    await timed("seek (glide)") { await timeline.seek(to: at.addingTimeInterval(round % 2 == 0 ? -1800 : 1800)) }
+                }
+                await timed("play", for: 3) { timeline.play() }
+                timeline.pause()
+                for zoom in [TimelineModel.Zoom.hour, .quarter, .sixHours, .day] {
+                    await timed("zoom") { timeline.zoom = zoom }
+                }
+                await timed("pan (two fingers)", for: 0.1) {
+                    for _ in 0 ..< 60 {
+                        timeline.pan(by: -120)
+                        try? await Task.sleep(for: .milliseconds(16))
+                    }
+                }
+                timeline.followPlayhead()
+                try? await Task.sleep(for: .seconds(0.6))
+                await timed("another day", for: 1) { await timeline.show(day: timeline.day.addingTimeInterval(-86400)) }
+                await timed("back a day", for: 1) { await timeline.show(day: timeline.day.addingTimeInterval(86400)) }
+                if cameras.count > 1 {
+                    await timed("another camera", for: 1) { await timeline.select(camera: cameras[(round + 1) % cameras.count]) }
+                }
+                if let kind = timeline.dayKinds.first {
+                    await timed("kind hidden") { withAnimation(.smooth(duration: 0.25)) { _ = timeline.shownKinds.remove(kind) } }
+                    await timed("kind shown") { withAnimation(.smooth(duration: 0.25)) { _ = timeline.shownKinds.insert(kind) } }
+                }
+            }
+            func line(_ name: String, _ lates: [Double]) -> String {
+                let ms = lates.map { $0 * 1000 }.sorted()
+                return String(format: "%@: slowest %.0f ms, 95th %.0f ms, over 16 ms: %d, over 33 ms: %d (%d answers)\n", name,
+                              ms.last ?? 0, ms.isEmpty ? 0 : ms[Int(Double(ms.count - 1) * 0.95)],
+                              ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
+            }
+            var report = "Timeline, \(cameras.count) cameras; while moving\n"
+            for name in moving.keys.sorted() { report += line(name, moving[name]!) }
+            try? report.write(toFile: "\(dir)/timeline.txt", atomically: true, encoding: .utf8)
         }
         // Live's rail resized by its handle as a drag does (a step each frame, out and back), for watching (recorded) that
         // the rail and the tiles move together, the rail never under them.
