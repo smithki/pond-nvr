@@ -668,10 +668,18 @@ if args.first == "demo" {
                 let semaphore = DispatchSemaphore(value: 0)
                 nonisolated(unsafe) var found: [String: Config.Controls] = [:]
                 let cameras = config.cameras
+                // All at once: one after another, each taking seconds, the many-cameras demo's first launch showed
+                // nothing for a minute and a half (and, quit meanwhile, started over the next time).
                 Task.detached {
-                    for camera in cameras {
-                        let access = CameraAccess(host: camera.host, username: camera.username, password: "demo", mainStream: camera.main)
-                        found[camera.id] = await CameraControls(access: access, device: camera.device).controls()
+                    await withTaskGroup(of: (String, Config.Controls?).self) { group in
+                        for camera in cameras {
+                            group.addTask {
+                                let access = CameraAccess(host: camera.host, username: camera.username, password: "demo",
+                                                          mainStream: camera.main)
+                                return (camera.id, await CameraControls(access: access, device: camera.device).controls())
+                            }
+                        }
+                        for await (id, controls) in group { found[id] = controls }
                     }
                     semaphore.signal()
                 }
