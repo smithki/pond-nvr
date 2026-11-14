@@ -827,7 +827,22 @@ struct TimelineLanes: View, @MainActor Animatable {
         rulerHeight + laneHeight(cameras: n) * Double(min(max(n, 1), 2)) + 2 * padding
     }
 
-    var laneHeight: Double { Self.laneHeight(cameras: Self.shownRows(cameras, folded: folded)) }
+    var laneHeight: Double {
+        if let made = rows.laneHeight { return made }
+        let made = Self.laneHeight(cameras: Self.shownRows(cameras, folded: folded))
+        rows.laneHeight = made
+        return made
+    }
+
+    /// The rows' heights and tops, worked out once for these lanes (their cameras and what's folded don't change for
+    /// as long as they're drawn), not again for every mark: per mark, each row above it, every camera's id parsed,
+    /// held the main thread through every frame of a glide or zoom.
+    @MainActor final class Rows {
+        var laneHeight: Double?
+        var heights: [Double]?
+        var tops: [Double]?
+    }
+    private let rows = Rows()
 
     /// The rows showing: headings and cameras, less a folded Pond's cameras.
     static func shownRows(_ cameras: [Config.Camera], folded: Set<String>) -> Int {
@@ -1210,7 +1225,7 @@ struct TimelineLanes: View, @MainActor Animatable {
 
     /// A lane's bar, and an event's mark inside it, in the lanes canvas (a folded Pond's at no height).
     func laneRect(_ index: Int, width: Double, at t: Date = Date()) -> CGRect {
-        let h = cameras.indices.contains(index) ? rowHeight(cameras[index], at: t) : laneHeight
+        let h = cameras.indices.contains(index) ? rowHeights(at: t)[index] : laneHeight
         let k = h / laneHeight
         return CGRect(x: 0, y: rowTop(index, at: t) + 5 * k, width: width, height: max(0, (laneHeight - 10) * k))
     }
@@ -1225,7 +1240,20 @@ struct TimelineLanes: View, @MainActor Animatable {
     }
 
     func rowTop(_ index: Int, at t: Date = Date()) -> Double {
-        cameras.prefix(index).reduce(0) { $0 + rowHeight($1, at: t) }
+        if rows.tops == nil {
+            var top = 0.0
+            rows.tops = rowHeights(at: t).map { h in defer { top += h }; return top } + [0]
+            rows.tops![cameras.count] = top
+        }
+        return rows.tops![max(0, min(index, cameras.count))]
+    }
+
+    /// Every row's height (`rowHeight`), kept (a Pond's openness doesn't change with time: folded or not).
+    func rowHeights(at t: Date) -> [Double] {
+        if let made = rows.heights { return made }
+        let made = cameras.map { rowHeight($0, at: t) }
+        rows.heights = made
+        return made
     }
 
     /// The row at a height in the lanes (nil past the last).
@@ -1813,9 +1841,11 @@ struct TimelineLanes: View, @MainActor Animatable {
                 context.opacity = cluster.weight
                 // Under chips set over it: cut round each, following its corners, the lane showing through an even
                 // gap, so which rounded ends are the chip's and which the bar's is plain.
+                // (Only those over this mark: overlapping it in time alone, a long bar took a cut for every chip in
+                // every lane over its span, hundreds in one clip, measured and drawn every frame of a glide or zoom.)
                 var cuts = Path()
                 for other in clusters[(index + 1)...] where other.over
-                    && other.rect.minX <= mark.maxX && mark.minX <= other.rect.maxX {
+                    && other.rect.insetBy(dx: -Self.cut, dy: -Self.cut).intersects(mark) {
                     let radius = min(4, other.rect.width / 2)
                     cuts.addRoundedRect(in: other.rect.insetBy(dx: -Self.cut, dy: -Self.cut),
                                         cornerSize: CGSize(width: radius + Self.cut, height: radius + Self.cut), style: .continuous)
@@ -1914,9 +1944,14 @@ struct TimelineLanes: View, @MainActor Animatable {
         let now = timeline.isLive ? (head ?? clockNow) : clockNow
         if visible.contains(now) {
             let px = x(now, width: size.width, visible: visible) - 6
-            var dim = Path(CGRect(x: px, y: 0, width: size.width - px, height: size.height))
-            for shape in recorded { dim = dim.subtracting(shape) }
-            context.fill(dim, with: .style(.background.opacity(0.5)))
+            let area = CGRect(x: px, y: 0, width: size.width - px, height: size.height)
+            // (Outside what's recorded, by a clip: subtracted from the area one by one, every recording of every lane,
+            // each a shape operation on all before it, held the main thread through every frame of a glide or zoom.)
+            var under = Path()
+            for shape in recorded where shape.boundingRect.intersects(area) { under.addPath(shape) }
+            var dimmed = context
+            if !under.isEmpty { dimmed.clip(to: under, options: .inverse) }
+            dimmed.fill(Path(area), with: .style(.background.opacity(0.5)))
         }
 
         if let head, visible.contains(head) {
@@ -2767,3 +2802,4 @@ struct DetectionBoxes: View {
         }
     }
 }
+
