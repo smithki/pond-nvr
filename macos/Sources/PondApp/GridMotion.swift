@@ -2,56 +2,13 @@
 // motion gives way to another is in one place, and tested (GridMotionTests). The view asks this what to do and
 // does it (animating, scrolling); this never draws, scrolls or waits.
 //
-// What can be under way at once:
-//  - one move of the cards: a `flip` (events came or went: each card from where it was to where it goes) or a
-//    `reshape` (the panel opened or closed: the grid zoomed from its old width to its new). A new one replaces it;
-//    landing (being put somewhere at once) ends it.
+// What can be under way at once (the cards' own moves are the grid's, in Core Animation):
 //  - one veil: the grid faded out while it's put somewhere far (a far jump) or its events change wholesale (a
 //    swap). A request for anything else gives it up.
 //  - clicks held while a far jump settles; events come meanwhile held back until it has.
 import Foundation
 
 struct GridMotion {
-    // MARK: The cards' move
-
-    enum Move {
-        case flip(GridFlip)
-        case reshape(GridReshape)
-
-        var began: Date {
-            switch self {
-            case let .flip(f): f.began
-            case let .reshape(r): r.began
-            }
-        }
-    }
-
-    private(set) var move: Move?
-    var flip: GridFlip? { if case let .flip(f) = move { f } else { nil } }
-    var reshaping: GridReshape? { if case let .reshape(r) = move { r } else { nil } }
-    /// The phase the move under way runs from (the grid's own, still).
-    func start(else phase: Double) -> Double {
-        switch move {
-        case let .flip(f)?: f.start
-        case let .reshape(r)?: r.start
-        case nil: phase
-        }
-    }
-
-    /// A move begun, in place of any under way.
-    mutating func begin(_ move: Move) { self.move = move }
-
-    /// A move's animation done: ended if it's still the one under way (not one begun since), and whether it was.
-    @discardableResult
-    mutating func ended(began: Date) -> Bool {
-        guard move?.began == began else { return false }
-        move = nil
-        return true
-    }
-
-    /// Put somewhere at once: no move under way.
-    mutating func land() { move = nil }
-
     // MARK: The panel, as last laid out
 
     /// Whether the panel was open, and where the grid began in the view (beside the rail, or not), as the grid was
@@ -187,16 +144,9 @@ struct GridMotion {
     /// Whether events coming now wait (a far jump under way), or move in now.
     var holdsEvents: Bool { swapping == nil && (settling || veil != nil) }
 
-    /// Whether the cards are clicked: not scrolling fast, nor a far jump settling, nor early in a move (each card's
-    /// hover answered every move of the pointer as they went by); nearly still (`progress` of the way), they are.
-    func clickable(scrubbing: Bool, progress: Double) -> Bool {
-        !scrubbing && !settling && (move == nil || progress >= Self.clickableAfter)
-    }
-
+    /// How far through the panel's zoom the cards are clicked again (nearly still: waiting for the very end, a click
+    /// on another went unanswered; each card's hover answered the pointer as they went by, early on).
     static let clickableAfter = 0.6
-
-    /// The scroller hidden while the grid reshapes (the scroll's put where it ends at once).
-    var scrollerHidden: Bool { reshaping != nil }
 
     // MARK: A window's resize
 

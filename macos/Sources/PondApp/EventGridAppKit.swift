@@ -1,11 +1,8 @@
-// The Events grid in AppKit: the same grid as `EventGrid` (its layout, its rules for what moves when, in
-// `GridMotion`; its inputs, an `EventGrid` value's), drawn with an NSScrollView and layer-backed cards
-// (`GridCardView`) reused as they scroll off and on. In SwiftUI, a change anywhere on the Events page had SwiftUI
-// go through every card's views again; here a card is a few layers, changed only when what it shows changes.
-//
-// Behind a hidden setting while it's made: `defaults write camera.pond eventsAppKitGrid -bool true` (the demo's:
-// camera.pond.demo). The day headers, the Now button and the order's switch are SwiftUI's (a few, hosted), so they
-// look as they do in `EventGrid`.
+// The Events grid: its layout (`EventGridLayout`), its rules for what moves when (`GridMotion`) and its inputs (an
+// `EventGrid` value), drawn with an NSScrollView and layer-backed cards (`GridCardView`) reused as they scroll off
+// and on. (It was SwiftUI's: a change anywhere on the Events page had SwiftUI go through every card's views again;
+// here a card is a few layers, changed only when what it shows changes.) The day headers, the Now button and the
+// order's switch are SwiftUI's, a few, hosted. It's laid out and moved with the rail and the panel by `EventsShell`.
 import AppKit
 import SwiftUI
 
@@ -1211,12 +1208,13 @@ struct GridZoom {
     let was: Double?
     let is_: Double?
 
-    init(_ r: GridReshape, now: EventGridLayout, dy: Double) {
-        beforeWidth = r.before.width
+    /// From `before` to `now`, the grid moved over `dx` in the view, the scroll `dy` further down, about `anchor`.
+    init(before: EventGridLayout, now: EventGridLayout, anchor: String?, dx: Double, dy: Double) {
+        beforeWidth = before.width
         nowWidth = now.width
-        dx = r.dx
-        was = r.anchor.flatMap { r.before.cards[$0] }.map { Double($0.minY) + dy }
-        is_ = r.anchor.flatMap { now.cards[$0] }.map { Double($0.minY) }
+        self.dx = dx
+        was = anchor.flatMap { before.cards[$0] }.map { Double($0.minY) + dy }
+        is_ = anchor.flatMap { now.cards[$0] }.map { Double($0.minY) }
     }
 
     /// Where a layer's drawn `p` of the way: the old one (drawn moved over by `dx`) or the new.
@@ -1323,8 +1321,7 @@ extension GridHostView {
         land(at: target)
         refresh()
         let dy = offset - beforeOffset
-        let r = GridReshape(before: before, anchor: anchor, beforeOffset: beforeOffset, dx: dx, start: 0, began: Date())
-        let z = GridZoom(r, now: laidOut, dy: dy)
+        let z = GridZoom(before: before, now: laidOut, anchor: anchor, dx: dx, dy: dy)
 
         // Over the scroll view, not in it (its clip view would cut the old, wider cards off at its sides, where
         // SwiftUI's let them run on: `scrollClipDisabled`), in a clip at the grid's top and bottom only.

@@ -33,22 +33,6 @@ import Testing
 @Suite struct EventGridLayoutTests {
     static let day = Date(timeIntervalSince1970: 1_800_000_000)
 
-    /// A card mid-move is drawn part way from where it was to where it goes, by the phase; at rest, where it goes.
-    @Test func aMoveDrawsCardsPartWay() {
-        func at(_ phase: Double, start: Double) -> CGPoint {
-            let t = FlipPlacement(phase: phase, target: 3, start: start, from: CGPoint(x: 0, y: 100), to: CGPoint(x: 40, y: 300))
-                .effectValue(size: .zero)
-            return CGPoint(x: t.m31, y: t.m32)
-        }
-        #expect(at(2, start: 2) == CGPoint(x: 0, y: 100))
-        #expect(at(2.5, start: 2) == CGPoint(x: 20, y: 200))
-        #expect(at(3, start: 2) == CGPoint(x: 40, y: 300))
-        // Begun part way through another (its phase not a whole one), it runs from there.
-        #expect(at(2.75, start: 2.5) == CGPoint(x: 20, y: 200))
-        // At rest (no move): where it goes.
-        #expect(at(3, start: 3) == CGPoint(x: 40, y: 300))
-    }
-
     @Test func cardsGoRowByRowUnderTheirDay() {
         let sections = [EventGridLayout.Section(day: Self.day, ids: ["a", "b", "c", "d", "e"]),
                         EventGridLayout.Section(day: Self.day.addingTimeInterval(-86400), ids: ["f"])]
@@ -93,43 +77,6 @@ import Testing
 /// The grid's account of where things are, with the figures macOS 26 gives (measured): a window toolbar 52 tall
 /// (counted in the scroll view's inset, though the grid's below it), the filters' bar's room 50, the strip at the
 /// bottom 80, a scroll view 1079 tall. If a macOS reports otherwise, these say how.
-@Suite struct GridMetricsTests {
-    static func metrics(contentOffset: Double) -> GridMetrics {
-        GridMetrics(reading: GridScrollReading(contentOffset: contentOffset, insetTop: 52, containerHeight: 1079),
-                    topRoom: 50, bottomRoom: 80)
-    }
-
-    @Test func atTheTopTheCardsAreScrolledNothing() {
-        // (The scroll view's offset, at its top, is minus its inset.)
-        let top = Self.metrics(contentOffset: -52)
-        #expect(top.offset == 0)
-        // The height in view is between the grid's own room above and below, not less the toolbar.
-        #expect(top.visibleHeight == 949)
-    }
-
-    @Test func scrollingToACardAndReadingItBackAgree() {
-        let m = Self.metrics(contentOffset: -52)
-        for y in [0.0, 300, 1234.5] {
-            #expect(Self.metrics(contentOffset: m.contentOffset(showing: y)).offset == y)
-        }
-    }
-
-    @Test func thePinnedDayIsJustUnderTheBarUntilTheNextPushesItUp() {
-        let m = Self.metrics(contentOffset: 448)   // scrolled 500
-        #expect(m.pinnedHeaderY(nextHeaderAt: .infinity, headerHeight: 58) == 50)
-        // The next day's header 20 below the top of the height in view: the pinned one's pushed up 38.
-        #expect(m.pinnedHeaderY(nextHeaderAt: 520, headerHeight: 58) == 12)
-    }
-
-    @Test func theBottomStripIsTheStretchJustBelowWhatsInView() {
-        let m = Self.metrics(contentOffset: 448)
-        #expect(m.bottomStrip == 1449 ... 1529)
-    }
-}
-
-/// A far jump's ease, cut in two: each piece starts and ends where the whole does there, and the speed it leaves
-/// at is the speed it arrives at.
-@MainActor
 @Suite struct JumpEaseTests {
     /// A timing curve's progress at time `t` (0…1), and its slope there (progress per time).
     func sample(_ c: (Double, Double, Double, Double), at t: Double) -> (y: Double, slope: Double) {

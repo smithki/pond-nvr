@@ -6,91 +6,8 @@ import Testing
 
 @MainActor
 @Suite struct GridMotionTests {
-    let layout = EventGridLayout(sections: [EventGridLayout.Section(day: Date(timeIntervalSince1970: 0), ids: ["a", "b", "c"])],
-                                 width: 900, columns: 3)
     let sectionsA = [EventGridLayout.Section(day: Date(timeIntervalSince1970: 0), ids: ["a"])]
     let sectionsB = [EventGridLayout.Section(day: Date(timeIntervalSince1970: 0), ids: ["a", "b"])]
-
-    func reshape(_ began: Date, start: Double = 0) -> GridMotion.Move {
-        .reshape(GridReshape(before: layout, anchor: nil, beforeOffset: 0, dx: 0, start: start, began: began))
-    }
-
-    func flip(_ began: Date, start: Double = 0) -> GridMotion.Move {
-        .flip(GridFlip(before: layout, beforeOffset: 0, dx: 0, cards: [:], headers: [:], offset: 0, start: start, began: began))
-    }
-
-    // MARK: Moves
-
-    @Test func aNewerMoveReplacesTheOneUnderWayWhoseEndIsThenIgnored() {
-        var m = GridMotion()
-        let first = Date(timeIntervalSince1970: 1), second = Date(timeIntervalSince1970: 2)
-        m.begin(reshape(first))
-        m.begin(flip(second, start: 3))
-        #expect(m.flip != nil && m.reshaping == nil)
-        let r1 = m.ended(began: first)
-        #expect(r1 == false)
-        #expect(m.flip != nil)
-        #expect(m.start(else: 9) == 3)
-        let r2 = m.ended(began: second)
-        #expect(r2)
-        #expect(m.move == nil)
-        #expect(m.start(else: 9) == 9)
-    }
-
-    @Test func landingMidReshapeEndsItAndItsLateCompletionChangesNothing() {
-        // The panel's zoom under way when a far jump lands (the panel closed far from its card).
-        var m = GridMotion()
-        let began = Date(timeIntervalSince1970: 1)
-        m.begin(reshape(began))
-        #expect(m.scrollerHidden)
-        m.land()
-        #expect(!m.scrollerHidden)
-        let r3 = m.ended(began: began)
-        #expect(r3 == false)
-        // A move begun after the landing isn't ended by the old one's completion.
-        let next = Date(timeIntervalSince1970: 2)
-        m.begin(flip(next))
-        let r4 = m.ended(began: began)
-        #expect(r4 == false)
-        #expect(m.flip != nil)
-    }
-
-    @Test func onlyAReshapeHidesTheScroller() {
-        var m = GridMotion()
-        m.begin(flip(Date()))
-        #expect(!m.scrollerHidden)
-        m.begin(reshape(Date()))
-        #expect(m.scrollerHidden)
-    }
-
-    // MARK: Clicks
-
-    @Test func clicksWaitTillAMoveIsNearlyStillAndForAFarJumpToSettle() {
-        var m = GridMotion()
-        #expect(m.clickable(scrubbing: false, progress: 1))
-        #expect(!m.clickable(scrubbing: true, progress: 1))
-        m.begin(reshape(Date()))
-        #expect(!m.clickable(scrubbing: false, progress: 0.3))
-        #expect(m.clickable(scrubbing: false, progress: GridMotion.clickableAfter))
-        m.land()
-        m.holdClicks(now: 100, showing: sectionsA)
-        #expect(!m.clickable(scrubbing: false, progress: 1))
-        m.settled()
-        #expect(m.clickable(scrubbing: false, progress: 1))
-    }
-
-    @Test func heldClicksAreLetGoOnlyOnceTheirTimeIsUp() {
-        var m = GridMotion()
-        m.holdClicks(now: 100, showing: sectionsA)
-        m.timedOut(now: 101)
-        #expect(m.settling)
-        // Held again meanwhile: from then.
-        m.holdClicks(now: 102, showing: sectionsA)
-        m.timedOut(now: 100 + GridMotion.settleFor)
-        #expect(m.settling)
-        m.timedOut(now: 102 + GridMotion.settleFor)
-        #expect(!m.settling)
-    }
 
     // MARK: The panel
 
@@ -112,6 +29,19 @@ import Testing
         m.moved(to: 30, panelOpen: true)
         let r6 = m.panelChanged(open: false, leading: 230)
         #expect(r6 == -200)
+    }
+
+    @Test func heldClicksAreLetGoOnlyOnceTheirTimeIsUp() {
+        var m = GridMotion()
+        m.holdClicks(now: 100, showing: sectionsA)
+        m.timedOut(now: 101)
+        #expect(m.settling)
+        // Held again meanwhile: from then.
+        m.holdClicks(now: 102, showing: sectionsA)
+        m.timedOut(now: 100 + GridMotion.settleFor)
+        #expect(m.settling)
+        m.timedOut(now: 102 + GridMotion.settleFor)
+        #expect(!m.settling)
     }
 
     @Test func measuredOnlyOnce() {

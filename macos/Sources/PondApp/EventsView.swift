@@ -14,12 +14,8 @@ struct EventsView: View {
     /// The event whose details are open, one camera's events or all (nil), the kinds hidden: kept with the app's
     /// model, so coming back (the toolbar's back, say) finds the view as it was left.
     @State private var selected: TimelineEvent?
-    /// The grid in AppKit (`EventGridAppKit`), while it's made: a hidden setting.
-    @AppStorage("eventsAppKitGrid", store: AppDefaults.store) private var appKitGrid = false
     /// The grid's made room for the panel (with it, as one move).
     @State private var roomMade = false
-    /// The panel opened just now (not stepped to another): its details come once it's in, placeholders until then.
-    @State private var freshOpen = false
     /// Events read while scrolled down that would move the cards, waiting; and whether it's near the top.
     @State private var held: Read?
     @State private var near = true
@@ -265,92 +261,9 @@ struct EventsView: View {
     /// How much narrower the panel opening makes the grid (less the rail's room, when it goes as the panel comes).
     var panelTakes: Double { EventDetail.width + 14 - (railMakesRoom ? ActivityRail.width + 14 : 0) }
 
-    /// The page's surface: the cards, the rail beside them, the glass at the window's edge and the panel over it. In
-    /// AppKit (`EventsShell`, with the AppKit grid), one view moving them all as one; or SwiftUI's own.
-    @ViewBuilder
-    var layers: some View {
-        if appKitGrid {
-            shell
-        } else {
-            swiftUILayers
-        }
-    }
-
-    @ViewBuilder
-    var swiftUILayers: some View {
-        ZStack(alignment: .topLeading) {
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Under the panel in a narrow window: faded away while it's open (back as it closes).
-                .opacity(cardsHidden ? 0 : 1)
-                .allowsHitTesting(!cardsHidden)
-                .padding(.leading, gridLeading)
-                // (The panel's room: the panel's drawn over the glass at the window's edge, below.)
-                .padding(.trailing, roomMade && !panelCovers ? EventDetail.width + 14 : 0)
-                .animation(nil, value: gridLeading)
-                .animation(nil, value: roomMade)
-            if railShown {
-                OnScreenRail(shown: index.shown, position: index.position, hourCounts: index.hourCounts, days: keptDays,
-                             onScreen: onScreen, dimmed: byBestMatch, retention: {
-                    model.showSettings(.storage)
-                }) { hour in
-                    // The first card at or after that hour (newest first: the last one before the next hour).
-                    let next = hour.addingTimeInterval(3600)
-                    if let target = shown.last(where: { $0.start < next && $0.start >= hour }) ?? shown.first(where: { $0.start < next }) {
-                        request = GridScroll(kind: .centre(target.id, always: true))
-                    }
-                }
-                .frame(width: ActivityRail.width)
-                .padding(.top, barHeight)
-                .zIndex(1)
-                // (Sliding with the grid's zoom, one curve: it goes as the cards take its room, and comes as they
-                // make it.)
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, 16)
-        // Glass over the grid's edges, blurring the cards that scroll on under them, the window's width, while
-        // anything's under it: under the filters, easing out just below; at the window's edge, easing in towards it.
-        .overlay(alignment: .bottom) {
-            EdgeGlass(fromTop: false)
-                .frame(height: Self.bottomFade)
-                // (Not while the cards are faded away: nothing under it.)
-                .opacity(underBottom && !cardsHidden ? 1 : 0)
-                .animation(.easeOut(duration: 0.2), value: underBottom)
-        }
-        // The panel, over the glass's layer and clear of it at the bottom (a surface of its own): an event's own (its
-        // own player), swapped at once from one to the next; it slides in and out only as it opens and closes.
-        .overlay(alignment: .topTrailing) {
-            if let selected {
-                ZStack {
-                    EventDetail(event: selected, camera: name(selected.camera), recordings: model.config?.storage.recordingsPath ?? "",
-                                source: EventSource(config: model.config),
-                                watch: { watch(selected) }, close: { panel(nil) }, delete: { deleting = selected },
-                                earlier: neighbour(of: selected, later: false).map { e in { choose(e) } },
-                                later: neighbour(of: selected, later: true).map { e in { choose(e) } },
-                                fillAfter: freshOpen ? EventGrid.reshapeTakes + 0.05 : nil)
-                        .id(selected.id)
-                        .transition(.identity)
-                }
-                // The window's own surface, which hides the cards. (Its translucent kind, they showed through it as
-                // it widened over them. Tried and dropped: the drawer first, over the cards on glass, then the cards
-                // making room; one move, together, read better.)
-                .background {
-                    EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor))
-                }
-                .frame(width: panelCovers ? nil : EventDetail.width)
-                .frame(maxWidth: panelCovers ? .infinity : nil, maxHeight: .infinity, alignment: .top)
-                .padding(.top, barHeight)
-                // (Its full height, over the glass at the window's edge, to the edge.)
-                .padding(.bottom, 16)
-                .padding(.horizontal, 16)
-                .transition(.modifier(active: PanelComing(away: true), identity: PanelComing(away: false)))
-            }
-        }
-        // (Read by the panel's coming and going as it moves: a panel opened in one size class and closed in another
-        // goes the way the window's class is now. A transition chosen here would be the one it came in with.)
-        .environment(\.panelCovers, panelCovers)
-    }
+    /// The page's surface: the cards, the rail beside them, the glass at the window's edge and the panel over it,
+    /// laid out and moved as one by `EventsShell`.
+    var layers: some View { shell }
 
     /// The width the page has (the grid's room worked out from it, for the AppKit shell).
     @State private var shellWidth = 0.0
@@ -557,7 +470,8 @@ struct EventsView: View {
             }
             .padding(.top, barHeight)
         } else {
-            grid
+            // (The grid's the shell's own.)
+            EmptyView()
         }
     }
 
@@ -658,7 +572,6 @@ struct EventsView: View {
     func panel(_ event: TimelineEvent?) {
         focus = (event ?? selected)?.id
         let open = event != nil
-        freshOpen = open && selected == nil
         // (One curve, the grid's zoom's: the panel and the rail move with the cards.)
         withAnimation(EventGrid.reshapeAnimation) {
             selected = event
@@ -676,7 +589,6 @@ struct EventsView: View {
 
     /// Another event's details (the arrows): its card's row brought to the middle if it isn't wholly in view.
     func choose(_ event: TimelineEvent) {
-        freshOpen = false
         selected = event
         focus = event.id
         request = GridScroll(kind: .centre(event.id, always: false))
@@ -823,27 +735,13 @@ struct EventsView: View {
     /// The grid, as wide as the room it's given (read from a view that takes what it's offered: the grid's content,
     /// laid out to that width, mustn't feed back into it). The columns come from the width there'd be without the
     /// panel, so the panel opening narrows the cards (smoothly) instead of changing how many there are a row.
-    var grid: some View {
-        // (Over the cards, the panel doesn't narrow them.)
+    /// The grid's inputs, for a grid `width` wide.
+    func makeGrid(width: Double) -> EventGrid {
         let open = roomMade && !panelCovers
-        // Each camera named once here, not as each card's made, frame after frame (each time asking for the list of
-        // cameras anew).
+        let index = self.index
+        // Each camera named once here, not as each card's made.
         let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
         let names: (String) -> String = { named[$0] ?? name($0) }
-        let index = index
-        return GeometryReader { geo in
-            makeGrid(width: max(200, geo.size.width), open: open, names: names, index: index)
-        }
-    }
-
-    /// The grid's inputs, for a grid `width` wide: the SwiftUI grid itself, or what the AppKit grid's told.
-    func makeGrid(width: Double, open: Bool? = nil, names: ((String) -> String)? = nil, index: EventsIndex? = nil) -> EventGrid {
-        let open = open ?? (roomMade && !panelCovers)
-        let index = index ?? self.index
-        let names = names ?? {
-            let named = Dictionary(cameras.map { ($0.id, name($0.id)) }, uniquingKeysWith: { a, _ in a })
-            return { named[$0] ?? name($0) }
-        }()
         return EventGrid(sections: index.sections, events: index.byID,
                          width: width,
                          // (One a row in a narrow window, whatever its width: two fit at its widest, and going between one
@@ -1374,23 +1272,6 @@ struct SearchReading: View {
 extension EnvironmentValues {
     /// Whether the Events view's panel covers the cards (a narrow window) or sits beside them.
     @Entry var panelCovers = false
-}
-
-/// The Events view's panel coming or going, as the window's size class has it now: beside the cards, in from the
-/// side; over them, up from the bottom, out of a blur.
-struct PanelComing: ViewModifier {
-    let away: Bool
-    @Environment(\.panelCovers) private var covers
-
-    func body(content: Content) -> some View {
-        let away = away, covers = covers
-        content
-            .blur(radius: away && covers ? 24 : 0)
-            .opacity(away ? 0 : 1)
-            .visualEffect { view, proxy in
-                view.offset(x: away && !covers ? proxy.size.width + 16 : 0, y: away && covers ? proxy.size.height : 0)
-            }
-    }
 }
 
 /// The new cards on screen a moment, the window in front: seen. Reads what's on screen itself (as the rail does), so
