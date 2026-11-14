@@ -145,7 +145,9 @@ public struct EventBuilder: Sendable {
                 changes.append(.resumed(event))
             } else {
                 let first = moving.max { Self.rank($0.track.category) > Self.rank($1.track.category) }!
-                current = CameraEvent(camera: camera, start: first.track.firstSeen, end: time, category: first.track.category,
+                // (From when what began it set off: when it was first seen, or, parked a while, when it went again.)
+                current = CameraEvent(camera: camera, start: first.track.activeSince ?? first.track.firstSeen, end: time,
+                                      category: first.track.category,
                                       confidence: first.track.bestConfidence, box: first.track.box)
                 peak = [:]
                 peakByCategory = [:]

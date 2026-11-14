@@ -82,6 +82,92 @@ import Understanding
         #expect(moves == 1)
     }
 
+    /// A parked car at night as a detector really boxes it: its box a sixth wider or narrower from one look to the
+    /// next, its middle wandering a little, now and then only half of it found. Once it's parked (a minute or two),
+    /// it never moves again (each flicker moving it by the rule for things on the move, it took up its event again
+    /// and again, all night).
+    @Test func aParkedCarWhoseBoxFlickersHasntMoved() {
+        var tracker = Tracker()
+        let t0 = Date()
+        var random = SplitMix(seed: 7)
+        var moves = 0
+        for step in 0 ..< 1800 {
+            let time = t0.addingTimeInterval(Double(step) * 1.7)
+            var width = 0.14 * (1 + random.uniform(-0.15, 0.15))
+            var x = 0.556 + random.uniform(-0.003, 0.003)
+            // Now and then, only part of it found.
+            if step % 37 == 0 { width *= 0.45; x += 0.03 }
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.8,
+                                box: .init(x: x, y: 0.533 + random.uniform(-0.002, 0.002), width: width, height: 0.069))
+            // (After its first few minutes.)
+            for s in tracker.update([car], mask: Self.everything, at: time) where s.track.lastMoved == time && step > 120 { moves += 1 }
+        }
+        #expect(tracker.tracks.first?.parked == true)
+        #expect(moves == 0)
+    }
+
+    /// The same car, parked a while, then driving off: it moves as it goes.
+    @Test func aParkedCarThatDrivesOffMoves() {
+        var tracker = Tracker()
+        let t0 = Date()
+        var random = SplitMix(seed: 11)
+        var drivingMoves = 0
+        var parked = false
+        for step in 0 ..< 340 {
+            // Parked (flickering, looked at every couple of seconds) for over eight minutes, then pulling away.
+            let time = t0.addingTimeInterval(step < 300 ? Double(step) * 1.7 : 510 + Double(step - 300) * 0.5)
+            let driving = step >= 300
+            if step == 299 { parked = tracker.tracks.first?.parked == true }
+            let x = 0.556 + (driving ? Double(step - 300) * 0.02 : 0) + random.uniform(-0.003, 0.003)
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.8,
+                                box: .init(x: x, y: 0.533, width: 0.14 * (1 + random.uniform(-0.15, 0.15)), height: 0.069))
+            for s in tracker.update([car], mask: Self.everything, at: time) where s.track.lastMoved == time && driving {
+                drivingMoves += 1
+            }
+        }
+        #expect(parked)
+        #expect(drivingMoves >= 3)
+    }
+
+    /// A parked car lost from sight for a moment and found again (a new track) is still parked, not something new
+    /// moving; another car driving in later, after the first drove off, is.
+    @Test func aParkedCarFoundAgainIsStillParked() {
+        var tracker = Tracker()
+        let t0 = Date()
+        var random = SplitMix(seed: 5)
+        func car(_ x: Double) -> Detection {
+            Detection(label: "car", category: .vehicle, confidence: 0.8,
+                      box: .init(x: x + random.uniform(-0.003, 0.003), y: 0.533, width: 0.14 * (1 + random.uniform(-0.15, 0.15)), height: 0.069))
+        }
+        var time = t0
+        for step in 0 ..< 200 {
+            time = t0.addingTimeInterval(Double(step) * 1.7)
+            _ = tracker.update([car(0.556)], mask: Self.everything, at: time)
+        }
+        #expect(tracker.tracks.first?.parked == true)
+        // Lost from sight a while (gone from the tracker), then found again where it was.
+        time = time.addingTimeInterval(20)
+        _ = tracker.update([], mask: Self.everything, at: time)
+        #expect(tracker.tracks.isEmpty)
+        time = time.addingTimeInterval(2)
+        let found = tracker.update([car(0.556)], mask: Self.everything, at: time)
+        #expect(found.first?.track.parked == true)
+        #expect(found.first?.track.lastMoved == nil)
+        // It drives off (moves as it goes); later another car comes in, moving.
+        var drove = 0
+        for step in 1 ... 20 {
+            time = time.addingTimeInterval(0.5)
+            for s in tracker.update([car(0.556 + Double(step) * 0.03)], mask: Self.everything, at: time) where s.track.lastMoved == time { drove += 1 }
+        }
+        #expect(drove >= 3)
+        time = time.addingTimeInterval(60)
+        _ = tracker.update([], mask: Self.everything, at: time)
+        time = time.addingTimeInterval(1)
+        let arriving = tracker.update([car(0.3)], mask: Self.everything, at: time)
+        #expect(arriving.first?.track.parked == false)
+        #expect(arriving.first?.track.lastMoved == time)
+    }
+
     /// Someone walking slowly moves, though no one step's far: from where they last moved, it adds up.
     @Test func aSlowWalkerMoves() {
         var tracker = Tracker()
@@ -103,6 +189,22 @@ import Understanding
         let mask = MotionMask(columns: 4, rows: 4, cells: [0])   // movement only at the top left
         let seen = tracker.update([parked], mask: mask, at: Date())
         #expect(seen.first?.track.moved == false)
+    }
+}
+
+/// Numbers that look random and are the same every run.
+struct SplitMix {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+    mutating func uniform(_ low: Double, _ high: Double) -> Double {
+        low + (high - low) * Double(next() >> 11) / Double(1 << 53)
     }
 }
 
@@ -131,6 +233,65 @@ import Understanding
         #expect(event.category == .person && event.labels == ["person": 1])
         #expect(event.start == t0)
         #expect(builder.current == nil)
+    }
+
+    /// A car that drives in and parks, its box flickering all night: one event, ended a couple of minutes after it
+    /// stops, not held open till morning.
+    @Test func aCarThatParksEndsItsEventSoonAfter() {
+        var tracker = Tracker()
+        var builder = EventBuilder(camera: "drive")
+        let t0 = Date()
+        var random = SplitMix(seed: 3)
+        var changes: [EventBuilder.Change] = []
+        var time = t0
+        // Driving in.
+        for step in 0 ..< 20 {
+            time = t0.addingTimeInterval(Double(step) * 0.5)
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.85,
+                                box: .init(x: 0.2 + Double(step) * 0.018, y: 0.533, width: 0.14, height: 0.069))
+            changes += builder.update(tracker.update([car], mask: Self.moving, at: time), at: time)
+        }
+        let parked = time
+        // Parked an hour, the picture over it changing all the while, its box flickering.
+        for step in 1 ... 2000 {
+            time = parked.addingTimeInterval(Double(step) * 1.7)
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.8,
+                                box: .init(x: 0.542 + random.uniform(-0.003, 0.003), y: 0.533,
+                                           width: 0.14 * (1 + random.uniform(-0.15, 0.15)), height: 0.069))
+            changes += builder.update(tracker.update([car], mask: Self.moving, at: time), at: time)
+        }
+        let ends = changes.compactMap { if case let .ended(e) = $0 { e } else { nil } }
+        #expect(changes.filter { if case .began = $0 { true } else { false } }.count == 1)
+        #expect(ends.count == 1)
+        // Ended within a few minutes of parking, not an hour on.
+        #expect((ends.first?.end.timeIntervalSince(parked) ?? .infinity) < 300)
+    }
+
+    /// A car parked an hour, then pulling away: its event starts as it goes, not an hour before when it was first seen.
+    @Test func aParkedCarsEventStartsWhenItGoes() {
+        var tracker = Tracker()
+        var builder = EventBuilder(camera: "drive")
+        let t0 = Date()
+        var random = SplitMix(seed: 9)
+        var time = t0
+        var began: [CameraEvent] = []
+        for step in 0 ..< 2200 {
+            time = t0.addingTimeInterval(Double(step) * 1.7)
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.8,
+                                box: .init(x: 0.556 + random.uniform(-0.003, 0.003), y: 0.533,
+                                           width: 0.14 * (1 + random.uniform(-0.15, 0.15)), height: 0.069))
+            for c in builder.update(tracker.update([car], mask: Self.moving, at: time), at: time) { if case let .began(e) = c { began.append(e) } }
+        }
+        let leaving = time
+        for step in 1 ... 20 {
+            time = leaving.addingTimeInterval(Double(step) * 0.5)
+            let car = Detection(label: "car", category: .vehicle, confidence: 0.8,
+                                box: .init(x: 0.556 + Double(step) * 0.03, y: 0.533, width: 0.14, height: 0.069))
+            for c in builder.update(tracker.update([car], mask: Self.moving, at: time), at: time) { if case let .began(e) = c { began.append(e) } }
+        }
+        // (The first, as it was first seen; the last, as it left: from then.)
+        let left = began.last
+        #expect((left?.start.timeIntervalSince(leaving) ?? -.infinity) >= 0)
     }
 
     @Test func aParkedCarAloneMakesNoEvent() {
