@@ -14,6 +14,8 @@ struct EventsView: View {
     /// The event whose details are open, one camera's events or all (nil), the kinds hidden: kept with the app's
     /// model, so coming back (the toolbar's back, say) finds the view as it was left.
     @State private var selected: TimelineEvent?
+    /// The open event put back on coming back to the page (`model.eventsSelected`): shown open at once.
+    @State private var restoring = false
     /// The grid's made room for the panel (with it, as one move).
     @State private var roomMade = false
     /// Events read while scrolled down that would move the cards, waiting; and whether it's near the top.
@@ -283,6 +285,7 @@ struct EventsView: View {
                                AnyView(EventDetail.skeleton(event: event, camera: name(event.camera), covers: panelCovers)
                                    .background { EventDetail.shape(covering: panelCovers).fill(Color(nsColor: .windowBackgroundColor)) })
                            },
+                           restoring: restoring,
                            panelKey: selected.map { s in
                                EventsShell.PanelKey(event: s, camera: name(s.camera),
                                                     earlier: neighbour(of: s, later: false)?.id, later: neighbour(of: s, later: true)?.id,
@@ -721,6 +724,7 @@ struct EventsView: View {
         if let open = selected, let now = events.first(where: { $0.id == open.id }), now != open { selected = now }
         if !loaded, selected == nil, let id = model.eventsSelected, let was = events.first(where: { $0.id == id }) {
             selected = was
+            restoring = true
             roomMade = true
             focus = id
             request = GridScroll(kind: .centre(id, always: true), animated: false)

@@ -20,6 +20,9 @@ struct EventsShell: NSViewRepresentable {
     let selected: TimelineEvent?
     let panelFor: (TimelineEvent) -> AnyView
     let skeletonFor: (TimelineEvent) -> AnyView
+    /// The open event put back as the page comes back (it was open when one went to another page): the panel there at
+    /// once, made as it is, not slid in nor a skeleton first; the cards beside it at once.
+    var restoring = false
     let panelKey: PanelKey?
     /// The glass at the window's edge, and whether anything's under it.
     let glass: AnyView
@@ -72,6 +75,8 @@ final class EventsShellView: NSView {
     /// The panel's going (out, then let go), and the rail's.
     private var panelLeaving: UUID?
     private var railLeaving: UUID?
+    /// The open event's been put back (once a page's showing: opened again after, it slides in as ever).
+    private var restored = false
 
     static let pad = 16.0
 
@@ -154,9 +159,14 @@ final class EventsShellView: NSView {
             rail.rootView = AnyView(content.environment(model))
         }
         let opening = old?.selected == nil && s.selected != nil
+        let restore = opening && s.restoring && !restored
+        if restore { restored = true }
         if let event = s.selected, s.panelKey != panelKey {
             panelKey = s.panelKey
-            if opening, readyFor == event.id {
+            if restore {
+                // Put back: made as it is, now (no skeleton: it's shown at once, not slid in).
+                panel.rootView = AnyView(s.panelFor(event).environment(model))
+            } else if opening, readyFor == event.id {
                 // Made ahead (the pointer rested on its card): it slides in as it is, nothing made now.
                 swap(&panel, &ready)
                 readyFor = nil
@@ -208,23 +218,27 @@ final class EventsShellView: NSView {
             if let old, old.panelCovers != s.panelCovers || ((old.rail != nil) != (s.rail != nil) && old.roomMade == s.roomMade) {
                 grid.sizeClassChanged = true
             }
+            // (Put back: the cards take their room beside it at once, as for the window's size.)
+            if restore { grid.sizeClassChanged = true }
             grid.update(config)
         }
         let first = old == nil
+        // At once: the first drawing, and the open event put back.
+        let still = first || restore
         // The cards: faded away under the panel when it covers them (a narrow window).
         if first || old?.cardsHidden != s.cardsHidden {
-            fade(grid, to: s.cardsHidden ? 0 : 1, animated: !first)
-            fade(placeholder, to: s.cardsHidden ? 0 : 1, animated: !first)
+            fade(grid, to: s.cardsHidden ? 0 : 1, animated: !still)
+            fade(placeholder, to: s.cardsHidden ? 0 : 1, animated: !still)
         }
         // The rail: sliding off its side as the cards take its room, and back as they make it.
         let railShown = s.rail != nil
         if first || (old?.rail != nil) != railShown {
-            slideRail(in: railShown, animated: !first)
+            slideRail(in: railShown, animated: !still)
             // (The cards zoom beside it, the same move: `GridHostView.update`.)
         }
         // The panel: in from the side (or up from the bottom, over the cards), out the same way.
         let panelShown = s.selected != nil
-        if first || (old?.selected != nil) != panelShown { slidePanel(in: panelShown, covers: s.panelCovers, animated: !first) }
+        if first || (old?.selected != nil) != panelShown { slidePanel(in: panelShown, covers: s.panelCovers, animated: !still) }
         // The glass at the window's edge, while anything's under it.
         let glassAlpha: Float = s.glassShown && !s.cardsHidden ? 1 : 0
         if let layer = glass.layer, layer.opacity != glassAlpha {
