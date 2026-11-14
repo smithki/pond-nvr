@@ -11,8 +11,9 @@ struct LiveShell: NSViewRepresentable {
     let railShown: Bool
     let railWidth: CGFloat
     let stage: LiveStageShell
-    /// The dock and the button that shows and hides it, one piece (a camera watched on its own), open or not; over
+    /// The button that shows and hides the dock, and the dock (a camera watched on its own), open or not; over
     /// the stage (hidden, only its button showing; or reaching up over it, a camera's other positions open).
+    let dockButton: AnyView?
     let dock: AnyView?
     let dockOpen: Bool
     let dockOver: Bool
@@ -24,7 +25,10 @@ struct LiveShell: NSViewRepresentable {
 
     func updateNSView(_ view: LiveShellView, context: Context) {
         let t = context.transaction
-        view.update(self, animated: t.animation != nil && !t.disablesAnimations, panelsAtOnce: model.railMovesAtOnce)
+        // (The panels move on their own curve whether or not the change came animated; at once only when asked, or as
+        // the window's resized.)
+        view.update(self, animated: t.animation != nil && !t.disablesAnimations, panelsAnimated: !t.disablesAnimations,
+                    panelsAtOnce: model.railMovesAtOnce)
     }
 
     static func dismantleNSView(_ view: LiveShellView, coordinator: ()) { view.tearDown() }
@@ -50,8 +54,10 @@ final class LiveShellView: NSView {
     private let stage: LiveStageView
     private let rail = PanelHost()
     private let sidebar = PanelHost()
-    /// The dock's piece: the column's width, from far above the button (room for what reaches up over the stage)
-    /// to the dock's bottom; clicks taken only on what's in it.
+    /// The button that shows and hides the dock; and the dock, the column's width, from far above it (room for what
+    /// reaches up over the stage) to its bottom, faded here as it comes and goes (faded in its own SwiftUI, it vanished
+    /// at once, closing). Clicks taken only on what's in them.
+    private let button = ChromeHost()
     private let dock = ChromeHost()
     private var shell: LiveShell?
     /// What's laid out: each panel there or not.
@@ -78,8 +84,10 @@ final class LiveShellView: NSView {
             addSubview(host)
         }
         addSubview(stage)
-        dock.isHidden = true
-        addSubview(dock)
+        for host in [dock, button] as [NSView] {
+            host.isHidden = true
+            addSubview(host)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -90,15 +98,18 @@ final class LiveShellView: NSView {
 
     // MARK: Told what to show
 
-    func update(_ s: LiveShell, animated: Bool, panelsAtOnce: Bool) {
+    func update(_ s: LiveShell, animated: Bool, panelsAnimated: Bool, panelsAtOnce: Bool) {
         shell = s
         rail.rootView = AnyView(s.rail.environment(model))
+        if let content = s.dockButton {
+            button.rootView = AnyView(content.chromeHits { [weak button] in button?.clickable = $0 }.environment(model))
+        }
         if let content = s.dock {
             dock.rootView = AnyView(content.padding(.top, max(bounds.height, 1)).frame(maxHeight: .infinity, alignment: .top)
                 .chromeHits { [weak dock] in dock?.clickable = $0 }.environment(model))
         }
         if let content = s.sidebar { sidebar.rootView = AnyView(content.environment(model)) }
-        arrange(animated: animated && !panelsAtOnce)
+        arrange(animated: panelsAnimated && !panelsAtOnce && !(window?.inLiveResize ?? false))
         stage.update(s.stage, animated: animated)
     }
 
@@ -110,7 +121,7 @@ final class LiveShellView: NSView {
     // MARK: Where the panels go
 
     private struct Frames {
-        var rail: CGRect, stage: CGRect, dock: CGRect, sidebar: CGRect
+        var rail: CGRect, stage: CGRect, button: CGRect, dock: CGRect, sidebar: CGRect
     }
 
     private func frames(_ s: LiveShell, _ shown: Shown, in size: CGSize) -> Frames {
@@ -128,7 +139,9 @@ final class LiveShellView: NSView {
         let above = max(size.height, 1)
         return Frames(rail: CGRect(x: shown.rail ? 0 : -railHost, y: 0, width: railHost, height: size.height),
                       stage: stage,
-                      dock: CGRect(x: left, y: top - above, width: width, height: above + piece),
+                      button: CGRect(x: left, y: top, width: width, height: LiveView.controlsButtonHeight),
+                      dock: CGRect(x: left, y: top + LiveView.controlsButtonHeight + 8 - above, width: width,
+                                   height: above + piece - LiveView.controlsButtonHeight - 8),
                       sidebar: CGRect(x: shown.sidebar ? size.width - LiveLayout.sidebarRoom : size.width, y: 0,
                                       width: LiveLayout.sidebarRoom, height: size.height))
     }
@@ -149,8 +162,10 @@ final class LiveShellView: NSView {
         show(rail, now.rail, was: was.rail, curve: curve)
         place(sidebar, target.sidebar, curve: curve)
         show(sidebar, now.sidebar, was: was.sidebar, curve: curve)
+        place(button, target.button, curve: curve, centred: true)
+        show(button, now.dock, was: was.dock, curve: curve)
         place(dock, target.dock, curve: curve, centred: true)
-        show(dock, now.dock, was: was.dock, curve: curve)
+        show(dock, now.dock && now.dockOpen, was: was.dock && was.dockOpen, curve: curve)
         if stage.frame != target.stage {
             if let curve, stage.frame.size != target.stage.size { stage.resizeCurve = curve }
             place(stage, target.stage, curve: curve)
@@ -159,6 +174,7 @@ final class LiveShellView: NSView {
         // over the stage, the dock is over it. (Its clicks are taken only where it has something, either way.)
         stage.layer?.zPosition = s.dockOver ? 0 : 1
         dock.layer?.zPosition = s.dockOver ? 2 : 0
+        button.layer?.zPosition = s.dockOver ? 2 : 0
         CATransaction.commit()
     }
 

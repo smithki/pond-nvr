@@ -382,21 +382,15 @@ struct LiveView: View {
                                   drag: reorderDrag, reorder: reorder, solo: solo, remove: { toggle($0) },
                                   openControls: { openControls($0) }, openEvent: openEvent,
                                   statuses: { if liveStatus != $0 { liveStatus = $0 } }, model: model),
-            dock: docked.map { AnyView(dockPiece($0)) }, dockOpen: controlsOpen,
+            dockButton: docked.map { _ in AnyView(controlsButton.chromeHit()) },
+            dock: docked.map { d in
+                AnyView(LiveControlsDock(camera: d.camera, controls: d.controls, open: controlsOpen)
+                    .chromeHit(controlsOpen)
+                    .padding(.horizontal, LiveLayout.dockInset))
+            },
+            dockOpen: controlsOpen,
             dockOver: !(controlsOpen && model.morePositionsOpen == nil),
             sidebar: sidebar, model: model)
-    }
-
-    /// The show and hide button, and under it the dock (open, or faded as it slides down out of sight).
-    func dockPiece(_ docked: (camera: Config.Camera, controls: Config.Controls)) -> some View {
-        VStack(spacing: 8) {
-            controlsButton.chromeHit()
-            LiveControlsDock(camera: docked.camera, controls: docked.controls, open: controlsOpen)
-                .opacity(controlsOpen ? 1 : 0)
-                .animation(Self.dockAnimation, value: controlsOpen)
-                .chromeHit(controlsOpen)
-        }
-        .padding(.horizontal, LiveLayout.dockInset)
     }
 
     /// The cameras' rail.
