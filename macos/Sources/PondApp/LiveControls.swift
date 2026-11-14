@@ -1538,6 +1538,8 @@ struct DockAdjustments: View {
     @State private var naming: Task<Void, Never>?
 
     static let columnWidth: CGFloat = 40
+    /// Above and below a page, inside the dock.
+    static let pageMargin: CGFloat = 16
 
     func hover(_ group: Config.Controls.Item.Group, _ inside: Bool) {
         naming?.cancel()
@@ -1603,18 +1605,21 @@ struct DockAdjustments: View {
                 .background(.black.opacity(0.28))
                 .overlay(alignment: .trailing) { Rectangle().fill(.white.opacity(0.1)).frame(width: 1) }
             }
+            // Each page with its margins, clipped at the dock's own edges: the pages slide under its top and bottom
+            // as one surface with it (clipped inside the margins, they vanished short of its edges).
+            let stride = pageHeight + 2 * Self.pageMargin
             VStack(spacing: 0) {
                 ForEach(groups, id: \.0) { group, items in
                     pageView(group, items)
-                        .frame(height: pageHeight, alignment: .top)
+                        .frame(width: width - (paged ? Self.columnWidth : 0), height: pageHeight, alignment: .top)
+                        .padding(.leading, 16)
+                        .padding(.trailing, trailing)
+                        .padding(.vertical, Self.pageMargin)
                 }
             }
-            .offset(y: -CGFloat(current) * pageHeight)
-            .frame(width: width - (paged ? Self.columnWidth : 0), height: pageHeight, alignment: .top)
+            .offset(y: -CGFloat(current) * stride)
+            .frame(height: stride, alignment: .top)
             .clipped()
-            .padding(.leading, 16)
-            .padding(.trailing, trailing)
-            .padding(.vertical, 16)
         }
     }
 
