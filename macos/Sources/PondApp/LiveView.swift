@@ -78,6 +78,9 @@ struct LiveView: View {
     /// Cameras kept in front while others arrive (those already shown when Show All is clicked).
     @State private var inFront: Set<String> = []
     @State private var lastChange = Date.distantPast
+    /// Changes asked for (a click, a key, the toolbar): the first ends the shell's stillness as the view opens, so what
+    /// one does animates at once; what arrives by itself as it opens doesn't (`LiveShellView.quiet`).
+    @State private var acted = 0
 
     static let railKey = "liveRail"
     /// The rail's width, as kept (dragged by its handle, `LiveShellView`).
@@ -139,6 +142,7 @@ struct LiveView: View {
                 // The preference changed elsewhere (the toolbar, the dock making room): followed, sliding (or at once,
                 // as the window is resized).
                 .onChange(of: showRail) { _, shown in
+                    acted += 1
                     guard railDrawn != shown else { return }
                     if model.railMovesAtOnce {
                         var instant = Transaction()
@@ -321,7 +325,7 @@ struct LiveView: View {
             },
             dockOpen: controlsOpen,
             dockOver: !(controlsOpen && model.morePositionsOpen == nil),
-            sidebar: sidebar, model: model)
+            sidebar: sidebar, acted: acted, model: model)
     }
 
     /// The cameras' rail.
@@ -352,6 +356,7 @@ struct LiveView: View {
     }
 
     func setControls(open: Bool) {
+        acted += 1
         withAnimation(Self.dockAnimation) { controlsShown = open }
         controlsKept = open
     }
@@ -447,6 +452,7 @@ struct LiveView: View {
     /// Moves a dragged camera to another's place in the order (its priority, saved in the settings), the
     /// rail and the stage making way as it goes.
     func reorder(_ id: String, onto target: String) {
+        acted += 1
         // Only among the cameras of one Pond: another Pond's, in the order kept here for it.
         guard AppModel.pond(of: id) == AppModel.pond(of: target) else { return }
         motion = .reorder
@@ -457,6 +463,7 @@ struct LiveView: View {
 
     /// Every camera on the stage, gently.
     func showAll(_ ids: [String]) {
+        acted += 1
         announcement?.cancel()
         pendingAnnouncement = nil
         justAdded = nil
@@ -478,6 +485,7 @@ struct LiveView: View {
     /// Shows one camera alone: instantly from another single camera; from a multi-view, by growing it to
     /// fill the stage while the others fade (or a crossfade, when it was not on the stage).
     func solo(_ id: String) {
+        acted += 1
         let before = staged(model.liveCameras)
         guard before != [id] else { return }
         announcement?.cancel()
@@ -511,6 +519,7 @@ struct LiveView: View {
 
     /// Adds a camera to the stage, or takes it off (keeping at least one).
     func toggle(_ id: String) {
+        acted += 1
         let now = Date()
         motion = now.timeIntervalSince(lastChange) < Self.fastPace ? .calm : .lively
         lastChange = now

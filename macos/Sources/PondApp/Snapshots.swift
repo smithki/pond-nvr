@@ -217,6 +217,18 @@ enum Snapshots {
                                 ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
             try? report.write(toFile: "\(dir)/timeline-loop.txt", atomically: true, encoding: .utf8)
         }
+        // Live just opened, then something asked for at once (a camera taken off 0.8 s in), for watching (recorded) that
+        // what arrives by itself as it opens is drawn in place and the change asked for still animates.
+        if wants("liveopen") {
+            model.mode = .live
+            try? await Task.sleep(for: .seconds(0.8))
+            let count = model.liveCameras.count
+            model.liveDrive = LiveDrive(action: .toggle(count - 1))
+            try? await Task.sleep(for: .seconds(1.5))
+            model.liveDrive = LiveDrive(action: .toggle(count - 1))
+            try? await Task.sleep(for: .seconds(1.5))
+            try? "done".write(toFile: "\(dir)/liveopen.txt", atomically: true, encoding: .utf8)
+        }
         // Live's rail resized by its handle as a drag does (a step each frame, out and back), for watching (recorded) that
         // the rail and the tiles move together, the rail never under them.
         if wants("railresize"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {

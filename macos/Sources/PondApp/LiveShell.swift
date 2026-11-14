@@ -19,6 +19,8 @@ struct LiveShell: NSViewRepresentable {
     let dockOver: Bool
     /// The adjustments down the right, when they're there.
     let sidebar: AnyView?
+    /// How many changes have been asked for (`LiveView.acted`): the first ends the stillness of the view's opening.
+    let acted: Int
     let model: AppModel
 
     func makeNSView(context: Context) -> LiveShellView { LiveShellView(model: model) }
@@ -71,8 +73,10 @@ final class LiveShellView: NSView {
     /// The rail's width while it's dragged (kept once let go, till the kept width says the same).
     private var draggedWidth: CGFloat?
     private var dragFrom: CGFloat = 0
-    /// When the view was first laid out at a size: for a moment after, everything is drawn at once (`quiet`).
+    /// When the view was first laid out at a size: for a moment after, what arrives by itself (the cameras, the lineup,
+    /// the panels) is drawn at once (`quiet`), till the first change asked for, which animates as ever.
     private var opened: Date?
+    private var acted: Int?
     /// How long after opening changes aren't animated: the cameras, the lineup and the panels arriving.
     static let openingQuiet: TimeInterval = 2
     private var quiet: Bool { opened.map { Date().timeIntervalSince($0) < Self.openingQuiet } ?? true }
@@ -134,6 +138,9 @@ final class LiveShellView: NSView {
 
     func update(_ s: LiveShell, animated: Bool, panelsAnimated: Bool, panelsAtOnce: Bool) {
         shell = s
+        // Something asked for: the opening's stillness is over.
+        if let was = acted, was != s.acted { opened = .distantPast }
+        acted = s.acted
         // The kept width caught up with the one dragged: it's the kept one again.
         if let dragged = draggedWidth, !handle.dragging, abs(dragged - s.railWidth) < 0.5 { draggedWidth = nil }
         rail.rootView = AnyView(s.rail.environment(model))
