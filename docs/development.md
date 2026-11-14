@@ -47,7 +47,17 @@ open -n -W --env POND_SNAPSHOTS=$(mktemp -d) --env POND_SNAPSHOTS_ONLY=transitio
 
 The step `panels` does only the detail panel, opened and closed 20 times (near the top, then far down), and writes `panels.txt`: with little else going on, it's the one to run under `sample`. Both steps keep macOS from napping the app while they run (a hidden window's timers are otherwise slowed, and the check timed its own naps), but a window behind others is still drawn less faithfully: compare two builds run the same way, one after the other, rather than against figures from another day.
 
-**The Events page.** It's drawn by `EventsShell`: the grid (`EventGridAppKit`, cards in layers, reused as they scroll), the rail and the detail panel, laid out and moved by one AppKit view, every move run by Core Animation on one curve (so none waits on the main thread, and none falls behind another); what's in the rail and the panel is SwiftUI's, hosted. The panel for the card the pointer rests on is made ahead, off the window; opened before it's ready, a skeleton of it slides in. The `panels` step times the panel's opening and closing, while things move apart from after.
+**Live's and the Timeline's smoothness, timed.** The step `live` does every kind of change to the Live view three
+times over (cameras added and taken off, one at a time and two quickly; all shown; one grown to fill the stage, one for
+another, one not on the stage arriving; the rail; the dock) and writes `live.txt`, timed as `transitions` is, while
+each moves and after. `timeline` does the Timeline's (playing, a seek's glide, zooming, a two-finger pan, another day,
+another camera, a kind of event hidden and shown) and writes `timeline.txt`; `timeline-loop` does only one of them over
+and over for 20 s (`POND_TIMELINE_LOOP=zoom` or `seek`), the one to run under `sample`. `quickadd`, `reflow`,
+`dockside` and `railresize` drive changes to Live to watch (recorded) rather than time. The demo's scenes follow the
+clock and its events fill the day as it goes, and the first launch after a build runs slower: compare builds run one
+after the other, neither the first.
+
+**The Events page.** It's drawn by `EventsShell`: the grid (`GridHostView`, cards in layers, reused as they scroll), the rail and the detail panel, laid out and moved by one AppKit view, every move run by Core Animation on one curve (so none waits on the main thread, and none falls behind another); what's in the rail and the panel is SwiftUI's, hosted. The panel for the card the pointer rests on is made ahead, off the window; opened before it's ready, a skeleton of it slides in. The `panels` step times the panel's opening and closing, while things move apart from after.
 
 `POND_STALLS=1` (any run) logs each main-thread wait over 40 ms with what the grid was doing then (`/usr/bin/log stream --predicate 'subsystem == "camera.pond" AND category == "frames"'`). To find what a stall is, `/usr/bin/sample <pid> 30` during the check; for the main thread's own code, sum the samples under functions `in PondApp`.
 
