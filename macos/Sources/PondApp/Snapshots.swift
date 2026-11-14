@@ -217,6 +217,18 @@ enum Snapshots {
                                 ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
             try? report.write(toFile: "\(dir)/timeline-loop.txt", atomically: true, encoding: .utf8)
         }
+        // Events with an event open, to Live and back, for watching (recorded) that the panel's there open at once, made.
+        if wants("eventsback") {
+            model.mode = .events
+            try? await Task.sleep(for: .seconds(4))
+            model.eventsDrive = EventsDrive(action: .open(3))
+            try? await Task.sleep(for: .seconds(2))
+            model.mode = .live
+            try? await Task.sleep(for: .seconds(2))
+            model.mode = .events
+            try? await Task.sleep(for: .seconds(3))
+            try? "done".write(toFile: "\(dir)/eventsback.txt", atomically: true, encoding: .utf8)
+        }
         // Live just opened, then something asked for at once (a camera taken off 0.8 s in), for watching (recorded) that
         // what arrives by itself as it opens is drawn in place and the change asked for still animates.
         if wants("liveopen") {
