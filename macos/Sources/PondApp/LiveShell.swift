@@ -71,6 +71,11 @@ final class LiveShellView: NSView {
     /// The rail's width while it's dragged (kept once let go, till the kept width says the same).
     private var draggedWidth: CGFloat?
     private var dragFrom: CGFloat = 0
+    /// When the view was first laid out at a size: for a moment after, everything is drawn at once (`quiet`).
+    private var opened: Date?
+    /// How long after opening changes aren't animated: the cameras, the lineup and the panels arriving.
+    static let openingQuiet: TimeInterval = 2
+    private var quiet: Bool { opened.map { Date().timeIntervalSince($0) < Self.openingQuiet } ?? true }
 
     struct Shown: Equatable {
         var rail = false, dock = false, dockOpen = false, sidebar = false
@@ -141,6 +146,7 @@ final class LiveShellView: NSView {
         }
         if let content = s.sidebar { sidebar.rootView = AnyView(content.environment(model)) }
         arrange(animated: panelsAnimated && !panelsAtOnce && !(window?.inLiveResize ?? false))
+        stage.quiet = quiet
         stage.update(s.stage, animated: animated)
     }
 
@@ -182,6 +188,9 @@ final class LiveShellView: NSView {
     /// Each panel to its place: moving there on the panels' curve, or at once (the window resized, the first time).
     private func arrange(animated: Bool) {
         guard let s = shell, bounds.size != .zero else { return }
+        if opened == nil { opened = Date() }
+        stage.quiet = quiet
+        let animated = animated && !quiet
         let was = shown
         let now = Shown(rail: s.railShown, dock: s.dock != nil, dockOpen: s.dockOpen, sidebar: s.sidebar != nil)
         shown = now

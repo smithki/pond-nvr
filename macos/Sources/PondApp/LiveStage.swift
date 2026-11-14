@@ -240,7 +240,7 @@ final class LiveStageView: NSView {
         laidOut = bounds.size
         let frames = frames(for: lineup, in: bounds.size)
         let before = columns(lineup.count, in: was), after = columns(lineup.count, in: bounds.size)
-        if was != .zero, before != after {
+        if was != .zero, before != after, !quiet {
             reflow(frames, from: before, to: after, curve: curve ?? Self.reflowCurve)
         } else {
             for (i, id) in lineup.enumerated() {
@@ -259,6 +259,9 @@ final class LiveStageView: NSView {
     private var settling: UUID?
     /// The next resize is the panels moving (`LiveShellView`): on this curve, not at once.
     var resizeCurve: StageCurve?
+    /// Just opened: what changes now (the cameras arriving, the window taking its size) is drawn at once, not moved
+    /// (tiles popping in and moving about as the view opens were distracting; the view should simply be there).
+    var quiet = false
 
     private func columns(_ count: Int, in size: CGSize) -> Int {
         Stage.layout(count: count, in: CGSize(width: size.width - 2 * Stage.padding, height: size.height - 2 * Stage.padding)).columns
@@ -315,7 +318,7 @@ final class LiveStageView: NSView {
         lineup = new
         let removed = old.filter { !new.contains($0) }
         let inserted = Set(new.filter { !old.contains($0) })
-        let motion = s.motion
+        let motion = quiet ? .swap : s.motion
         let stageCentre = CGPoint(x: size.width / 2, y: size.height / 2)
         // Tiles that change rows: moved as the others are (one piece, from where it's drawn, whatever it's in the
         // middle of), over them (not faded across: a tile is one thing that moves).
