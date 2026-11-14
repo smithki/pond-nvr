@@ -6,15 +6,6 @@
 import AppKit
 import SwiftUI
 
-struct EventGridAppKit: NSViewRepresentable {
-    /// What to show, and what to do: as for the SwiftUI grid.
-    let grid: EventGrid
-    let model: AppModel
-    func makeNSView(context: Context) -> GridHostView { GridHostView(model: model) }
-
-    func updateNSView(_ view: GridHostView, context: Context) { view.update(grid) }
-}
-
 /// The grid: a scroll view of cards, the pinned day and the order's switch over it.
 @MainActor
 final class GridHostView: NSView {
@@ -633,31 +624,6 @@ final class GridHostView: NSView {
                 layer.filters = nil
             }
         }
-    }
-
-    /// A card coming in (growing in from its middle, fading in) or going (shrinking away, fading), by the panel's
-    /// spring (`EventGrid.appear`).
-    private func appear(_ card: GridCardView, coming: Bool) {
-        guard let layer = card.layer else { return }
-        let small = card.frame.insetBy(dx: card.frame.width * 0.075, dy: card.frame.height * 0.075)
-        let shrunk = Self.moving(layer, from: card.frame, to: small, scale: 0.85)
-        let grow = CASpringAnimation(perceptualDuration: EventGrid.panelSpring.duration, bounce: 0)
-        grow.keyPath = "transform"
-        grow.fromValue = coming ? shrunk : CATransform3DIdentity
-        grow.toValue = coming ? CATransform3DIdentity : shrunk
-        grow.duration = grow.settlingDuration
-        let fade = CASpringAnimation(perceptualDuration: EventGrid.panelSpring.duration, bounce: 0)
-        fade.keyPath = "opacity"
-        fade.fromValue = coming ? 0 : 1
-        fade.toValue = coming ? 1 : 0
-        fade.duration = fade.settlingDuration
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer.transform = coming ? CATransform3DIdentity : shrunk
-        layer.opacity = coming ? 1 : 0
-        CATransaction.commit()
-        layer.add(grow, forKey: "appear")
-        layer.add(fade, forKey: "appear.fade")
     }
 
     /// How far a layer's drawn from its view's place just now (a move under way), in the view's (flipped) terms.

@@ -413,9 +413,4 @@ final class LayoutCache {
         return made
     }
 
-    /// One for a width passed through (a reshape's frames): made, not kept (its places shared).
-    func passing(sections: [EventGridLayout.Section], width: Double, columns: Int) -> EventGridLayout {
-        let found = places.first(where: { $0.sections == sections })?.places
-        return EventGridLayout(sections: sections, width: width, columns: columns, places: found)
-    }
 }

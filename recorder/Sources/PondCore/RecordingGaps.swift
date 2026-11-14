@@ -33,13 +33,6 @@ public struct RecordingGap: Equatable, Sendable {
             }
         }
 
-        /// This Mac's or Pond's side (not the camera's).
-        public var isMacSide: Bool {
-            switch self {
-            case .macAsleep, .macOff, .recorderStopped, .recorderNotRunning, .storage, .macNetwork: true
-            default: false
-            }
-        }
     }
 
     public var range: ClosedRange<Date>

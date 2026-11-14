@@ -40,11 +40,6 @@ public struct HealthIncident: Codable, Equatable, Sendable {
         /// again.
         case storageFailed, storageBack
 
-        /// This Mac's or the service's, not a camera's (recorded with no camera).
-        public var isMacWide: Bool {
-            [.serviceStarted, .serviceStopped, .macSleeping, .macWoke, .macStarted].contains(self)
-        }
-
         /// Kept as long as recordings may be (a year, with privacy's changes): few, and what explains a gap in
         /// recordings however far back they go.
         public static let keptLong: [Kind] = [.madePrivate, .madePublic, .serviceStarted, .serviceStopped, .macSleeping, .macWoke,
