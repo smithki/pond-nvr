@@ -1512,6 +1512,14 @@ enum TileStatus: Hashable {
     case keptPrivate
     /// Made public after its own privacy mode: starting its video again (it may fail to connect meanwhile).
     case waking
+
+    /// The middle of the tile says what's going on (no picture, and why): the badge at the top would say it again.
+    var saysItself: Bool {
+        switch self {
+        case .playing, .connecting: false
+        default: true
+        }
+    }
 }
 
 /// Each tile's status, collected by the stage.
@@ -1704,7 +1712,7 @@ struct CameraTile: View {
             }
             .overlay(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 6) {
-                    if health.showsBadge { HealthBadge(health: health, compact: compact) }
+                    if health.showsBadge, !status.saysItself { HealthBadge(health: health, compact: compact) }
                     if let events, events.eventsToday > 0 {
                         EventsChip(events: events, compact: compact, open: openEvent,
                                    popoverShown: { popoverOpen = $0 })
@@ -1800,20 +1808,7 @@ struct CameraTile: View {
             .controlSize(.regular)
             .help("\(camera.name) settings")
         case .privacy:
-            let isPrivate = model.isPrivate(camera.id)
-            Button { Task { await model.setPrivacy(camera.id, !isPrivate) } } label: {
-                Image(systemName: isPrivate ? "eye.slash.fill" : "eye.slash")
-                    .font(compact ? .callout : .headline)
-                    .foregroundStyle(isPrivate ? AnyShapeStyle(CameraHealth.keptPrivate.tint) : AnyShapeStyle(.primary))
-                    .frame(width: diameter - 8, height: diameter - 8)
-            }
-            // Private: as the tile's Private badge at the top (HealthBadge), its glass tinted with the colour, the
-            // mark in it.
-            .buttonStyle(.glass(isPrivate ? .regular.tint(CameraHealth.keptPrivate.tint.opacity(0.25)) : .regular))
-            .buttonBorderShape(.circle)
-            .controlSize(.regular)
-            .help(isPrivate ? "Private: not recorded, shown live or in the Home app. Click to record \(camera.name) again."
-                            : "Make \(camera.name) private: not recorded, shown live or in the Home app until you turn it off")
+            PrivacyButton(camera: camera, diameter: diameter, compact: compact)
         case .doctor:
             // Something wrong with it, or something to change (not notices, not ignored): the doctor, at the camera.
             if let finding = model.doctor.mark(camera.id) {
@@ -1899,62 +1894,8 @@ struct CameraTile: View {
         }
     }
 
-    @ViewBuilder
     func status(compact: Bool) -> some View {
-        switch status {
-        case .noPassword:
-            TileMessage(symbol: "key.slash", title: "No password", detail: "Set it in Settings → Cameras.", compact: compact)
-        case .connecting:
-            VStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                if !compact { Text("Connecting…").font(.callout).foregroundStyle(.secondary) }
-            }
-            .environment(\.colorScheme, .dark)
-        case .playing:
-            EmptyView()
-        case .waking:
-            VStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                if !compact {
-                    Text("Waking up\u{2026}").font(.callout).foregroundStyle(.secondary)
-                    Text("Its privacy mode is off; the camera is starting its video again.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16)
-            .environment(\.colorScheme, .dark)
-        case .keptPrivate:
-            if model.isPrivateOnCameraOnly(camera.id) {
-                // Its own privacy mode: Pond can't turn it off.
-                TileMessage(symbol: "eye.slash", title: "Private on the camera",
-                            detail: "Its own privacy mode is on. Turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app") to watch and record it again.",
-                            compact: compact)
-            } else {
-                TileMessage(symbol: "eye.slash", title: "Private",
-                            detail: "Not recorded, shown or in the Home app until you turn privacy off.", compact: compact,
-                            action: ("Turn Off Privacy", { Task { await model.setPrivacy(camera.id, false) } }))
-            }
-        case .noPicture:
-            TileMessage(symbol: "eye.slash", title: "No picture",
-                        detail: "The camera is connected but sends no video. Is privacy mode on?", compact: compact)
-        case .serviceStopped, .serviceBehind:
-            if let starting = model.serviceStartingWords {
-                VStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    if !compact { Text(starting).font(.callout).foregroundStyle(.secondary) }
-                }
-                .environment(\.colorScheme, .dark)
-            } else if status == .serviceStopped {
-                TileMessage(symbol: "pause.circle", title: "Service not running", detail: ServiceNote.stopped, compact: compact,
-                            action: ("Start Service", { model.startService() }))
-            } else {
-                TileMessage(symbol: "arrow.clockwise.circle", title: "Not live yet", detail: ServiceNote.behind(camera.name),
-                            compact: compact, action: ("Restart Service", { model.startService() }))
-            }
-        case let .failed(reason):
-            TileMessage(symbol: "wifi.exclamationmark", title: "Can\u{2019}t connect", detail: reason, compact: compact)
-        }
+        TileStatusWords(status: status, camera: camera, compact: compact)
     }
 
     /// Runs the stream while the tile is on screen.
@@ -2081,8 +2022,8 @@ extension CameraHealth {
         }
     }
 
-    /// The tile's edge in its colour: for a problem, and for privacy.
-    var showsEdge: Bool { isProblem || self == .keptPrivate }
+    /// The tile's edge in its colour: for a problem (not privacy, a choice: the tile says it in the middle).
+    var showsEdge: Bool { isProblem }
 }
 
 /// A camera's problem, as a small glass badge in the problem's colour.
@@ -2241,6 +2182,112 @@ struct RecentEvents: View {
         }
         .padding(10)
         .frame(width: 300)
+    }
+}
+
+/// Beside a tile's name: makes the camera private, or (lit) public again. One button whatever its state, only its
+/// tint changing: private, the indigo-tinted glass of the "Private" badge. (The glass button style takes its tint
+/// from `.tint`; a tint given in its glass, `.glass(.regular.tint(…))`, it ignores.)
+struct PrivacyButton: View {
+    @Environment(AppModel.self) private var model
+    let camera: Config.Camera
+    let diameter: CGFloat
+    var compact = false
+
+    var body: some View {
+        let isPrivate = model.isPrivate(camera.id)
+        Button { Task { await model.setPrivacy(camera.id, !isPrivate) } } label: {
+            Image(systemName: isPrivate ? "eye.slash.fill" : "eye.slash")
+                .font(compact ? .callout : .headline)
+                .foregroundStyle(isPrivate ? AnyShapeStyle(CameraHealth.keptPrivate.tint) : AnyShapeStyle(.primary))
+                // The glass button adds 4 pt round its label: a circle as tall as the name pill.
+                .frame(width: diameter - 8, height: diameter - 8)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
+        .tint(isPrivate ? CameraHealth.keptPrivate.tint.opacity(0.25) : nil)
+        .help(isPrivate ? "Private: not recorded, shown live or in the Home app. Click to record \(camera.name) again."
+                        : "Make \(camera.name) private: not recorded, shown live or in the Home app until you turn it off")
+    }
+}
+
+/// What a tile without its picture says, in the middle, by how much it matters:
+/// - calm (chosen, or on its way: private, connecting, waking): a mark and a word or two, quiet;
+/// - a problem: what's wrong, why, and a button where there's something to do (`TileMessage`).
+/// Said once: the badge at the top is for a tile that's playing (`TileStatus.saysItself`); privacy's one switch is
+/// the eye beside the name.
+struct TileStatusWords: View {
+    @Environment(AppModel.self) private var model
+    let status: TileStatus
+    let camera: Config.Camera
+    var compact = false
+
+    var body: some View {
+        switch status {
+        case .playing:
+            EmptyView()
+        case .connecting:
+            TileNote(title: "Connecting\u{2026}", spinning: true, compact: compact)
+        case .waking:
+            TileNote(title: "Waking up\u{2026}", spinning: true, compact: compact)
+        case .keptPrivate:
+            if model.isPrivateOnCameraOnly(camera.id) {
+                // Its own privacy mode: Pond can't turn it off; where to, in a line.
+                TileNote(symbol: "eye.slash", title: "Private on the camera",
+                         line: "Turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app")", compact: compact)
+            } else {
+                TileNote(symbol: "eye.slash", title: "Private", compact: compact)
+            }
+        case .noPassword:
+            TileMessage(symbol: "key.slash", title: "No password", detail: "Pond needs it to log in to the camera.", compact: compact,
+                        action: ("Open Settings", { model.editCameraSettings(camera.id) }))
+        case .noPicture:
+            TileMessage(symbol: "eye.slash", title: "No picture",
+                        detail: "The camera is connected but sends no video. Is its own privacy mode on?", compact: compact)
+        case .serviceStopped, .serviceBehind:
+            if let starting = model.serviceStartingWords {
+                TileNote(title: starting, spinning: true, compact: compact)
+            } else if status == .serviceStopped {
+                TileMessage(symbol: "pause.circle", title: "Service not running", detail: ServiceNote.stopped, compact: compact,
+                            action: ("Start Service", { model.startService() }))
+            } else {
+                TileMessage(symbol: "arrow.clockwise.circle", title: "Not live yet", detail: ServiceNote.behind(camera.name),
+                            compact: compact, action: ("Restart Service", { model.startService() }))
+            }
+        case let .failed(reason):
+            TileMessage(symbol: "wifi.exclamationmark", title: CameraHealth.offline(reason).title, detail: reason, compact: compact)
+        }
+    }
+}
+
+/// A calm state, in the middle of a tile: a mark (or a spinner) and a word or two, and at most a short line; small
+/// tiles, the mark (and the words, unless it's a spinner).
+struct TileNote: View {
+    var symbol: String?
+    let title: String
+    var line: String?
+    var spinning = false
+    var compact = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if spinning {
+                ProgressView().controlSize(.small)
+            } else if let symbol {
+                Image(systemName: symbol).font(compact ? .body : .title3).foregroundStyle(.secondary)
+            }
+            if !(compact && spinning) {
+                Text(title).font((compact ? Font.caption : .callout).weight(.medium)).foregroundStyle(.secondary)
+            }
+            if !compact, let line {
+                Text(line).font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 240)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .help(line.map { "\(title). \($0)" } ?? title)
+        .environment(\.colorScheme, .dark)
     }
 }
 

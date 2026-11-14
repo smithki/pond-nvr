@@ -913,7 +913,7 @@ final class StageTileView: NSView {
         }
         // Badges wanted now that aren't made yet: made (out of this drawing).
         let wanted: [Pin] = (s.hovering ? [.topTrailing, .bottomTrailing, .topLeading] : [])
-            + (s.health.showsBadge ? [.topLeading] : []) + (s.announced ? [.topCentre] : [])
+            + (s.health.showsBadge && !s.status(model).saysItself ? [.topLeading] : []) + (s.announced ? [.topCentre] : [])
             + (model.audibleCamera == id || model.talking?.camera == id ? [.bottomTrailing] : [])
         if s.frozen == nil, wanted.contains(where: { hosts[$0] == nil }) {
             DispatchQueue.main.async { [weak self] in for pin in wanted { self?.build(pin) } }
@@ -1382,18 +1382,7 @@ struct TileBadgeView: View {
             .controlSize(.regular)
             .help("\(camera.name) settings")
         case .privacy:
-            let isPrivate = model.isPrivate(camera.id)
-            Button { Task { await model.setPrivacy(camera.id, !isPrivate) } } label: {
-                Image(systemName: isPrivate ? "eye.slash.fill" : "eye.slash")
-                    .font(compact ? .callout : .headline)
-                    .foregroundStyle(isPrivate ? AnyShapeStyle(CameraHealth.keptPrivate.tint) : AnyShapeStyle(.primary))
-                    .frame(width: diameter - 8, height: diameter - 8)
-            }
-            .buttonStyle(.glass(isPrivate ? .regular.tint(CameraHealth.keptPrivate.tint.opacity(0.25)) : .regular))
-            .buttonBorderShape(.circle)
-            .controlSize(.regular)
-            .help(isPrivate ? "Private: not recorded, shown live or in the Home app. Click to record \(camera.name) again."
-                            : "Make \(camera.name) private: not recorded, shown live or in the Home app until you turn it off")
+            PrivacyButton(camera: camera, diameter: diameter, compact: compact)
         case .doctor:
             if let finding = model.doctor.mark(camera.id) {
                 Button {
@@ -1510,6 +1499,7 @@ struct TileCornerButtons: View {
 
 /// Top left: its health; its events, hovered (as `CameraTile`'s).
 struct TileTopLeading: View {
+    @Environment(AppModel.self) private var model
     let state: StageTileState
     let open: (TimelineEvent) -> Void
 
@@ -1517,7 +1507,7 @@ struct TileTopLeading: View {
         let compact = state.compact
         let hovering = state.hovering
         VStack(alignment: .leading, spacing: 6) {
-            if state.frozen == nil, state.health.showsBadge {
+            if state.frozen == nil, state.health.showsBadge, !state.status(model).saysItself {
                 HealthBadge(health: state.health, compact: compact).chromeHit()
             }
             if state.frozen == nil, let events = state.events, events.eventsToday > 0 {
@@ -1550,62 +1540,8 @@ struct TileStatusMessage: View {
         .offset(y: compact ? -10 : 0)
     }
 
-    @ViewBuilder
     func message(_ status: TileStatus, compact: Bool) -> some View {
-        let camera = state.camera
-        switch status {
-        case .noPassword:
-            TileMessage(symbol: "key.slash", title: "No password", detail: "Set it in Settings → Cameras.", compact: compact)
-        case .connecting:
-            VStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                if !compact { Text("Connecting…").font(.callout).foregroundStyle(.secondary) }
-            }
-            .environment(\.colorScheme, .dark)
-        case .playing:
-            EmptyView()
-        case .waking:
-            VStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                if !compact {
-                    Text("Waking up\u{2026}").font(.callout).foregroundStyle(.secondary)
-                    Text("Its privacy mode is off; the camera is starting its video again.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16)
-            .environment(\.colorScheme, .dark)
-        case .keptPrivate:
-            if model.isPrivateOnCameraOnly(camera.id) {
-                TileMessage(symbol: "eye.slash", title: "Private on the camera",
-                            detail: "Its own privacy mode is on. Turn it off in \(camera.device?.appName ?? "the camera\u{2019}s own app") to watch and record it again.",
-                            compact: compact)
-            } else {
-                TileMessage(symbol: "eye.slash", title: "Private",
-                            detail: "Not recorded, shown or in the Home app until you turn privacy off.", compact: compact,
-                            action: ("Turn Off Privacy", { Task { await model.setPrivacy(camera.id, false) } }))
-            }
-        case .noPicture:
-            TileMessage(symbol: "eye.slash", title: "No picture",
-                        detail: "The camera is connected but sends no video. Is privacy mode on?", compact: compact)
-        case .serviceStopped, .serviceBehind:
-            if let starting = model.serviceStartingWords {
-                VStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    if !compact { Text(starting).font(.callout).foregroundStyle(.secondary) }
-                }
-                .environment(\.colorScheme, .dark)
-            } else if status == .serviceStopped {
-                TileMessage(symbol: "pause.circle", title: "Service not running", detail: ServiceNote.stopped, compact: compact,
-                            action: ("Start Service", { model.startService() }))
-            } else {
-                TileMessage(symbol: "arrow.clockwise.circle", title: "Not live yet", detail: ServiceNote.behind(camera.name),
-                            compact: compact, action: ("Restart Service", { model.startService() }))
-            }
-        case let .failed(reason):
-            TileMessage(symbol: "wifi.exclamationmark", title: "Can\u{2019}t connect", detail: reason, compact: compact)
-        }
+        TileStatusWords(status: status, camera: state.camera, compact: compact)
     }
 }
 
