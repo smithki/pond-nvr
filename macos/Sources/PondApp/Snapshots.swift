@@ -136,6 +136,33 @@ enum Snapshots {
             }
             try? "done".write(toFile: "\(dir)/quickadd.txt", atomically: true, encoding: .utf8)
         }
+        // Live's rail resized by its handle as a drag does (a step each frame, out and back), for watching (recorded) that
+        // the rail and the tiles move together, the rail never under them.
+        if wants("railresize"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {
+            model.mode = .live
+            let visible = screen.visibleFrame
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1500, height: 780), display: true)
+            try? await Task.sleep(for: .seconds(5))
+            model.liveDrive = LiveDrive(action: .showAll)
+            try? await Task.sleep(for: .seconds(2))
+            func find(_ view: NSView) -> RailHandle? {
+                if let handle = view as? RailHandle { return handle }
+                for sub in view.subviews { if let found = find(sub) { return found } }
+                return nil
+            }
+            if let handle = window.contentView.flatMap(find) {
+                for target in [240.0, -240, 240, -240] {
+                    handle.began()
+                    for step in 0 ... 60 {
+                        handle.moved(target * Double(step) / 60)
+                        try? await Task.sleep(for: .milliseconds(16))
+                    }
+                    handle.ended()
+                    try? await Task.sleep(for: .seconds(0.8))
+                }
+            }
+            try? "done".write(toFile: "\(dir)/railresize.txt", atomically: true, encoding: .utf8)
+        }
         // Live's dock with its adjustments moving to the sidebar and back (a wide window), for watching (recorded) that the
         // dock slides over with its column, not jumps.
         if wants("dockside"), let window = mainWindow(), let screen = window.screen ?? NSScreen.main {

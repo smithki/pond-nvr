@@ -299,13 +299,6 @@ struct EventGrid {
     static let scrollerGap = 6.0
 }
 
-/// What the grid's scroll view says of itself: its offset, the inset at its top, its height.
-/// The grid's width and how many cards a row: what a window's resize changes.
-struct GridSize: Equatable {
-    let width: Double
-    let columns: Int
-}
-
 /// The events shown changed (a search, its order, those held back let in): made, and whether the grid's sections
 /// changed with it.
 typealias GridChange = @MainActor () -> Bool

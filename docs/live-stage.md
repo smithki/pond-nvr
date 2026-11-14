@@ -1,18 +1,18 @@
 # Live's stage: how it moves
 
-What the Live view does on screen, every motion and the reasons behind it, written down before the stage is moved
-from SwiftUI to AppKit (as Events was: `EventsShell`), so the AppKit stage can be checked against it, case by case.
-Each item names where it lives today (`LiveView.swift`). A reference recording of today's stage is made by the
-snapshot step `live` (the window placed on screen at 1240 × 780; every kind of change below, three times over).
+What the Live view does on screen, every motion and the reasons behind it. The stage (`LiveStage.swift`), and the
+rail, dock and sidebar around it (`LiveShell.swift`), are AppKit, moved by Core Animation; what goes on the stage and
+how each change moves is decided in `LiveView.swift`. The snapshot step `live` times every kind of change below, three
+times over (the window placed on screen at 1240 × 780); `reflow`, `quickadd` and `dockside` drive changes to watch.
 
 ## Why
 
-Every change to the stage (a camera added or taken off, one watched alone, all shown) has SwiftUI work out and lay
-out every tile, each frame of the move: on the demo's ten cameras, about one frame in each change over 33 ms (show
-all: two or three; the worst 100 ms), the main thread's time almost all SwiftUI's graph and layout, almost none the
-video's. In AppKit, each tile is layers: its picture and video resized by Core Animation, its badges and buttons
-(SwiftUI, hosted, small) carried with its corners, never laid out again; the stage, the rail, the dock and the
-adjustments' sidebar moved together, on one clock.
+These replaced a SwiftUI stage. Every change to it (a camera added or taken off, one watched alone, all shown) had
+SwiftUI work out and lay out every tile, each frame of the move: on the demo's ten cameras, about one frame in each
+change over 33 ms (show all: two or three; the worst 100 ms), the main thread's time almost all SwiftUI's graph and
+layout, almost none the video's. In AppKit, each tile is layers: its picture and video resized by Core Animation, its
+badges and buttons (SwiftUI, hosted, small) carried with its corners, never laid out again; the stage, the rail, the
+dock and the adjustments' sidebar moved together, on one clock.
 
 ## The layout
 
@@ -34,32 +34,30 @@ change 16 ms later).
 | Motion | When | Tiles moving to their new places | New tiles arriving | Tiles leaving |
 |---|---|---|---|---|
 | **lively** | one change on its own | `spring(0.5, bounce 0.3)`, each tile `ripple` 0.025 s after the one before (by its place), after `removeLead` 0.1 s if a tile was taken off | scale 0.6 about its centre + fade, `spring(0.45, bounce 0.35)` after `insertDelay` 0.3 s (the others make room first) | scale 0.9 + fade, ease-out 0.16 s |
-| **calm** | a change within 0.45 s of the last (`fastPace`) | `spring(0.46, bounce 0.15)`, no ripple; in SwiftUI's stage, tiles that change rows didn't travel: a still of each faded out where it was while it faded in at its new place (`rowChanges`, stand-ins, smooth 0.32 s). The AppKit stage moves them as every other tile, over the others while they cross: a tile is one thing that moves, never one that goes and comes back | scale 0.9 + fade, `spring(0.25)` after 0.12 s | as lively |
+| **calm** | a change within 0.45 s of the last (`fastPace`) | `spring(0.46, bounce 0.15)`, no ripple; tiles that change rows (`rowChanges`) move as every other tile, over the others while they cross: a tile is one thing that moves, never one that goes and comes back | scale 0.9 + fade, `spring(0.25)` after 0.12 s | as lively |
 | **reveal** | Show All (and the overview's Show These Cameras) | `smooth(0.4)`; the tiles already on the stage kept in front while they arrive (`inFront`, 0.8 s) | scale 0.92 + fade, `smooth(0.35)` after 0.08 s + 0.015 s each (`revealStagger`) | fade, ease-out 0.16 s |
 | **reorder** | dragged into a new order (on the stage, or in Settings) | `snappy(0.3)`, row changes as calm | as calm | as calm |
 | **swap** | one camera alone to another alone | at once, no animation | at once | at once |
 | **focus** | to one camera that was on the stage | it grows to fill the stage, `smooth(0.4)`, in front (z 2) | — | the others fade, ease-in-out 0.25 s |
-| **crossfade** | to one camera not on the stage | — | it grows from 0.98 to whole + fade, `smooth(0.4)` after 0.2 s (`arriveDelay`), as the old stage has nearly gone | the old stage (live tiles kept as they were, `departures`) recedes as one to 0.98 toward the stage's centre (`RecedeEffect`) and fades, `smooth(0.25)`; let go after 0.35 s |
+| **crossfade** | to one camera not on the stage | — | it grows from 0.98 to whole + fade, `smooth(0.4)` after 0.2 s (`arriveDelay`), as the old stage has nearly gone | the old stage (its tiles kept as they were) recedes as one to 0.98 toward the stage's centre and fades, `smooth(0.25)`; let go after 0.35 s |
 
 Also, with every motion:
-- **Announcing**: a camera added on its own glows (`AddedGlow`) for 1.8 s; in a quick run of changes, one glow for
+- **Announcing**: a camera added on its own glows (its ring, and an "Added" chip) for 1.8 s; in a quick run of changes, one glow for
   the last added, once the run is over (`announceLater`); a newer announcement takes the glow off the last at once
   (`superseded`); taking one off cancels a pending one.
 - **In front** (z order): the focused tile 2; `inFront` 2; the one just added 1; leaving tiles −1.
-- **Stand-ins** (`standIn`): a still of a tile at a place it's leaving (row changes; the receding stage) shows what it
-  showed: its live picture at that moment (`liveStill`), else its latest recorded one, and its status as it was
-  (`TileStatuses`), never its live stream.
+- **Leaving**: a tile taken off is the tile itself, kept until it's gone (it fades, or recedes with the old stage).
 - **Not clicked** while leaving.
-- **The first frame**: `shownLineup` set on appear, so the first layout doesn't animate.
+- **The first frame**: laid out at once, not animated.
 
 ## A tile
 
-Laid out by the stage (no GeometryReader inside: it would report the final size while the tile is still animating,
-and the contents slide diagonally); its contents move with its animated size as one (`geometryGroup`).
+A view of layers (`StageTileView`), placed by the stage: moving, its layers are resized by Core Animation and its
+hosted badges carried with their corners, laid out again for its size only once it's still.
 
 - **Picture**: black; its last snapshot, whole (`fit`), dimmed to 35% unless it's playing (or a stand-in); not even
-  that when private. Its stream's video over it (`VideoLayerView`, the stream's own `AVSampleBufferDisplayLayer`,
-  sized with the view in the same step); shown only once playing.
+  that when private. Its stream's video over it (the stream's own `AVSampleBufferDisplayLayer`, never resized: a fixed size, scaled,
+  so its picture never lags behind the tile's); shown only once playing.
 - **Main and sub stream**: the tile growing or shrinking past 900 pt wide starts the other stream *under* the
   current one (drawing all along, all but unseen), and once it plays and the tile has stopped moving (`settle`
   0.65 s), fades it in over 0.3 s (`crossfade`) with the current one whole underneath, then stops the current one:
@@ -78,15 +76,15 @@ and the contents slide diagonally); its contents move with its animated size as 
     height: 32 / 26 pt compact), ease-out 0.15 s;
   - top left: the health badge; the events chip, hovered, with its popover (which keeps the controls shown);
   - a picture taken: a white flash, 0.55, in 0.05 s, out 0.35 s;
-  - something wrong or private: its edge in the health's colour (2 pt, 0.7);
-  - the glow round one just added (`AddedGlow`), always there, switched on and off.
-- **Clicks**: double-click watches it alone; its menu (`CameraMenu`); dragged, it reorders (`StageReorder`, applied
-  before `.position` so its drop area is the tile); hover shows its controls.
+  - something wrong: its edge in the health's colour (2 pt, 0.7);
+  - the glow round one just added, always there, switched on and off.
+- **Clicks**: double-click watches it alone; its menu; dragged, it reorders (the tile its drop area); hover shows its
+  controls. Its hosted badges take clicks only where they have something (`chromeHit`).
 - **Sound**: the one heard (`audibleCamera`) unmuted; waking retried soon.
 
 - **Resized** (the rail or the dock coming or going, the window): the tiles follow the stage's edge at once; when
   its new size takes another number of columns, they reflow, each moving to its new place on the side panels'
-  curve, those changing rows over the others (AppKit stage; SwiftUI's snapped).
+  curve, those changing rows over the others.
 - **Interrupted**: a change made while tiles are still moving (or arriving) moves them on from where they're drawn,
   as one piece, whatever they're in the middle of (each move is added on top of those still running).
 
@@ -106,15 +104,10 @@ and the contents slide diagonally); its contents move with its animated size as 
 
 ## Around the stage, in AppKit
 
-With the AppKit stage, the rail, the stage, the dock and the sidebar are one view (`LiveShell`, `LiveShell.swift`):
+The rail, the stage, the dock and the sidebar are one view (`LiveShell`, `LiveShell.swift`):
 each panel SwiftUI, hosted once and laid out at its size, never again frame by frame. A change to them (the rail
 shown or hidden, the dock opened or closed, the sidebar coming with it) sets each one's frame at once and carries it
 there from where it was drawn on the panels' curve (spring 0.42, bounce 0.12), fading what comes and goes; the
 stage's tiles move to their places for its new size on the same curve, so all of it moves on one clock. The dock's
 piece (its button and the dock) covers the stage's column and takes clicks only on what's in it (`chromeHit`), the
 other positions' panel reaching up over the stage included. The window resized, everything follows at once.
-
-## The new stage, checked against
-
-The reference recording, side by side, change by change; the `live` timings, before and after; and each item above
-ticked off as it's built.

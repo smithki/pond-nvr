@@ -64,6 +64,13 @@ final class LiveShellView: NSView {
     private var shown = Shown()
     /// Panels on their way out: let go once gone (a newer change keeps them).
     private var going: [ObjectIdentifier: UUID] = [:]
+    /// The rail's resize handle, in the gap before the stage, over it: dragged, the rail and the stage are resized here,
+    /// together, in the same event (resized by the rail's own SwiftUI, through its kept width, the stage followed a
+    /// step behind the mouse and the rail spilled under the tiles; and the stage over the handle took most of its clicks).
+    private let handle = RailHandle()
+    /// The rail's width while it's dragged (kept once let go, till the kept width says the same).
+    private var draggedWidth: CGFloat?
+    private var dragFrom: CGFloat = 0
 
     struct Shown: Equatable {
         var rail = false, dock = false, dockOpen = false, sidebar = false
@@ -71,8 +78,8 @@ final class LiveShellView: NSView {
 
     /// The side panels' curve (`LiveView.dockAnimation`).
     static let curve = LiveStageView.reflowCurve
-    /// The rail's resize handle sits past its edge, in the gap before the stage.
-    static let handleOverhang: CGFloat = 10
+    /// The handle's width, centred just past the rail's room (in the gap before the stage).
+    static let handleWidth: CGFloat = 16
 
     init(model: AppModel) {
         self.model = model
@@ -88,6 +95,28 @@ final class LiveShellView: NSView {
             host.isHidden = true
             addSubview(host)
         }
+        handle.isHidden = true
+        addSubview(handle)
+        handle.began = { [weak self] in
+            guard let self, let s = self.shell else { return }
+            self.dragFrom = self.draggedWidth ?? s.railWidth
+        }
+        handle.moved = { [weak self] dx in
+            guard let self else { return }
+            // No wider than leaves the open controls room.
+            let widest = max(CameraRail.widths.lowerBound, min(CameraRail.widths.upperBound, self.model.railLimit ?? .infinity))
+            self.draggedWidth = (self.dragFrom + dx).clamped(to: CameraRail.widths.lowerBound ... widest)
+            self.arrange(animated: false)
+        }
+        handle.ended = { [weak self] in
+            guard let self, let width = self.draggedWidth else { return }
+            AppDefaults.store.set(Double(width), forKey: LiveView.railWidthKey)
+        }
+        handle.reset = { [weak self] in
+            guard let self else { return }
+            self.draggedWidth = nil
+            AppDefaults.store.set(CameraRail.defaultWidth, forKey: LiveView.railWidthKey)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -100,6 +129,8 @@ final class LiveShellView: NSView {
 
     func update(_ s: LiveShell, animated: Bool, panelsAnimated: Bool, panelsAtOnce: Bool) {
         shell = s
+        // The kept width caught up with the one dragged: it's the kept one again.
+        if let dragged = draggedWidth, !handle.dragging, abs(dragged - s.railWidth) < 0.5 { draggedWidth = nil }
         rail.rootView = AnyView(s.rail.environment(model))
         if let content = s.dockButton {
             button.rootView = AnyView(content.chromeHits { [weak button] in button?.clickable = $0 }.environment(model))
@@ -121,12 +152,11 @@ final class LiveShellView: NSView {
     // MARK: Where the panels go
 
     private struct Frames {
-        var rail: CGRect, stage: CGRect, button: CGRect, dock: CGRect, sidebar: CGRect
+        var rail: CGRect, handle: CGRect, stage: CGRect, button: CGRect, dock: CGRect, sidebar: CGRect
     }
 
     private func frames(_ s: LiveShell, _ shown: Shown, in size: CGSize) -> Frames {
-        let railRoom = LiveLayout.railRoom(Double(s.railWidth))
-        let railHost = railRoom + Self.handleOverhang
+        let railRoom = LiveLayout.railRoom(Double(draggedWidth ?? s.railWidth))
         let left = shown.rail ? railRoom : 0
         let right = shown.sidebar ? LiveLayout.sidebarRoom : 0
         let width = max(0, size.width - left - right)
@@ -137,7 +167,10 @@ final class LiveShellView: NSView {
                                                : -(LiveView.controlsButtonHeight + 14))
         let piece = LiveView.controlsButtonHeight + 8 + LiveControlsDock.height()
         let above = max(size.height, 1)
-        return Frames(rail: CGRect(x: shown.rail ? 0 : -railHost, y: 0, width: railHost, height: size.height),
+        let inset = LiveLayout.railLeading
+        return Frames(rail: CGRect(x: shown.rail ? 0 : -railRoom, y: 0, width: railRoom, height: size.height),
+                      handle: CGRect(x: (shown.rail ? railRoom : 0) + 2 - Self.handleWidth / 2, y: inset, width: Self.handleWidth,
+                                     height: max(0, size.height - 2 * inset)),
                       stage: stage,
                       button: CGRect(x: left, y: top, width: width, height: LiveView.controlsButtonHeight),
                       dock: CGRect(x: left, y: top + LiveView.controlsButtonHeight + 8 - above, width: width,
@@ -160,6 +193,9 @@ final class LiveShellView: NSView {
         CATransaction.setDisableActions(true)
         place(rail, target.rail, curve: curve)
         show(rail, now.rail, was: was.rail, curve: curve)
+        place(handle, target.handle, curve: curve)
+        show(handle, now.rail, was: was.rail, curve: curve)
+        handle.layer?.zPosition = 3
         place(sidebar, target.sidebar, curve: curve)
         show(sidebar, now.sidebar, was: was.sidebar, curve: curve)
         place(button, target.button, curve: curve, centred: true)
@@ -225,5 +261,92 @@ final class LiveShellView: NSView {
                 view.isHidden = true
             }
         }
+    }
+}
+
+/// The rail's resize handle: a grip that brightens and grows under the pointer; dragged, it says how far (in the
+/// window, so one to one with the mouse); double-clicked, back to the usual width.
+final class RailHandle: NSView {
+    var began: () -> Void = {}
+    var moved: (CGFloat) -> Void = { _ in }
+    var ended: () -> Void = {}
+    var reset: () -> Void = {}
+    private(set) var dragging = false
+    private var from: CGFloat?
+    private var hovering = false
+    private let grip = CALayer()
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        grip.cornerRadius = 2.5
+        grip.cornerCurve = .continuous
+        layer?.addSublayer(grip)
+        toolTip = "Drag to resize the list of cameras; double-click for the usual width"
+        restyle(animated: false)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+
+    override func layout() {
+        super.layout()
+        restyle(animated: false)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle(animated: false)
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true; restyle(animated: true) }
+    override func mouseExited(with event: NSEvent) { hovering = false; restyle(animated: true) }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            reset()
+            return
+        }
+        from = event.locationInWindow.x
+        dragging = true
+        restyle(animated: true)
+        began()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let from else { return }
+        moved(event.locationInWindow.x - from)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragging else { return }
+        dragging = false
+        from = nil
+        restyle(animated: true)
+        ended()
+    }
+
+    /// Its grip: 5 pt wide, 40 tall (54 under the pointer or dragged), the secondary colour faint (brighter then).
+    private func restyle(animated: Bool) {
+        let lit = hovering || dragging
+        let height: CGFloat = lit ? 54 : 40
+        var colour = NSColor.secondaryLabelColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { colour = NSColor.secondaryLabelColor.withAlphaComponent(lit ? 0.8 : 0.4) }
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        CATransaction.setAnimationDuration(0.15)
+        grip.frame = CGRect(x: (bounds.width - 5) / 2, y: (bounds.height - height) / 2, width: 5, height: height)
+        grip.backgroundColor = colour.cgColor
+        CATransaction.commit()
     }
 }

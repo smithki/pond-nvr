@@ -1,9 +1,10 @@
 // Live's stage in AppKit: each tile is layers (its picture and video resized by Core Animation) with its badges and
 // buttons (SwiftUI, hosted, small) carried with its corners, never laid out again while it moves; every change of
-// the stage (a camera added or taken off, one watched alone, all shown) is moved by Core Animation, as the SwiftUI
-// stage (`Stage`) moved it, case by case (docs/live-stage.md): nothing is worked out again frame by frame.
+// the stage (a camera added or taken off, one watched alone, all shown) is moved by Core Animation, case by case
+// (docs/live-stage.md): nothing is worked out again frame by frame. (It replaced a SwiftUI stage that laid out every
+// tile, each frame of a move.)
 //
-// What's on the stage, and how it moves for each change, is still decided by `LiveView`, as it was for `Stage`.
+// What's on the stage, and how it moves for each change, is decided by `LiveView`; where tiles go, by `Stage`.
 import AVFoundation
 import AppKit
 import Observation
@@ -28,7 +29,7 @@ struct LiveStageShell: NSViewRepresentable {
     let remove: (String) -> Void
     let openControls: (String) -> Void
     let openEvent: (TimelineEvent) -> Void
-    /// What each tile shows (as `TileStatuses` told it).
+    /// Told what each tile shows.
     let statuses: ([String: TileStatus]) -> Void
     let model: AppModel
 
@@ -289,8 +290,7 @@ final class LiveStageView: NSView {
         }
     }
 
-    /// The springs' bounce, a little less than SwiftUI's stage had (0.3, 0.35, 0.15): changes in quick succession were
-    /// too lively.
+    /// The springs' bounce (SwiftUI's stage had 0.3, 0.35, 0.15: changes in quick succession were too lively).
     static let livelyBounce = 0.22, popBounce = 0.27, calmBounce = 0.1
 
     /// The side panels' curve (`LiveView.dockAnimation`).
@@ -318,7 +318,7 @@ final class LiveStageView: NSView {
         let motion = s.motion
         let stageCentre = CGPoint(x: size.width / 2, y: size.height / 2)
         // Tiles that change rows: moved as the others are (one piece, from where it's drawn, whatever it's in the
-        // middle of), over them. (SwiftUI's stage faded these across in a quick run of changes.)
+        // middle of), over them (not faded across: a tile is one thing that moves).
         let area = CGSize(width: size.width - 2 * Stage.padding, height: size.height - 2 * Stage.padding)
         let rowChanges = Stage.rowChanges(from: old, to: new, area: area, size: size)
 
@@ -404,7 +404,7 @@ final class LiveStageView: NSView {
         statusesChanged()
     }
 
-    /// Told on: every tile's status (those leaving too, while they're there), as `TileStatuses` gathered them.
+    /// Told on: every tile's status (those leaving too, while they're there).
     private func statusesChanged() {
         var now: [String: TileStatus] = [:]
         for tile in leaving + Array(tiles.values) {
@@ -998,7 +998,7 @@ final class StageTileView: NSView {
 
     // MARK: The stream
 
-    /// Runs the stream while the tile is on screen (as `CameraTile.play`).
+    /// Runs the stream while the tile is on screen.
     private func play() async {
         let camera = state.camera
         guard model.hasPassword(camera.id) else {
@@ -1315,7 +1315,7 @@ extension ChromeHits {
     static let space = "chrome"
 }
 
-/// Bottom left: the name, always; then its badges in their one order (as `CameraTile.badges`).
+/// Bottom left: the name, always; then its badges in their one order (`CameraTile.TileBadge`).
 struct TileNameRow: View {
     @Environment(AppModel.self) private var model
     let state: StageTileState
@@ -1360,7 +1360,7 @@ struct TileNameRow: View {
     }
 }
 
-/// One of the badges beside a tile's name (as `CameraTile.tileBadge`).
+/// One of the badges beside a tile's name.
 struct TileBadgeView: View {
     @Environment(AppModel.self) private var model
     let state: StageTileState
@@ -1407,7 +1407,7 @@ struct TileBadgeView: View {
     }
 }
 
-/// Bottom right: sound, talking, the picture's size (as the right of `CameraTile.badges`).
+/// Bottom right: sound, talking, the picture's size.
 struct TileTrailingRow: View {
     @Environment(AppModel.self) private var model
     let state: StageTileState
@@ -1454,7 +1454,7 @@ struct TileTrailingRow: View {
     }
 }
 
-/// Top right, hovered: its controls, watch it alone, take it off (as `CameraTile`'s).
+/// Top right, hovered: its controls, watch it alone, take it off.
 struct TileCornerButtons: View {
     let state: StageTileState
     let actions: () -> StageTileView.Actions
@@ -1497,7 +1497,7 @@ struct TileCornerButtons: View {
     }
 }
 
-/// Top left: its health; its events, hovered (as `CameraTile`'s).
+/// Top left: its health, while it's playing; its events, hovered.
 struct TileTopLeading: View {
     @Environment(AppModel.self) private var model
     let state: StageTileState
@@ -1522,7 +1522,7 @@ struct TileTopLeading: View {
     }
 }
 
-/// Centred on the tile: what's wrong (as `CameraTile.status`), one layout at every size, scaled on small tiles.
+/// Centred on the tile: what's going on (`TileStatusWords`), one layout at every size, scaled on small tiles.
 struct TileStatusMessage: View {
     @Environment(AppModel.self) private var model
     let state: StageTileState
@@ -1545,7 +1545,7 @@ struct TileStatusMessage: View {
     }
 }
 
-/// Just added: "Added", at the top of the tile (as `AddedGlow`'s), with the ring (the tile's layers).
+/// Just added: "Added", at the top of the tile, with the ring (the tile's layers).
 struct TileAddedChip: View {
     let state: StageTileState
 

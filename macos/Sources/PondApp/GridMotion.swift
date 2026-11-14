@@ -128,12 +128,6 @@ struct GridMotion {
     /// Events came while a far jump was under way: held (the sections drawn kept as they were).
     mutating func hold(_ was: [EventGridLayout.Section]) { if waiting == nil { waiting = was } }
 
-    /// Those held, taken (to move from, with those come now).
-    mutating func takeWaiting() -> [EventGridLayout.Section]? {
-        defer { waiting = nil }
-        return waiting
-    }
-
     /// Once settled, those come meanwhile let in: the sections they move from, if any changed.
     mutating func letIn(now sections: [EventGridLayout.Section]) -> [EventGridLayout.Section]? {
         guard !settling, veil == nil, let was = waiting else { return nil }

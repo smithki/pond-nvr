@@ -10,7 +10,7 @@ import SwiftUI
 enum StageMotion: Equatable {
     /// One change on its own: springy, rippling, new tiles popping in.
     case lively
-    /// Changes in quick succession: calm, and tiles that change rows fade across.
+    /// Changes in quick succession: calm, no ripple, less bounce.
     case calm
     /// Many cameras at once (Show All): a gentle, staggered fade in, no bounce.
     case reveal
@@ -54,7 +54,7 @@ struct LiveView: View {
     @State private var railNote = false
     /// The live view's width (the rail, the stage and the adjustments' column).
     @State private var contentWidth: CGFloat = 0
-    @AppStorage("liveRailWidth", store: AppDefaults.store) private var railKeptWidth = CameraRail.defaultWidth
+    @AppStorage(LiveView.railWidthKey, store: AppDefaults.store) private var railKeptWidth = CameraRail.defaultWidth
     @State private var railNoteTask: Task<Void, Never>?
 
     private var controlsOpen: Bool { controlsWanted && dockReady }
@@ -78,10 +78,10 @@ struct LiveView: View {
     /// Cameras kept in front while others arrive (those already shown when Show All is clicked).
     @State private var inFront: Set<String> = []
     @State private var lastChange = Date.distantPast
-    /// The stage drawn in AppKit (`LiveStageShell`), while it's being built and checked against SwiftUI's (`Stage`).
-    @AppStorage("liveStageAppKit", store: AppDefaults.store) private var stageInAppKit = false
 
     static let railKey = "liveRail"
+    /// The rail's width, as kept (dragged by its handle, `LiveShellView`).
+    static let railWidthKey = "liveRailWidth"
     static let defaultCount = 4
 
     var body: some View {
@@ -96,75 +96,7 @@ struct LiveView: View {
                     Button("Add Camera…") { model.addingCamera = true }.buttonStyle(.borderedProminent)
                 }
             } else {
-                Group {
-                if stageInAppKit {
-                    shellView(cameras)
-                } else {
-                HStack(spacing: 0) {
-                    if railDrawn {
-                        railView(cameras)
-                            .transition(model.railMovesAtOnce ? .identity : .move(edge: .leading).combined(with: .opacity))
-                    }
-                    // The stage, and under it the controls of a camera watched on its own.
-                    let docked = docked(cameras)
-                    VStack(spacing: 0) {
-                        Group {
-                            if stageInAppKit {
-                                let onStage = cameras.filter { staged(cameras).contains($0.id) }
-                                LiveStageShell(cameras: onStage, allCameras: cameras, snapshots: snapshots, activity: activity,
-                                               health: Dictionary(onStage.map { ($0.id, health($0.id, cameras: cameras)) }) { $1 },
-                                               justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
-                                               drag: reorderDrag, reorder: reorder, solo: solo, remove: { toggle($0) },
-                                               openControls: { openControls($0) }, openEvent: openEvent,
-                                               statuses: { if liveStatus != $0 { liveStatus = $0 } }, model: model)
-                            } else {
-                                Stage(cameras: cameras.filter { staged(cameras).contains($0.id) }, allCameras: cameras, snapshots: snapshots,
-                                      activity: activity, health: { health($0, cameras: cameras) }, openEvent: openEvent,
-                                      drag: reorderDrag, reorder: reorder,
-                                      justAdded: justAdded, afterRemoval: lastRemoved, motion: motion, inFront: inFront,
-                                      solo: solo, remove: { toggle($0) }, openControls: { openControls($0) })
-                            }
-                        }
-                            // Above the dock: tiles growing back over its place (more cameras on the stage) pass
-                            // over it as it goes, not under it.
-                            .zIndex(1)
-                        if let docked {
-                            // The dock and its button, one piece: open, it sits under the stage with the button on
-                            // its top edge; hidden, it slides down until only the button shows, at the bottom of
-                            // the stage. Its place on the screen is only as tall as the dock while it's open.
-                            Color.clear
-                                .frame(height: controlsOpen ? Self.dockToggleRoom + 12 + LiveControlsDock.height() : 0)
-                                .overlay(alignment: .top) {
-                                    VStack(spacing: 8) {
-                                        controlsButton
-                                        // Centred, as wide as it needs (it lays itself out for narrower windows).
-                                        LiveControlsDock(camera: docked.camera, controls: docked.controls, open: controlsOpen)
-                                            .opacity(controlsOpen ? 1 : 0)
-                                    }
-                                    .padding(.horizontal, LiveLayout.dockInset)
-                                    .offset(y: controlsOpen ? Self.dockToggleRoom - Self.controlsButtonHeight - 8
-                                                            : -(Self.controlsButtonHeight + 14))
-                                }
-                                // Hidden, the button is over the stage; open, the stage is over the dock (tiles
-                                // growing back over its place pass over it as it goes).
-                                // (Above it too while a camera's other positions are open, reaching up over the stage.)
-                                .zIndex(controlsOpen && model.morePositionsOpen == nil ? 0 : 2)
-                                .transition(.opacity)
-                        }
-                    }
-                    // The docked camera's adjustments, down the right as the rail is down the left: the picture
-                    // keeps its height.
-                    if let docked, controlsOpen, model.adjustmentsInSidebar, !model.sidebarFloats {
-                        AdjustmentsView(camera: docked.camera, controls: docked.controls)
-                            .frame(width: LiveLayout.sidebarWidth)
-                            .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomTrailing))
-                            .padding(.trailing, LiveLayout.sidebarInset)
-                            .padding(.vertical, 12)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                }
-                }
-                }
+                shellView(cameras)
                 // What the dock will hold, asked before it opens (so it opens complete, then slides up); a slow
                 // camera (logging in, busy) holds it back only a moment, then it opens and fills in.
                 .task(id: docked(cameras)?.camera.id) {
@@ -254,7 +186,6 @@ struct LiveView: View {
                 .onChange(of: showRail) { _, shown in if shown { model.railMadeRoom = false } }
                 // Whether the rail would fit beside the open controls, for the toolbar's button.
                 .onChange(of: railFits(cameras), initial: true) { _, fits in if model.railFits != fits { model.railFits = fits } }
-                .onPreferenceChange(TileStatuses.self) { liveStatus = $0 }
                 // The overview's Show These Cameras: those that need attention, alone on the stage (the rail filtered
                 // to them too).
                 // The camera window's Show in Live: that camera alone.
@@ -533,14 +464,12 @@ struct LiveView: View {
         lastChange = .distantPast
         motion = .reveal
         inFront = Set(staged(model.liveCameras))
-        // As for solo: the motion first, then the change.
+        withAnimation(Self.revealAnimation) {
+            alongStage(next: ids)
+            stagedList = ids
+        }
+        stagedIDs = ids.joined(separator: ",")
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(16))
-            withAnimation(Self.revealAnimation) {
-                alongStage(next: ids)
-                stagedList = ids
-            }
-            stagedIDs = ids.joined(separator: ",")
             try? await Task.sleep(for: .seconds(0.8))
             inFront = []
         }
@@ -559,30 +488,25 @@ struct LiveView: View {
         // From one camera alone to another, as from several to one not among them: the one leaving recedes and fades
         // (and goes out of focus), the other arriving.
         let next: StageMotion = before.contains(id) ? .focus(id) : .crossfade
-        // The motion first, in its own update: a removed tile leaves with the transition it was last drawn
-        // with, so the tiles must be drawn with this one before they go.
+        // (The stage reads the motion with the change, in the same update.)
         motion = next
-        Task { @MainActor in
-            // A frame for the tiles to be drawn with their new way of leaving.
-            try? await Task.sleep(for: .milliseconds(16))
-            switch next {
-            case .swap:
-                var instant = Transaction()
-                instant.disablesAnimations = true
-                withTransaction(instant) { stagedList = [id] }
-            case .focus:
-                withAnimation(Self.focusAnimation) {
-                    alongStage(next: [id])
-                    stagedList = [id]
-                }
-            default:
-                withAnimation(Self.recedeAnimation) {
-                    alongStage(next: [id])
-                    stagedList = [id]
-                }
+        switch next {
+        case .swap:
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { stagedList = [id] }
+        case .focus:
+            withAnimation(Self.focusAnimation) {
+                alongStage(next: [id])
+                stagedList = [id]
             }
-            stagedIDs = id
+        default:
+            withAnimation(Self.recedeAnimation) {
+                alongStage(next: [id])
+                stagedList = [id]
+            }
         }
+        stagedIDs = id
     }
 
     /// Adds a camera to the stage, or takes it off (keeping at least one).
@@ -648,8 +572,8 @@ struct CameraRail: View {
     var openControls: (String) -> Void = { _ in }
     let drag: ReorderDrag
     let reorder: (String, String) -> Void
-    @AppStorage("liveRailWidth", store: AppDefaults.store) private var width = CameraRail.defaultWidth
-    @State private var dragStart: Double?
+    /// Its width as laid out: the room the shell gives it (`LiveShellView`, which also resizes it, by its handle).
+    @State private var width = CameraRail.defaultWidth
     @Environment(AppModel.self) private var model
     /// Where the cameras are, and where the header ends and the footer begins, in the rail.
     @State private var contentSpan = 0.0 ... 0.0
@@ -675,7 +599,7 @@ struct CameraRail: View {
     /// As many columns of at least `thumbnailWidth` as fit, but no more than there are cameras: a single
     /// camera in a wide rail gets the whole width rather than half of it.
     var columns: Int {
-        let inner = width.clamped(to: Self.widths) - 24
+        let inner = width - 24
         let fit = max(1, Int((inner + 10) / (Self.thumbnailWidth + 10)))
         return min(fit, max(1, cameras.count))
     }
@@ -771,25 +695,11 @@ struct CameraRail: View {
         // whether or not anything's under it; the bars draw their own, only while something is.)
         .scrollEdgeEffectHidden(true, for: [.top, .bottom])
         .coordinateSpace(.named(Self.railSpace))
-        .frame(width: width.clamped(to: Self.widths))
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
         .background(.quaternary.opacity(0.35), in: LiveLayout.panel(nearWindowCorner: .bottomLeading))
         // (What scrolls under the bars kept inside the rail's corners.)
         .clipShape(LiveLayout.panel(nearWindowCorner: .bottomLeading))
-        .overlay(alignment: .trailing) {
-            ResizeHandle { dx in
-                let start = dragStart ?? width
-                dragStart = start
-                // No wider than leaves the open controls room.
-                let widest = max(Self.widths.lowerBound, min(Self.widths.upperBound, model.railLimit ?? .infinity))
-                width = (start + dx).clamped(to: Self.widths.lowerBound ... widest)
-            } onEnd: {
-                dragStart = nil
-            } onReset: {
-                withAnimation(.snappy(duration: 0.25)) { width = Self.defaultWidth }
-            }
-            // Centred in the gap between the rail and the stage, clear of both.
-            .offset(x: 16)
-        }
         .padding([.leading, .vertical], LiveLayout.railLeading)
         .padding(.trailing, LiveLayout.railTrailing)
     }
@@ -939,43 +849,6 @@ struct ShowAllButton: View {
         .help(filtered ? (allShown ? "Every camera that needs attention is on the screen" : "Put every camera that needs attention on the screen")
                        : allShown ? "Every camera is on the screen" : "Put every camera on the screen")
         .accessibilityLabel(allShown ? "All cameras shown" : "Show all cameras")
-    }
-}
-
-/// The rail's edge: drag to resize, double-click to go back to the usual width.
-struct ResizeHandle: View {
-    let onDrag: (Double) -> Void
-    let onEnd: () -> Void
-    let onReset: () -> Void
-    @State private var hovering = false
-    @State private var dragging = false
-
-    var body: some View {
-        ZStack {
-            Color.clear
-            Capsule()
-                .fill(.secondary.opacity(hovering || dragging ? 0.8 : 0.4))
-                .frame(width: 5, height: hovering || dragging ? 54 : 40)
-        }
-        .frame(width: 16)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .animation(.snappy(duration: 0.15), value: hovering || dragging)
-        .onHover { inside in
-            hovering = inside
-            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-        }
-        .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-            .onChanged { value in
-                dragging = true
-                onDrag(value.translation.width)
-            }
-            .onEnded { _ in
-                dragging = false
-                onEnd()
-            })
-        .onTapGesture(count: 2, perform: onReset)
-        .help("Drag to resize the list of cameras; double-click for the usual width")
     }
 }
 
@@ -1149,69 +1022,11 @@ struct RailThumbnail: View {
 
 // MARK: - Stage
 
-/// The chosen cameras, in as many columns as make the tiles largest, the last row centred.
-struct Stage: View {
-    @Environment(AppModel.self) private var model
-    let cameras: [Config.Camera]
-    /// Every camera, for stand-ins of ones that have just left the stage.
-    var allCameras: [Config.Camera] = []
-    let snapshots: CameraSnapshots
-    var activity: CameraActivity?
-    var health: (String) -> CameraHealth = { _ in .ok }
-    var openEvent: (TimelineEvent) -> Void = { _ in }
-    var drag = ReorderDrag()
-    var reorder: (String, String) -> Void = { _, _ in }
-    /// A camera just added, announced with a glow.
-    let justAdded: String?
-    /// The change took a camera off: tiles wait for it to fade before moving into its place.
-    let afterRemoval: Bool
-    /// How to move for this change.
-    let motion: StageMotion
-    /// Cameras kept above the others while they arrive.
-    var inFront: Set<String> = []
-
-    /// Changes are coming quickly: calm motion, and tiles that change rows fade across instead of travelling.
-    var fast: Bool { motion == .calm || motion == .reorder }
-
+/// Where the stage's tiles go (`LiveStageView`): the chosen cameras, in as many columns as make them largest, the last
+/// row centred; and the timings of its moves.
+enum Stage {
     /// Seconds between tiles fading in when many arrive at once (16 tiles: a quarter of a second in all).
     static let revealStagger = 0.015
-
-    let solo: (String) -> Void
-    let remove: (String) -> Void
-    /// Watches a camera on its own with its controls open.
-    var openControls: (String) -> Void = { _ in }
-
-    /// The cameras as last laid out, to tell which tiles a change moves to another row.
-    @State private var shownLineup: [String] = []
-    /// Tiles that changed rows, hidden at their new place until they fade in.
-    @State private var hiding: Set<String> = []
-    /// Stills of those tiles at their old place, fading out.
-    @State private var ghosts: [Ghost] = []
-    /// When switching to a camera that was not on the stage: the tiles leaving, kept (live) at their places
-    /// while they recede, then removed.
-    @State private var departing: [Ghost] = []
-    @State private var receded = false
-    /// What each tile shows, so a stand-in can show the same.
-    @State private var statuses: [String: TileStatus] = [:]
-
-    /// A tile and where it goes; `leaving` while it recedes before being removed.
-    struct Placed: Identifiable {
-        var camera: Config.Camera
-        var frame: CGRect
-        var index: Int
-        var leaving: Bool
-        var id: String { camera.id }
-    }
-
-    struct Ghost: Identifiable, Equatable {
-        var camera: String
-        var frame: CGRect
-        var id: String { "ghost-\(camera)" }
-    }
-
-    /// How long a tile that changes rows takes to fade across.
-    static let crossfade = 0.32
-
     static let spacing = 10.0
     static let padding = 12.0
     /// Seconds between one tile starting to move and the next.
@@ -1225,199 +1040,6 @@ struct Stage: View {
     static let compactHeight = 200.0
     /// Tiles at least this wide play the main stream.
     static let mainStreamWidth = 900.0
-
-    var body: some View {
-        GeometryReader { geo in
-            let area = CGSize(width: geo.size.width - 2 * Self.padding, height: geo.size.height - 2 * Self.padding)
-            let (columns, tile) = Self.layout(count: cameras.count, in: area)
-            let centres = Self.centres(count: cameras.count, columns: columns, tile: tile, in: geo.size)
-            // Changes when cameras are added or removed (not when the window is resized).
-            let lineup = cameras.map(\.id)
-            // In fast mode, tiles that this change moves to another row (and their old places).
-            let rowChanges = fast ? Self.rowChanges(from: shownLineup, to: lineup, area: area, size: geo.size) : [:]
-            // Switching to a camera not on the stage: the tiles leaving (stored once the change is seen).
-            let receding = !departing.isEmpty ? departing
-                : motion == .crossfade ? Self.departures(from: shownLineup, to: lineup, area: area, size: geo.size) : []
-            // Each tile is placed by itself (not in rows), so when the layout changes every tile moves and
-            // resizes smoothly to its new place, rather than being rebuilt in another row.
-            let stageCentre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            // The tiles on the stage, and any still receding (the same views, so their video keeps playing).
-            let placed = receding.compactMap { ghost in
-                (cameras.first { $0.id == ghost.camera } ?? departedCamera(ghost.camera))
-                    .map { Placed(camera: $0, frame: ghost.frame, index: 0, leaving: true) }
-            } + cameras.enumerated().map { index, camera in
-                Placed(camera: camera, frame: CGRect(x: centres[index].x - tile.width / 2, y: centres[index].y - tile.height / 2,
-                                                     width: tile.width, height: tile.height), index: index, leaving: false)
-            }
-            ZStack {
-                ForEach(ghostsShown(rowChanges)) { ghost in
-                    standIn(ghost).transition(.scale(scale: 0.94).combined(with: .opacity))
-                }
-                ForEach(placed) { place in
-                    let camera = place.camera
-                    let jumps = rowChanges[camera.id] != nil
-                    let centre = CGPoint(x: place.frame.midX, y: place.frame.midY)
-                    // Every modifier is applied whether or not the tile is leaving, so it stays the same view
-                    // (and its stream keeps running) when it starts to recede.
-                    let compact = place.frame.height < Self.compactHeight
-                    CameraTile(camera: camera, mainStream: place.frame.width >= Self.mainStreamWidth,
-                               cornerRadius: place.frame.width > 600 ? 22 : 16, snapshot: snapshots[camera.id]?.image,
-                               canRemove: cameras.count > 1, announced: !place.leaving && camera.id == justAdded,
-                               superseded: motion == .calm || (justAdded != nil && justAdded != camera.id),
-                               solo: cameras.count > 1 ? { solo(camera.id) } : nil, remove: { remove(camera.id) },
-                               openControls: { openControls(camera.id) },
-                               compact: compact, health: health(camera.id), events: activity?[camera.id],
-                               openEvent: openEvent)
-                        .frame(width: place.frame.width, height: place.frame.height)
-                        // Before .position: after it, the tile's view spans the whole stage, and every tile
-                        // would take drops anywhere on it.
-                        .modifier(StageReorder(id: camera.id, name: camera.name, drag: drag, enabled: !place.leaving && cameras.count > 1,
-                                               move: reorder))
-                        // The tile's contents follow its animated size as one, rather than each piece
-                        // (icon, message, badges) animating to its new place separately.
-                        .geometryGroup()
-                        // Receding: every leaving tile shrinks by the same amount and moves the same fraction
-                        // of the way to the stage's centre, so the grid shrinks as one, gutters and all.
-                        .modifier(RecedeEffect(amount: place.leaving && receded ? 1 : 0, scale: LiveView.recedeScale,
-                                               shift: CGSize(width: (LiveView.recedeScale - 1) * (centre.x - stageCentre.x),
-                                                             height: (LiveView.recedeScale - 1) * (centre.y - stageCentre.y))))
-                        .position(centre)
-                        .scaleEffect(jumps || hiding.contains(camera.id) ? 0.94 : 1)
-                        .opacity(jumps || hiding.contains(camera.id) || (place.leaving && receded) ? 0 : 1)
-                        // A tile changing rows in fast mode goes straight to its new place (and fades in there).
-                        // Otherwise each tile starts a little after the one before, so the grid ripples into
-                        // place; quick runs of changes move calmly, all at once.
-                        .animation(jumps || place.leaving ? nil : moveAnimation(place.index), value: lineup)
-                        .allowsHitTesting(!place.leaving)
-                        .onTapGesture(count: 2) { solo(camera.id) }
-                        .modifier(CameraMenu(camera: camera.id, solo: { solo(camera.id) }))
-                        // Adding mirrors removing: the others make room first, then the new tile pops into the
-                        // gap (rather than landing on tiles that are still moving out of the way).
-                        // Placed with .position, a tile's view spans the stage: its own centre, as a point of
-                        // that, anchors a single tile's scale.
-                        .transition(place.leaving ? .identity
-                                    : transition(tileCentre: UnitPoint(x: centre.x / max(geo.size.width, 1),
-                                                                       y: centre.y / max(geo.size.height, 1)),
-                                                 index: place.index))
-                        .zIndex(place.leaving ? -1 : motion == .focus(camera.id) || inFront.contains(camera.id) ? 2
-                                : camera.id == justAdded ? 1 : 0)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .onAppear { shownLineup = lineup }
-            // Kept, not replaced: a stand-in shows what its tile showed after the tile has gone.
-            .onPreferenceChange(TileStatuses.self) { statuses.merge($0) { $1 } }
-            .onChange(of: lineup) { old, new in
-                if motion == .crossfade {
-                    departing = Self.departures(from: old, to: new, area: area, size: geo.size)
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(16))
-                        withAnimation(LiveView.recedeAnimation) { receded = true }
-                        try? await Task.sleep(for: .seconds(0.35))
-                        departing = []
-                        receded = false
-                    }
-                }
-                let moved = fast ? Self.rowChanges(from: old, to: new, area: area, size: geo.size) : [:]
-                shownLineup = new
-                guard !moved.isEmpty else { return }
-                hiding = Set(moved.keys)
-                ghosts = moved.map { Ghost(camera: $0.key, frame: $0.value) }
-                Task { @MainActor in
-                    withAnimation(.smooth(duration: Self.crossfade)) {
-                        hiding = []
-                        ghosts = []
-                    }
-                }
-            }
-        }
-    }
-
-    func departedCamera(_ id: String) -> Config.Camera? {
-        allCameras.first { $0.id == id }
-    }
-
-    func moveAnimation(_ index: Int) -> Animation? {
-        switch motion {
-        case .lively: LiveView.layoutAnimation.delay((afterRemoval ? Self.removeLead : 0) + Double(index) * Self.ripple)
-        case .calm: LiveView.calmAnimation
-        case .reorder: .snappy(duration: 0.3)
-        case .reveal: LiveView.revealAnimation
-        case .swap: nil
-        case .focus: LiveView.focusAnimation
-        case .crossfade: LiveView.recedeAnimation
-        }
-    }
-
-    /// How tiles come and go for this change; `tileCentre` is the tile's centre as a point of the stage.
-    func transition(tileCentre: UnitPoint, index: Int = 0) -> AnyTransition {
-        switch motion {
-        case .reveal:
-            .asymmetric(insertion: .scale(scale: 0.92, anchor: tileCentre).combined(with: .opacity)
-                            .animation(.smooth(duration: 0.35).delay(0.08 + Double(index) * Self.revealStagger)),
-                        removal: .opacity.animation(.easeOut(duration: 0.16)))
-        case .lively:
-            // Adding mirrors removing: the others make room first, then the new tile pops into the gap
-            // (rather than landing on tiles that are still moving out of the way).
-            .asymmetric(insertion: .scale(scale: 0.6, anchor: tileCentre).combined(with: .opacity)
-                            .animation(.spring(duration: 0.45, bounce: 0.35).delay(Self.insertDelay)),
-                        removal: .scale(scale: 0.9, anchor: tileCentre).combined(with: .opacity)
-                            .animation(.easeOut(duration: 0.16)))
-        case .calm, .reorder:
-            .asymmetric(insertion: .scale(scale: 0.9, anchor: tileCentre).combined(with: .opacity)
-                            .animation(.spring(duration: 0.25, bounce: 0).delay(0.12)),
-                        removal: .scale(scale: 0.9, anchor: tileCentre).combined(with: .opacity)
-                            .animation(.easeOut(duration: 0.16)))
-        case .swap:
-            .identity
-        case .focus:
-            .opacity.animation(.easeInOut(duration: 0.25))
-        case .crossfade:
-            // The departing tiles are replaced at once by stand-ins in the receding layer (see `receding`);
-            // the new camera grows by the same amount as it arrives, once the old stage has nearly gone.
-            .asymmetric(insertion: .scale(scale: LiveView.recedeScale, anchor: .center).combined(with: .opacity)
-                            .animation(.smooth(duration: 0.4).delay(LiveView.arriveDelay)),
-                        removal: .identity)
-        }
-    }
-
-    /// The ghosts fading out, and (for the moment of the change itself, before they are stored) the ones
-    /// this change makes.
-    func ghostsShown(_ rowChanges: [String: CGRect]) -> [Ghost] {
-        var all = ghosts
-        for (camera, frame) in rowChanges where !all.contains(where: { $0.camera == camera }) {
-            all.append(Ghost(camera: camera, frame: frame))
-        }
-        return all
-    }
-
-    /// A still of a tile at a place it is leaving, showing what the tile showed: its live picture at that moment
-    /// (else its latest recorded one).
-    func standIn(_ ghost: Ghost) -> some View {
-        Group {
-            if let camera = cameras.first(where: { $0.id == ghost.camera }) ?? departedCamera(ghost.camera) {
-                CameraTile(camera: camera, mainStream: false, cornerRadius: ghost.frame.width > 600 ? 22 : 16,
-                           snapshot: model.liveStill(ghost.camera) ?? snapshots[ghost.camera]?.image,
-                           frozen: statuses[ghost.camera] ?? .connecting,
-                           compact: ghost.frame.height < Self.compactHeight)
-            }
-        }
-        .frame(width: ghost.frame.width, height: ghost.frame.height)
-        .position(x: ghost.frame.midX, y: ghost.frame.midY)
-        .allowsHitTesting(false)
-    }
-
-    /// Cameras a change takes off the stage, with where they were.
-    static func departures(from old: [String], to new: [String], area: CGSize, size: CGSize) -> [Ghost] {
-        guard !old.isEmpty else { return [] }
-        let (columns, tile) = layout(count: old.count, in: area)
-        let oldCentres = centres(count: old.count, columns: columns, tile: tile, in: size)
-        return old.enumerated().filter { !new.contains($0.element) }.map { i, id in
-            let c = oldCentres[i]
-            return Ghost(camera: id, frame: CGRect(x: c.x - tile.width / 2, y: c.y - tile.height / 2,
-                                                   width: tile.width, height: tile.height))
-        }
-    }
 
     /// Cameras that a change from `old` to `new` moves to another row, with where they were.
     static func rowChanges(from old: [String], to new: [String], area: CGSize, size: CGSize) -> [String: CGRect] {
@@ -1466,43 +1088,6 @@ struct Stage: View {
     }
 }
 
-/// A stage tile as something to drag into a new order. One structure whether enabled or not: an if/else here
-/// made the tile a different view whenever it flipped (a tile leaving, the count going to or from one), and
-/// the old one then faded out over the new one.
-struct StageReorder: ViewModifier {
-    let id: String
-    let name: String
-    let drag: ReorderDrag
-    let enabled: Bool
-    let move: (String, String) -> Void
-
-    func body(content: Content) -> some View {
-        content.reorderable(id, name: name, drag: drag, from: .stage, enabled: enabled, move: move)
-    }
-}
-
-/// Shrinks a view about its own centre and moves it by a fraction (`amount`) of `shift`: with the same
-/// amount and each tile's share of the shift toward the stage's centre, a set of tiles shrinks as one.
-struct RecedeEffect: GeometryEffect {
-    var amount: Double
-    let scale: Double
-    let shift: CGSize
-
-    var animatableData: Double {
-        get { amount }
-        set { amount = newValue }
-    }
-
-    func effectValue(size: CGSize) -> ProjectionTransform {
-        let s = 1 + (scale - 1) * amount
-        return ProjectionTransform(
-            CGAffineTransform(translationX: size.width / 2 + shift.width * amount, y: size.height / 2 + shift.height * amount)
-                .scaledBy(x: s, y: s)
-                .translatedBy(x: -size.width / 2, y: -size.height / 2))
-    }
-}
-
-/// What a tile is showing.
 enum TileStatus: Hashable {
     case noPassword, connecting, playing, noPicture
     /// Live view comes through the service: it isn't running, or hasn't taken this camera on.
@@ -1522,491 +1107,25 @@ enum TileStatus: Hashable {
     }
 }
 
-/// Each tile's status, collected by the stage.
-struct TileStatuses: PreferenceKey {
-    static let defaultValue: [String: TileStatus] = [:]
-    static func reduce(value: inout [String: TileStatus], nextValue: () -> [String: TileStatus]) {
-        value.merge(nextValue()) { $1 }
-    }
-}
-
-/// One camera's live picture, with its name and a recording badge; when there is no picture, its last
-/// snapshot dimmed behind what is wrong.
-struct CameraTile: View {
-    @Environment(AppModel.self) private var model
-    let camera: Config.Camera
-    let mainStream: Bool
-    let cornerRadius: Double
-    var snapshot: CGImage?
-    var canRemove = false
-    /// Just added to the stage: glow, and say so.
-    var announced = false
-    /// Another camera has just been announced: this one's glow goes at once.
-    var superseded = false
-    var solo: (() -> Void)?
-    var remove: (() -> Void)?
-    /// Watches it on its own with its controls open.
-    var openControls: (() -> Void)?
-    /// A still stand-in: no connection, the snapshot, and this status.
-    var frozen: TileStatus?
-    /// A small tile: shorter messages and badges.
-    var compact = false
-    var health = CameraHealth.ok
-    /// Today's events, shown on hover.
-    var events: CameraActivity.Summary?
-    var openEvent: (TimelineEvent) -> Void = { _ in }
-    @State private var stream: LiveStream?
-    /// The stream taking over (the tile grew or shrank past the size for the main stream): connecting under
-    /// the current one until it plays and the tile has stopped moving; then the current one goes and stops, so
-    /// the picture never goes black between them. Each stream keeps its own view all along (moved to a new view, a stream was
-    /// drawn for a frame at the tile's final size while the tile was still animating to it).
-    @State private var incoming: LiveStream?
-    /// The incoming stream faded in over the current one (it then takes over).
-    @State private var incomingShown = false
+/// A live tile's measures and timings (`StageTileView`), and its badges.
+enum CameraTile {
+    /// The stream taking over (the tile grew or shrank past the size for the main stream) fades in over this long.
     static let crossfade = 0.3
-    @State private var noPassword = false
-    @State private var pointerInside = false
-    /// The events popover is open: it has the pointer or the keyboard, so the tile's controls stay.
-    @State private var popoverOpen = false
-
     /// Between the badges along the bottom of a tile (name, gear, privacy, HomeKit, sound, resolution).
     static let badgeGap = 6.0
     /// The height of the tile's glass controls along the bottom: the name pill and gear, the sound button
     /// and the resolution pill all line up.
     static let pillHeight = 32.0
     static let compactPillHeight = 26.0
-
-    /// This camera's settings, on its page in the camera window.
-    func openSettings() { model.editCameraSettings(camera.id) }
-
     /// Longer than the stage's moves (its tiles growing and shrinking), so a new stream's picture shows once its
     /// tile has stopped moving.
     static let settle: TimeInterval = 0.65
-
-    /// This camera is the one heard.
-    var audible: Bool { model.audibleCamera == camera.id }
-    /// Its speaker has the microphone.
-    var talking: Bool { model.talking?.camera == camera.id }
-    /// It has controls for the dock under the stage.
-    var hasDockControls: Bool { true }
-
-    /// Show the hover controls: the pointer is on the tile, or in its popover.
-    var hovering: Bool { pointerInside || popoverOpen }
-
-    var status: TileStatus {
-        if let frozen { return frozen }
-        if model.isPrivate(camera.id) { return .keptPrivate }
-        if noPassword { return .noPassword }
-        if model.isWaking(camera.id), stream?.state != .playing { return .waking }
-        switch stream?.state {
-        case .playing?: return .playing
-        case .noPicture?: return .noPicture
-        case .serviceStopped?: return .serviceStopped
-        case .serviceBehind?: return .serviceBehind
-        case let .failed(reason)?: return .failed(reason)
-        case .connecting?, nil: return .connecting
-        }
-    }
-
-    var playing: Bool { status == .playing }
-
-    var body: some View {
-        // No GeometryReader here: it reports a tile's final size at once while the tile is still animating
-        // to it, so the contents would slide diagonally. The stage says how big the tile is instead.
-        Group {
-            ZStack {
-                Color.black
-                // Private: not even its last picture.
-                if let snapshot, !playing || frozen != nil, status != .keptPrivate {
-                    // Dimmed behind a message; a stand-in for a playing tile shows it plainly. Whole, as the video
-                    // is (a squarer camera gets bars at the sides), so nothing jumps when the video takes over.
-                    Image(decorative: snapshot, scale: 1).resizable().aspectRatio(contentMode: .fit)
-                        .opacity(playing ? 1 : 0.35)
-                }
-                if frozen == nil {
-                    // The stream taking over over the current one, all but unseen and drawing all along (unseen
-                    // altogether, a view doesn't draw, and one shown later rose from black), until it's ready: then
-                    // faded in over it, the current one whole underneath (both fading, the picture dimmed by a
-                    // quarter halfway), which then goes.
-                    // Made private: faded out where it is (then stopped); taken out at once, its view was drawn
-                    // shrinking into a corner as the change animated.
-                    let hidden = model.isPrivate(camera.id)
-                    ForEach([stream, incoming].compactMap { $0 }) { s in
-                        VideoLayerView(layer: s.layer, videoSize: s.size)
-                            .opacity(s.state == .playing && !hidden ? (s === incoming && !incomingShown ? 0.001 : 1) : 0)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            // Always: the bottom-left corner darkened softly, under the name and badges there, so they read on any
-            // picture.
-            .overlay {
-                RadialGradient(colors: [.black.opacity(0.38), .black.opacity(0.12), .clear], center: .bottomLeading,
-                               startRadius: 0, endRadius: compact ? 170 : 280)
-                    .allowsHitTesting(false)
-            }
-            // Hovered: the top and bottom edges darkened a little, so the controls there stand out from the video.
-            // Under them, and always laid out (faded), so it moves with the tile.
-            .overlay {
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.black.opacity(0.45), .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: compact ? 44 : 72)
-                    Spacer(minLength: 0)
-                    LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: compact ? 52 : 84)
-                }
-                .opacity(hovering && frozen == nil ? 1 : 0)
-                .animation(.easeOut(duration: 0.15), value: hovering)
-                .allowsHitTesting(false)
-            }
-            // An overlay, centred on the tile itself: inside the stack it would be centred on the snapshot,
-            // which is sized for the tile's final size at once and so pulls the message off centre while
-            // the tile grows.
-            // One layout at every size, scaled down on small tiles (and clear of the name badge there): a
-            // scale animates with the tile as one piece, where changing fonts and spacing would make the
-            // icon, title and detail each drift to their new places.
-            .overlay {
-                // Always there, centred on the tile; a new message (made private, say) fades in where it
-                // belongs, not laid out from a corner as the change animates.
-                ZStack {
-                    status(compact: compact)
-                        .id(status)
-                        .transition(.opacity)
-                }
-                // The tile's size whatever it holds: grown from nothing, it drew the message drifting in.
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .scaleEffect(compact ? 0.8 : 1)
-                .offset(y: compact ? -10 : 0)
-            }
-            .overlay(alignment: .bottomLeading) { badges(compact: compact).padding(compact ? 7 : 10) }
-            // The overlays below are always laid out and only faded in and out: views added or removed
-            // while a tile is moving would animate from wherever they last were, not with the tile.
-            .overlay(alignment: .topTrailing) {
-                HStack(spacing: 6) {
-                    // Its controls (moving it, its positions, day and night), under it on its own.
-                    // Not when it's alone on the stage: its controls are under it there.
-                    if hasDockControls, frozen == nil, canRemove {
-                        Button { openControls?() } label: { cornerSymbol("slider.horizontal.3", compact: compact) }
-                            .help("Controls for \(camera.name) (\u{2325}\u{2318}L)")
-                            .opacity(hovering ? 1 : 0)
-                            .allowsHitTesting(hovering)
-                    }
-                    // Only with other cameras on the stage: alone, there is nothing to enlarge it over or
-                    // take it off for.
-                    Group {
-                        Button { solo?() } label: { cornerSymbol("arrow.up.left.and.arrow.down.right", compact: compact) }
-                            .help("Watch only this camera")
-                        Button { remove?() } label: { cornerSymbol("xmark", compact: compact) }
-                            .help("Take off the screen")
-                    }
-                    .opacity(hovering && solo != nil && canRemove ? 1 : 0)
-                    .allowsHitTesting(hovering && solo != nil && canRemove)
-                }
-                .buttonStyle(.glass)
-                // Circles of one size (the name pill's height), whatever their symbol's width.
-                .buttonBorderShape(.circle)
-                .controlSize(compact ? .small : .regular)
-                .padding(compact ? 6 : 10)
-                .animation(.easeOut(duration: 0.15), value: hovering)
-            }
-            .overlay(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if health.showsBadge, !status.saysItself { HealthBadge(health: health, compact: compact) }
-                    if let events, events.eventsToday > 0 {
-                        EventsChip(events: events, compact: compact, open: openEvent,
-                                   popoverShown: { popoverOpen = $0 })
-                            .opacity(hovering ? 1 : 0)
-                            .allowsHitTesting(hovering)
-                            .animation(.easeOut(duration: 0.15), value: hovering)
-                    }
-                }
-                .padding(compact ? 6 : 10)
-            }
-            // A picture taken: a quick flash, as a shutter.
-            .overlay {
-                Color.white
-                    .opacity(model.flash == camera.id ? 0.55 : 0)
-                    .animation(model.flash == camera.id ? .easeOut(duration: 0.05) : .easeOut(duration: 0.35), value: model.flash)
-                    .allowsHitTesting(false)
-            }
-            .overlay {
-                // Something is wrong, or it's private: the tile's edge says so too.
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(health.tint.opacity(health.showsEdge ? 0.7 : 0), lineWidth: 2)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        // Always there, switched on and off: a glow that was inserted and removed would fade out where the
-        // tile used to be while the tile moved on.
-        .overlay { AddedGlow(cornerRadius: cornerRadius, active: announced, superseded: superseded) }
-        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .onHover { pointerInside = $0 }
-        .preference(key: TileStatuses.self, value: frozen == nil ? [camera.id: status] : [:])
-        .onChange(of: audible) { _, heard in stream?.muted = !heard }
-        .onChange(of: model.isWaking(camera.id)) { _, waking in stream?.retriesSoon = waking }
-        .onDisappear { stopStreams() }
-        .task(id: "\(camera.id) \(camera.main) \(camera.sub) \(camera.username) \(mainStream) \(model.isPrivate(camera.id))") {
-            guard frozen == nil else { return }
-            // Private: not connected at all (once the picture has faded).
-            guard !model.isPrivate(camera.id) else {
-                try? await Task.sleep(for: .seconds(0.4))
-                return stopStreams()
-            }
-            await play()
-        }
-    }
-
-    /// A top-right button's symbol, framed so every button there is a circle of the name pill's height.
-    func cornerSymbol(_ name: String, compact: Bool) -> some View {
-        let diameter = compact ? Self.compactPillHeight : Self.pillHeight
-        return Image(systemName: name)
-            .font(compact ? .callout : .headline)
-            // The glass button adds 4 pt round its label.
-            .frame(width: diameter - 8, height: diameter - 8)
-    }
 
     /// The badges beside a tile's name, always in this order: privacy (by the name), the gear, the doctor's mark,
     /// HomeKit.
     enum TileBadge: String, Identifiable, CaseIterable {
         case privacy, gear, doctor, homeKit
         var id: String { rawValue }
-    }
-
-    /// Those shown now, in their one order: each when it matters (private, a finding, a HomeKit problem), or for the
-    /// pointer. One order whatever's shown, so where each one is can be counted on; one that stays (a HomeKit
-    /// problem) slides along to make room as those for the pointer fade in before it.
-    var shownBadges: [TileBadge] {
-        guard frozen == nil else { return [] }
-        // Private, from here: this Mac's cameras (another Pond's are made private there), not while the camera's own
-        // privacy mode holds it.
-        let canPrivacy = AppModel.pond(of: camera.id) == nil && !model.isPrivateOnCameraOnly(camera.id)
-        let homeKit = model.homeKitState(for: camera)
-        return TileBadge.allCases.filter { badge in
-            switch badge {
-            case .privacy: canPrivacy && (hovering || model.isPrivate(camera.id))
-            case .gear: hovering
-            case .doctor: model.doctor.mark(camera.id) != nil
-            case .homeKit: homeKit.map { hovering || $0.needsAttention } ?? false
-            }
-        }
-    }
-
-    @ViewBuilder
-    func tileBadge(_ badge: TileBadge, compact: Bool) -> some View {
-        let diameter = compact ? Self.compactPillHeight : Self.pillHeight
-        switch badge {
-        case .gear:
-            Button(action: openSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(compact ? .callout : .headline)
-                    // The glass button adds 4 pt round its label: a circle as tall as the name pill.
-                    .frame(width: diameter - 8, height: diameter - 8)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .controlSize(.regular)
-            .help("\(camera.name) settings")
-        case .privacy:
-            PrivacyButton(camera: camera, diameter: diameter, compact: compact)
-        case .doctor:
-            // Something wrong with it, or something to change (not notices, not ignored): the doctor, at the camera.
-            if let finding = model.doctor.mark(camera.id) {
-                Button {
-                    model.showDoctor(camera: camera.id)
-                } label: {
-                    Image(systemName: "stethoscope")
-                        .font(compact ? .caption.weight(.semibold) : .callout.weight(.semibold))
-                        .foregroundStyle(finding.severity == .problem ? .red : .orange)
-                        .padding(.horizontal, compact ? 7 : 10)
-                        .frame(minHeight: diameter, maxHeight: diameter)
-                        .glassEffect(.regular, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .help("\(finding.headline): \(finding.evidence). Click for the doctor.")
-            }
-        case .homeKit:
-            if let state = model.homeKitState(for: camera) {
-                HomeKitBadge(camera: camera, state: state, compact: compact, height: diameter,
-                             popoverShown: { popoverOpen = $0 })
-            }
-        }
-    }
-
-    func badges(compact: Bool) -> some View {
-        HStack(spacing: Self.badgeGap) {
-            // The name, always; then its badges in their one order (`shownBadges`): those that matter now always,
-            // those for the pointer faded in and out, and what stays sliding along to make room for them.
-            // (One row for the name and its badges, animated as a whole: badges coming and going fade, and those that
-            // stay slide along. On the badges alone, they came and went without fading.)
-            HStack(spacing: Self.badgeGap) {
-            Text("\(camera.name)\(Text(model.pondName(of: camera.id).map { "  \($0)" } ?? "").foregroundStyle(.secondary))")
-                .font(compact ? .callout.weight(.semibold) : .headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, compact ? 10 : 13)
-                .frame(height: compact ? Self.compactPillHeight : Self.pillHeight)
-                .glassEffect(.regular, in: .capsule)
-                .layoutPriority(1)
-            // (No REC badge: recording is the usual state, so said on every tile it was noise. When a camera isn't
-            // recorded, the tile says so: its problem badge and edge.)
-            ForEach(shownBadges) { badge in
-                tileBadge(badge, compact: compact)
-                    .transition(.opacity)
-            }
-            }
-            .animation(.easeOut(duration: 0.15), value: shownBadges)
-            Spacer(minLength: 0)
-            // The buttons on the right come and go with the pointer as the tile's other controls do.
-            HStack(spacing: Self.badgeGap) {
-            // Sound: the button is there on hover, and stays while the camera is heard, so it is clear which.
-            // A circle as tall as the name pill and the resolution pill.
-            if stream?.hasAudio == true, frozen == nil, hovering || audible {
-                let diameter = compact ? Self.compactPillHeight : Self.pillHeight
-                Button { model.audibleCamera = audible ? nil : camera.id } label: {
-                    Image(systemName: audible ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                        .font(compact ? .callout : .headline)
-                        .contentTransition(.symbolEffect(.replace))
-                        // The glass button adds 4 pt round its label.
-                        .frame(width: diameter - 8, height: diameter - 8)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .controlSize(.regular)
-                .help(audible ? "Mute \(camera.name)" : "Listen to \(camera.name) (mutes the others)")
-                .transition(.opacity)
-            }
-            // Talking through its speaker: on hover, and while talking (lit, with the voice's level).
-            if model.controls(for: camera)?.talk != nil, frozen == nil, hovering || talking, !model.isAsleep(camera.id) {
-                TalkButton(camera: camera, compact: compact)
-                    .transition(.opacity)
-            }
-            if hovering, !compact, let size = stream?.size {
-                Text("\(Int(size.width))×\(Int(size.height))")
-                    .font(.callout.monospacedDigit())
-                    .padding(.horizontal, 12)
-                    .frame(height: Self.pillHeight)
-                    .glassEffect(.regular, in: .capsule)
-                    .transition(.opacity)
-            }
-            }
-            .animation(.easeOut(duration: 0.15), value: hovering)
-        }
-    }
-
-    func status(compact: Bool) -> some View {
-        TileStatusWords(status: status, camera: camera, compact: compact)
-    }
-
-    /// Runs the stream while the tile is on screen.
-    func play() async {
-        // Whether there is one, not what it is: the service uses it.
-        guard model.hasPassword(camera.id) else {
-            noPassword = true
-            return
-        }
-        noPassword = false
-        let s = LiveStream(url: mainStream ? camera.main : camera.sub, relay: model.streamRelay)
-        s.retriesSoon = model.isWaking(camera.id)
-        s.muted = !audible
-        // This camera's other stream (main or sub), already playing, stays the picture until this one plays. Only
-        // this camera's: a tile can be given another camera, whose picture must not stand in for this one.
-        let previous = stream.flatMap { old in
-            old.state == .playing && [camera.main, camera.sub].contains(old.url) ? old : nil
-        }
-        incoming?.stop()
-        incoming = nil
-        incomingShown = false
-        if let previous {
-            s.muted = true
-            incoming = s
-            s.start()
-            // Up to a few seconds for its first picture, and not before the tile has finished growing or shrinking
-            // (its view, new, isn't animated: it has the tile's final size from the start, so shown sooner it
-            // would sit cropped and out of register over the old one, which grows with the tile); then it fades
-            // in over the old one, which then stops.
-            let started = Date()
-            for _ in 0 ..< 100 where (s.state != .playing || Date().timeIntervalSince(started) < Self.settle) && !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            // Faded in over the old one, whole underneath (fading both, the picture dimmed by a quarter halfway);
-            // then it takes over, the old one stopped.
-            if incoming === s {
-                withAnimation(.easeInOut(duration: Self.crossfade)) { incomingShown = true } completion: {
-                    guard incoming === s else { return }
-                    var instant = Transaction()
-                    instant.disablesAnimations = true
-                    withTransaction(instant) {
-                        s.muted = !audible
-                        stream = s
-                        incoming = nil
-                        incomingShown = false
-                    }
-                    model.liveFeeds[camera.id] = s
-                    previous.stop()
-                }
-            }
-        } else {
-            stream?.stop()
-            stream = s
-            s.start()
-            model.liveFeeds[camera.id] = s
-        }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(3600))
-        }
-        // Not stopped here: a newer stream takes over from this one (and stops it once it plays), or the tile
-        // has gone (onDisappear stops it), whichever runs first.
-    }
-
-    /// The tile has left the screen: its streams stop.
-    func stopStreams() {
-        if let stream, model.liveFeeds[camera.id] === stream { model.liveFeeds[camera.id] = nil }
-        stream?.stop()
-        incoming?.stop()
-        stream = nil
-        incoming = nil
-        incomingShown = false
-    }
-}
-
-/// Around a tile just added to the stage: an accent ring that glows up and settles, and an "Added" label.
-/// Part of every tile, shown while `active`, so it moves with its tile. It lights up once the tiles have
-/// nearly settled, so it appears where the camera landed; when another camera is added it goes at once, so
-/// only one is ever lit.
-struct AddedGlow: View {
-    let cornerRadius: Double
-    let active: Bool
-    let superseded: Bool
-
-    var change: Animation {
-        if active { return .spring(duration: 0.5, bounce: 0.35).delay(0.6) }
-        return superseded ? .easeOut(duration: 0.15) : .easeOut(duration: 0.6)
-    }
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        // The animations are scoped to the glow's own opacity, shadow and scale: its position and size are
-        // the tile's, and must move exactly with it.
-        ZStack(alignment: .top) {
-            shape
-                .strokeBorder(.tint, lineWidth: 3)
-                .animation(change) { ring in
-                    ring.shadow(color: .accentColor.opacity(0.9), radius: active ? 14 : 0)
-                        .shadow(color: .accentColor.opacity(0.5), radius: active ? 28 : 0)
-                        .opacity(active ? 1 : 0)
-                }
-            Label("Added", systemImage: "plus.circle.fill")
-                .font(.callout.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .glassEffect(.regular.tint(.accentColor.opacity(0.5)), in: .capsule)
-                .animation(change) { chip in
-                    chip.scaleEffect(active ? 1 : 0.7).opacity(active ? 1 : 0)
-                }
-                .padding(.top, 10)
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -2432,26 +1551,5 @@ extension Array {
         var yes: [Element] = [], no: [Element] = []
         for e in self { if matches(e) { yes.append(e) } else { no.append(e) } }
         return (yes, no)
-    }
-}
-
-/// A stage tile's menu: its camera from here (its settings, its zones, its doctor; another Pond's, only watched).
-struct CameraMenu: ViewModifier {
-    @Environment(AppModel.self) private var model
-    let camera: String
-    let solo: () -> Void
-
-    func body(content: Content) -> some View {
-        let own = model.ownCamera(camera) != nil
-        content.contextMenu {
-            Button("Watch Only This", action: solo)
-            Divider()
-            Button("Camera Settings\u{2026}", systemImage: "gearshape") { model.editCameraSettings(camera) }
-                .disabled(!own)
-            Button("Edit Zones\u{2026}", systemImage: "square.dashed") { model.editZones(camera) }
-                .disabled(!model.canEditZones(camera))
-            Button("Doctor\u{2026}", systemImage: "stethoscope") { model.showDoctor(camera: camera) }
-                .disabled(!own)
-        }
     }
 }

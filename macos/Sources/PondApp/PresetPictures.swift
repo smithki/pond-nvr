@@ -169,15 +169,3 @@ extension LiveStream {
         return Self.pictures.createCGImage(scaled, from: scaled.extent)
     }
 }
-
-extension AppModel {
-    /// What a camera's tile shows now, live (for a stand-in at a place the tile is leaving): taken once and kept for
-    /// a moment, so a stand-in drawn again mid-fade shows the same picture, not a newer one. Nil while it isn't
-    /// playing.
-    func liveStill(_ camera: String) -> CGImage? {
-        if let kept = liveStills[camera], Date().timeIntervalSince(kept.at) < 1 { return kept.image }
-        guard let stream = liveFeeds[camera], stream.state == .playing, let image = stream.picture(width: 1280) else { return nil }
-        liveStills[camera] = (image, Date())
-        return image
-    }
-}
