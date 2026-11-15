@@ -777,12 +777,30 @@ struct TimelineLanes: View, @MainActor Animatable {
     var playhead: Double
 
     var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
-        get { AnimatablePair(AnimatablePair(start, length), playhead.isNaN ? 0 : playhead) }
+        // (Drawn by the surface, SwiftUI doesn't move it frame by frame: given where it ends up, the surface moves it.)
+        get { Self.surface ? AnimatablePair(AnimatablePair(0, 0), 0) : AnimatablePair(AnimatablePair(start, length), playhead.isNaN ? 0 : playhead) }
         set {
+            guard !Self.surface else { return }
             start = newValue.first.first
             length = newValue.first.second
             if !playhead.isNaN { playhead = newValue.second }
         }
+    }
+
+    /// The ruler and the lanes drawn as images moved by Core Animation (`LanesSurface`), not a `Canvas` redrawn every
+    /// frame of a move (docs/timeline-lanes.md); a setting while it's checked against the `Canvas`.
+    static var surface: Bool { AppDefaults.store.bool(forKey: "timelineSurface") }
+    /// Drawn without the playhead (the surface moves it, a layer of its own).
+    var hidesHead = false
+    /// Words placed by the view's edges, collected instead of drawn (the surface draws its lanes wider than the view, and
+    /// places these itself, as they'd be drawn in the view at each moment of a move: `EdgeLabel`).
+    var edgeLabels: EdgeLabels?
+
+    /// What's recorded, and the lanes' other highlights: the Mac's accent colour, as the rest of the app; or, to see it
+    /// (the setting `timelineBrandTeal`), Pond's own teal (web/DESIGN.md: the brand's, for later in the app).
+    static var accent: Color {
+        AppDefaults.store.bool(forKey: "timelineBrandTeal") ? Color(red: 0x65 / 255.0, green: 0xD9 / 255.0, blue: 0xD1 / 255.0)
+            : Color(nsColor: .controlAccentColor)
     }
     /// The event under the pointer, shared with TimelineView, which draws its callout.
     @Binding var hovered: EventHover?
@@ -794,6 +812,8 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// Advanced every second while the timeline shows today, so what is being recorded (drawn up to the
     /// present) keeps growing when nothing else changes.
     @State private var clock = Date()
+    /// The clock as last advanced (for a drawing made apart from the view: the surface).
+    var clockNow: Date { clock }
     /// Kinds of event being shown or hidden (a filter just changed): their marks fade in or out.
     @State private var kindFades: [TimelineEvent.Kind: KindFade] = [:]
     /// Where the visible part started when a pan of the time axis began.
@@ -859,7 +879,13 @@ struct TimelineLanes: View, @MainActor Animatable {
                 Color.clear.frame(width: Self.labelWidth)
                 GeometryReader { geo in
                     // Dragged, the time axis pans the timeline; the lanes below move the playhead.
-                    Canvas { context, size in drawRuler(context, size: size, visible: visible) }
+                    Group {
+                        if Self.surface {
+                            LanesSurface(lanes: self, part: .ruler)
+                        } else {
+                            Canvas { context, size in drawRuler(context, size: size, visible: visible) }
+                        }
+                    }
                         .contentShape(Rectangle())
 
                         .gesture(DragGesture(minimumDistance: 1)
@@ -899,10 +925,16 @@ struct TimelineLanes: View, @MainActor Animatable {
                         GeometryReader { geo in
                             // Zoomed in (1 h, 15 m), what is being recorded grows with the clock frame by frame
                             // rather than a step a second; and newly loaded minutes fill in smoothly at any zoom.
-                            SwiftUI.TimelineView(.animation(minimumInterval: 1 / 30, paused: !animating)) { frame in
-                                Canvas { context, size in
-                                    drawLanes(context, size: size, visible: visible,
-                                              now: smoothNow ? frame.date : clock, frame: frame.date)
+                            Group {
+                                if Self.surface {
+                                    LanesSurface(lanes: self, part: .lanes)
+                                } else {
+                                    SwiftUI.TimelineView(.animation(minimumInterval: 1 / 30, paused: !animating)) { frame in
+                                        Canvas { context, size in
+                                            drawLanes(context, size: size, visible: visible,
+                                                      now: smoothNow ? frame.date : clock, frame: frame.date)
+                                        }
+                                    }
                                 }
                             }
                                 .contentShape(Rectangle())
@@ -958,6 +990,7 @@ struct TimelineLanes: View, @MainActor Animatable {
                 }
             }
         }
+        .tint(Self.accent)
         // Two-finger sideways scrolling over the timeline pans it (up and down still scroll the lanes); so does
         // dragging with the middle button (the scroll wheel pressed).
         .onHover { overTimeline = $0 }
@@ -1020,7 +1053,9 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// A camera's recording as drawn at `now`: what's listed, its last stretch ending where the model says the
     /// recording being written has reached (the one thing that moves it).
     func drawnCoverage(_ camera: String, now: Date) -> [ClosedRange<Date>] {
-        var ranges = timeline.coverage[camera] ?? []
+        // (None past the present: a recording's end is its start and a segment's length till the next is seen, and
+        // another Pond's, with no live edge here to end it at, ran on into the future.)
+        var ranges = (timeline.coverage[camera] ?? []).filter { $0.lowerBound < now }.map { $0.lowerBound ... min($0.upperBound, now) }
         guard let edge = timeline.liveEdge(of: camera, now: now), let segment = timeline.live[camera],
               let last = ranges.last, last.contains(segment.start) || last.upperBound >= segment.start else { return ranges }
         ranges[ranges.count - 1] = last.lowerBound ... max(last.lowerBound, edge)
@@ -1197,7 +1232,10 @@ struct TimelineLanes: View, @MainActor Animatable {
         let length = visible.upperBound.timeIntervalSince(visible.lowerBound)
         let slack = 4 / width * length
         let t = time(at: point.x, width: width, visible: visible)
-        let spans = Self.joined(timeline.privateSpans(of: camera), to: timeline.coverage[camera] ?? [])
+        // (As they're drawn: those a moment apart, one.)
+        let point = length / max(width, 1)
+        let spans = Self.merged(Self.joined(timeline.privateSpans(of: camera), to: Self.merged(timeline.coverage[camera] ?? [], within: point)),
+                                within: 3 * point)
         guard let span = spans.first(where: { t >= $0.lowerBound.addingTimeInterval(-slack) && t <= $0.upperBound.addingTimeInterval(slack) })
         else { return nil }
         return TimelineEvent(id: "private-\(camera)-\(span.lowerBound.timeIntervalSince1970)", camera: camera, kind: .privacy,
@@ -1333,7 +1371,12 @@ struct TimelineLanes: View, @MainActor Animatable {
     }
 
     /// The marker's time: the drag while dragging (it follows the pointer), else the animated playhead.
-    var head: Date? { dragging ?? (playhead.isNaN ? nil : Date(timeIntervalSinceReferenceDate: playhead)) }
+    var head: Date? {
+        guard !hidesHead else { return nil }
+        return dragging ?? (playhead.isNaN ? nil : Date(timeIntervalSinceReferenceDate: playhead))
+    }
+    /// The playhead's time to draw it at, the surface's own layer (while scrubbing, the drag).
+    var headTime: Date? { dragging ?? (playhead.isNaN ? nil : Date(timeIntervalSinceReferenceDate: playhead)) }
 
     /// Hour ticks (local time), and the playhead's knob.
     func drawRuler(_ context: GraphicsContext, size: CGSize, visible: ClosedRange<Date>) {
@@ -1434,10 +1477,14 @@ struct TimelineLanes: View, @MainActor Animatable {
         }
         if let first = rulerStart, visible.contains(first) {
             let px = x(first, width: size.width, visible: visible)
-            let label = context.resolve(Text("\(Image(systemName: "flag.fill")) Recording starts")
-                .font(.caption2.weight(.semibold)).foregroundStyle(.tint))
+            let text = Text("\(Image(systemName: "flag.fill")) Recording starts").font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+            let label = context.resolve(text)
             let box = label.measure(in: size)
-            context.draw(label, at: CGPoint(x: Self.startLabelX(line: px, width: box.width), y: box.height / 2 + 2))
+            if let edgeLabels {
+                edgeLabels.list.append(EdgeLabel(text: text, plate: false, box: box, y: box.height / 2 + 2, rule: .beside(first)))
+            } else {
+                context.draw(label, at: CGPoint(x: Self.startLabelX(line: px, width: box.width), y: box.height / 2 + 2))
+            }
             var line = Path()
             line.move(to: CGPoint(x: px, y: 0))
             line.addLine(to: CGPoint(x: px, y: size.height))
@@ -1479,9 +1526,13 @@ struct TimelineLanes: View, @MainActor Animatable {
         context.stroke(line, with: .style(.tint), lineWidth: 1.5)
         // The label before the line, in the empty part of the lane; without room there, the line alone (past
         // it is the camera's recording, where the label couldn't be read).
-        let label = context.resolve(Text("\(Image(systemName: "flag.fill")) \(camera.name) added")
-            .font(.caption2.weight(.semibold)).foregroundStyle(.tint))
+        let text = Text("\(Image(systemName: "flag.fill")) \(camera.name) added").font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+        let label = context.resolve(text)
         let box = label.measure(in: size)
+        if let edgeLabels {
+            edgeLabels.list.append(EdgeLabel(text: text, plate: false, box: box, y: lane.midY, rule: .before(added)))
+            return
+        }
         let midX = px - box.width / 2 - 6
         if midX - box.width / 2 >= lane.minX + 2 { context.draw(label, at: CGPoint(x: midX, y: lane.midY)) }
     }
@@ -1589,10 +1640,13 @@ struct TimelineLanes: View, @MainActor Animatable {
         return min(max(pointer, max(mark.minX, 0)), min(mark.maxX, width))
     }
 
+    /// An edge on whole pixels (a Retina display's: half points), so stretches that meet do so cleanly.
+    static func snap(_ x: Double) -> Double { (x * 2).rounded() / 2 }
+
     /// Zoomed in far enough for what's over a long bar to be its own chip.
-    static func apart(_ visible: ClosedRange<Date>) -> Bool {
-        visible.upperBound.timeIntervalSince(visible.lowerBound) <= apartWithin * 1.01
-    }
+    /// (By the view's length, not the stretch drawn: the surface draws more than the view, and at 1 h they'd be grouped as
+    /// further out.)
+    var apart: Bool { length <= Self.apartWithin * 1.01 }
 
     /// What leads a chip of several, as its colour does: a long one that's most of it, else the most telling.
     func lead(of group: (events: [TimelineEvent], rect: CGRect), width: Double, visible: ClosedRange<Date>) -> TimelineEvent {
@@ -1611,7 +1665,7 @@ struct TimelineLanes: View, @MainActor Animatable {
         guard let nearest = event(at: point, width: width, visible: visible) else { return nil }
         let shown = (timeline.index[nearest.camera]?.overlapping(visible) ?? []).filter { timeline.shownKinds.contains($0.kind) }
         let clusters = Self.clusters(shown.map { (kind: $0.kind, rect: markRect($0, width: width, visible: visible), weight: 1.0) },
-                                     ids: shown.map(\.id), apart: Self.apart(visible))
+                                     ids: shown.map(\.id), apart: apart)
         guard let hit = clusters.first(where: { $0.ids.contains(nearest.id) }), hit.ids.count > 1 else { return nil }
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return (hit.ids.compactMap { byID[$0] }.sorted { $0.start < $1.start }, hit.rect)
@@ -1632,6 +1686,19 @@ struct TimelineLanes: View, @MainActor Animatable {
     /// Private stretches reaching out to the recording beside them, where it stopped a little before the change
     /// or started again a little after (within a minute and a half): never pulled in, so a stretch always covers
     /// the whole time it was private (recording that seems to run into it lies under it).
+    /// Stretches nearer each other than `within` seconds (or overlapping), as one.
+    static func merged(_ spans: [ClosedRange<Date>], within: TimeInterval) -> [ClosedRange<Date>] {
+        var out: [ClosedRange<Date>] = []
+        for span in spans.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            if let last = out.last, span.lowerBound.timeIntervalSince(last.upperBound) <= within {
+                out[out.count - 1] = last.lowerBound ... max(last.upperBound, span.upperBound)
+            } else {
+                out.append(span)
+            }
+        }
+        return out
+    }
+
     static func joined(_ spans: [ClosedRange<Date>], to coverage: [ClosedRange<Date>]) -> [ClosedRange<Date>] {
         let near: TimeInterval = 90
         return spans.map { span in
@@ -1692,11 +1759,20 @@ struct TimelineLanes: View, @MainActor Animatable {
             // Being recorded now (not playable yet): drawn after the recording it continues, joined to it.
             // The live end and what's being recorded beyond it, from one moment, so they meet exactly.
             let edgeNow = smoothNow ? frame : clockNow
-            let coverage = drawnCoverage(camera.id, now: edgeNow)
+            // At this zoom, what's closer than a few points is one: private stretches a moment apart (privacy switched
+            // off and on again quickly) one block, not slivers of blocks; the recordings of a second or two between
+            // them under it, not drawn (each at least a sliver wide, and run on under the block either side, they piled
+            // up into a bright stripe beside it); recordings that touch, one bar (overlapping, their colour doubled).
+            let point = visible.upperBound.timeIntervalSince(visible.lowerBound) / max(size.width, 1)
+            let recordings = Self.merged(drawnCoverage(camera.id, now: edgeNow), within: point)
             // Private stretches, reaching to the recording on either side (recording stops and starts again a
             // moment apart from the change), so the lane runs on through them without a break.
             // (Going on now: to the same live edge as a recording's, so the lanes end together.)
-            let privateSpans = Self.joined(timeline.privateSpans(of: camera.id, now: edgeNow), to: coverage)
+            let privateSpans = Self.merged(Self.joined(timeline.privateSpans(of: camera.id, now: edgeNow), to: recordings),
+                                           within: 3 * point)
+            let coverage = recordings.filter { range in
+                !privateSpans.contains { $0.lowerBound < range.lowerBound && range.upperBound < $0.upperBound }
+            }
             let recordingNow = timeline.recordingNow(of: camera.id, now: edgeNow)
             for range in coverage where range.upperBound > visible.lowerBound && range.lowerBound < visible.upperBound {
                 // Running on under a private stretch beside it by a corner's width, so the bar shows in the
@@ -1706,8 +1782,8 @@ struct TimelineLanes: View, @MainActor Animatable {
                 let privateBefore = visible.contains(range.lowerBound) && privateSpans.contains { $0.upperBound == range.lowerBound }
                 let underRight = privateAfter ? 6.0 : 0
                 let underLeft = privateBefore ? 6.0 : 0
-                let x0 = max(0, x(range.lowerBound, width: size.width, visible: visible) - underLeft)
-                let x1 = min(size.width, x(range.upperBound, width: size.width, visible: visible) + underRight)
+                let x0 = Self.snap(max(0, x(range.lowerBound, width: size.width, visible: visible) - underLeft))
+                let x1 = Self.snap(min(size.width, x(range.upperBound, width: size.width, visible: visible) + underRight))
                 let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
                 let strength = withEvents ? (selected ? 0.65 : 0.38) : (selected ? 0.85 : 0.45)
                 // Square on the right where the part being recorded carries on from it; square on the left where
@@ -1731,8 +1807,8 @@ struct TimelineLanes: View, @MainActor Animatable {
             // where it joins the recording before it; rounded on the right, where the dimmed future (drawn below)
             // reaches in under its corners.
             if let now = recordingNow, now.upperBound > visible.lowerBound, now.lowerBound < visible.upperBound {
-                let x0 = max(0, x(now.lowerBound, width: size.width, visible: visible))
-                let x1 = min(size.width, x(now.upperBound, width: size.width, visible: visible))
+                let x0 = Self.snap(max(0, x(now.lowerBound, width: size.width, visible: visible)))
+                let x1 = Self.snap(min(size.width, x(now.upperBound, width: size.width, visible: visible)))
                 let bar = CGRect(x: x0, y: lane.minY, width: max(2, x1 - x0), height: lane.height)
                 let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
                     topLeading: 0, bottomLeading: 0, bottomTrailing: 6, topTrailing: 6))
@@ -1754,12 +1830,21 @@ struct TimelineLanes: View, @MainActor Animatable {
             }
             // Private: indigo, hatched (nothing recorded, by choice), with the word where there's room.
             for span in privateSpans where span.upperBound > visible.lowerBound && span.lowerBound < visible.upperBound {
-                let x0 = max(0, x(span.lowerBound, width: size.width, visible: visible))
-                let x1 = min(size.width, x(span.upperBound, width: size.width, visible: visible))
+                // (On whole pixels: an edge part over a pixel let the recording's bar under it show through, a thin line
+                // down the whole edge, like a second, sliver of a stretch.)
+                let x0 = Self.snap(max(0, x(span.lowerBound, width: size.width, visible: visible)))
+                let x1 = Self.snap(min(size.width, x(span.upperBound, width: size.width, visible: visible)))
                 // On top of the bar, the lane's full height, with its own rounded corners: the bar's square ends
                 // show at them, under it.
                 let bar = CGRect(x: x0, y: lane.minY, width: max(3, x1 - x0), height: lane.height)
-                let shape = Path(roundedRect: bar, cornerRadius: min(6, bar.width / 2))
+                // Square where it begins the camera's recording (against the line that marks it, "… added", "Recording
+                // starts"), as a recording's bar is there; rounded elsewhere.
+                let radius = min(6, bar.width / 2)
+                let opens = [timeline.added(camera.id), timeline.cameraStarts[camera.id]].contains { start in
+                    start.map { abs(span.lowerBound.timeIntervalSince($0)) < 2 } ?? false
+                }
+                let shape = Path(roundedRect: bar, cornerRadii: RectangleCornerRadii(
+                    topLeading: opens ? 0 : radius, bottomLeading: opens ? 0 : radius, bottomTrailing: radius, topTrailing: radius))
                 // Kept out of the future's dimming, as a recording is (its end at the present isn't dimmed).
                 if span.upperBound > clockNow.addingTimeInterval(-3600) { recorded.append(shape) }
                 context.fill(shape, with: .style(.background))
@@ -1777,10 +1862,15 @@ struct TimelineLanes: View, @MainActor Animatable {
                     layer.clip(to: shape)
                     layer.stroke(hatch, with: .color(.indigo.opacity(selected ? 0.6 : 0.4)), lineWidth: 1.5)
                 }
-                let label = context.resolve(Text("\(Image(systemName: "eye.slash.fill")) Private")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.indigo))
+                let text = Text("\(Image(systemName: "eye.slash.fill")) Private").font(.caption2.weight(.semibold)).foregroundStyle(.indigo)
+                let label = context.resolve(text)
                 let box = label.measure(in: size)
-                if box.width + 16 < bar.width, box.height < bar.height {
+                if let edgeLabels {
+                    if box.height < bar.height {
+                        edgeLabels.list.append(EdgeLabel(text: text, plate: true, box: box, y: bar.midY,
+                                                         rule: .cling(span.lowerBound, span.upperBound, inset: 0)))
+                    }
+                } else if box.width + 16 < bar.width, box.height < bar.height {
                     let plate = CGRect(x: bar.minX + 6, y: bar.midY - box.height / 2 - 1, width: box.width + 8, height: box.height + 2)
                     context.fill(Path(roundedRect: plate, cornerRadius: 4), with: .style(.background.opacity(0.85)))
                     context.draw(label, at: CGPoint(x: plate.midX, y: plate.midY))
@@ -1794,17 +1884,22 @@ struct TimelineLanes: View, @MainActor Animatable {
             // Not recorded (and not private): an empty stretch, outlined in orange, dashed, with the words where
             // there's room and why on hover. (What caused it may be this Mac's, not the camera's: RecordingGaps.)
             for gap in timeline.gaps[camera.id] ?? [] where gap.range.upperBound > visible.lowerBound && gap.range.lowerBound < visible.upperBound {
-                let x0 = max(0, x(gap.range.lowerBound, width: size.width, visible: visible))
-                let x1 = min(size.width, x(gap.range.upperBound, width: size.width, visible: visible))
+                let x0 = Self.snap(max(0, x(gap.range.lowerBound, width: size.width, visible: visible)))
+                let x1 = Self.snap(min(size.width, x(gap.range.upperBound, width: size.width, visible: visible)))
                 let bar = CGRect(x: x0, y: lane.minY, width: max(3, x1 - x0), height: lane.height).insetBy(dx: 0.75, dy: 0.75)
                 let shape = Path(roundedRect: bar, cornerRadius: min(5, bar.width / 2))
                 if gap.ongoing { recorded.append(shape) }
                 context.fill(shape, with: .color(.orange.opacity(selected ? 0.12 : 0.07)))
                 context.stroke(shape, with: .color(.orange.opacity(selected ? 0.75 : 0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                let label = context.resolve(Text("\(Image(systemName: gap.reason.symbol)) Not recorded")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.orange))
+                let text = Text("\(Image(systemName: gap.reason.symbol)) Not recorded").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                let label = context.resolve(text)
                 let box = label.measure(in: size)
-                if box.width + 16 < bar.width, box.height < bar.height {
+                if let edgeLabels {
+                    if box.height < bar.height {
+                        edgeLabels.list.append(EdgeLabel(text: text, plate: false, box: box, y: bar.midY,
+                                                         rule: .cling(gap.range.lowerBound, gap.range.upperBound, inset: 0.75)))
+                    }
+                } else if box.width + 16 < bar.width, box.height < bar.height {
                     context.draw(label, at: CGPoint(x: bar.minX + 8 + box.width / 2, y: bar.midY))
                 }
                 if highlighted == Self.gapID(camera.id, gap) {
@@ -1818,7 +1913,7 @@ struct TimelineLanes: View, @MainActor Animatable {
             let marks = (timeline.index[camera.id]?.overlapping(visible) ?? []).filter { visibility($0.kind, at: frame) > 0 }
             let clusters = Self.clusters(marks.map {
                 (kind: $0.kind, rect: markRect($0, width: size.width, visible: visible), weight: visibility($0.kind, at: frame))
-            }, ids: marks.map(\.id), apart: Self.apart(visible))
+            }, ids: marks.map(\.id), apart: apart)
             var symbols: [TimelineEvent.Kind: GraphicsContext.ResolvedText] = [:]
             func symbol(_ kind: TimelineEvent.Kind, height: Double) -> GraphicsContext.ResolvedText {
                 // As text, so the symbol keeps its own shape (a walking figure is taller than wide); each kind's made
@@ -1905,11 +2000,15 @@ struct TimelineLanes: View, @MainActor Animatable {
             // does at the first section's).
             // (Not while it's folded away: its heading alone shows, with nothing under it to mark.)
             if let heading = section.heading, visible.contains(first), section.rows.upperBound - section.rows.lowerBound > 1 {
-                let label = context.resolve(Text("\(Image(systemName: "flag.fill")) Recording starts")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.tint))
+                let text = Text("\(Image(systemName: "flag.fill")) Recording starts").font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+                let label = context.resolve(text)
                 let box = label.measure(in: size)
                 let labelY = heading.upperBound - box.height / 2 - 4
-                context.draw(label, at: CGPoint(x: Self.startLabelX(line: px, width: box.width), y: labelY))
+                if let edgeLabels {
+                    edgeLabels.list.append(EdgeLabel(text: text, plate: false, box: box, y: labelY, rule: .beside(first)))
+                } else {
+                    context.draw(label, at: CGPoint(x: Self.startLabelX(line: px, width: box.width), y: labelY))
+                }
                 // From the label down (clear of the lanes above, as the ruler's line is of the ruler's top).
                 var line = Path()
                 line.move(to: CGPoint(x: px, y: labelY - box.height / 2))

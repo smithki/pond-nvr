@@ -217,6 +217,70 @@ enum Snapshots {
                                 ms.count { $0 > 16 }, ms.count { $0 > 33 }, ms.count)
             try? report.write(toFile: "\(dir)/timeline-loop.txt", atomically: true, encoding: .utf8)
         }
+        // A camera made private for a moment and public again (a recording, a private stretch, a recording), then the
+        // Timeline zoomed in on it at 15 minutes, for looking at where they meet (timeline-privacy.png).
+        if wants("tlprivacy"), let window = mainWindow(), let camera = model.config?.cameras.first {
+            let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            model.mode = .timeline
+            await model.setPrivacy(camera.id, true)
+            try? await Task.sleep(for: .seconds(40))
+            await model.setPrivacy(camera.id, false)
+            try? await Task.sleep(for: .seconds(20))
+            await model.timeline.select(camera: camera.id)
+            model.timeline.zoom = .quarter
+            try? await Task.sleep(for: .seconds(4))
+            try? "done".write(toFile: "\(dir)/tlprivacy.txt", atomically: true, encoding: .utf8)
+            try? await Task.sleep(for: .seconds(6))
+        }
+        // Privacy switched off and on quickly (as when someone toggles it), then the Timeline at 1 hour on it, for looking
+        // at how the short stretches are drawn (tlflicker.txt when it's ready).
+        if wants("tlflicker"), let window = mainWindow(), let camera = model.config?.cameras.first {
+            let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+            window.setFrame(NSRect(x: visible.minX + 40, y: visible.maxY - 40 - 780, width: 1240, height: 780), display: true)
+            model.mode = .timeline
+            for (on, wait) in [(true, 20.0), (false, 1), (true, 1), (false, 1), (true, 1), (false, 13), (true, 20), (false, 6)] {
+                await model.setPrivacy(camera.id, on)
+                try? await Task.sleep(for: .seconds(wait))
+            }
+            await model.timeline.select(camera: camera.id)
+            model.timeline.zoom = .hour
+            try? await Task.sleep(for: .seconds(4))
+            try? "done".write(toFile: "\(dir)/tlflicker.txt", atomically: true, encoding: .utf8)
+            try? await Task.sleep(for: .seconds(6))
+        }
+        // The Timeline with several Ponds: this one alone and all again, then the other Pond's lanes folded and opened
+        // (2 s apart), for watching (recorded) how the lanes move.
+        if wants("tlponds") {
+            model.mode = .timeline
+            try? await Task.sleep(for: .seconds(5))
+            let other = model.remotePonds.first?.id ?? ""
+            for step in 0 ..< 4 {
+                switch step {
+                case 0: model.shownPonds = .this
+                case 1: model.shownPonds = .all
+                case 2: AppDefaults.store.set(other, forKey: "timelineFoldedPonds")
+                default: AppDefaults.store.set("", forKey: "timelineFoldedPonds")
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+            try? "done".write(toFile: "\(dir)/tlponds.txt", atomically: true, encoding: .utf8)
+        }
+        // Live's tiles found under the pointer as hover finds them (the frontmost view at each tile's middle is it), for
+        // checking hover isn't lost to what's around them nor taken through what's over them.
+        if wants("hovertest"), let window = mainWindow() {
+            model.mode = .live
+            try? await Task.sleep(for: .seconds(4))
+            func tiles(_ view: NSView) -> [StageTileView] { (view as? StageTileView).map { [$0] } ?? view.subviews.flatMap(tiles) }
+            var report = ""
+            for tile in tiles(window.contentView?.superview ?? window.contentView!) {
+                let middle = tile.convert(CGPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+                let top = (window.contentView?.superview ?? window.contentView)?.hitTest(middle)
+                let found = top.map { $0 === tile || $0.isDescendant(of: tile) } ?? false
+                report += "\(tile.state.camera.name): \(found ? "found" : "not found (\(top.map { String(describing: type(of: $0)) } ?? "nil"))")\n"
+            }
+            try? report.write(toFile: "\(dir)/hovertest.txt", atomically: true, encoding: .utf8)
+        }
         // Events with an event open, to Live and back, for watching (recorded) that the panel's there open at once, made.
         if wants("eventsback") {
             model.mode = .events
