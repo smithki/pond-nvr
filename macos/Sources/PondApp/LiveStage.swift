@@ -1103,6 +1103,8 @@ final class StageTileView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea { removeTrackingArea(hoverArea) }
+        // (Entered and exited only: tracking the pointer's every move too, the tiles kept the window's other hovers,
+        // the new events' card under the toolbar, from letting go.)
         let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
         addTrackingArea(area)
         hoverArea = area
@@ -1125,7 +1127,12 @@ final class StageTileView: NSView {
     func recheckHover() {
         var inside = false
         if !isLeaving, state.frozen == nil, let window, NSApp.isActive {
-            inside = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+            let point = window.mouseLocationOutsideOfEventStream
+            // On it, and it the frontmost there: not under something drawn over it (a tracking area goes by where the
+            // pointer is alone, and a card over the stage, the new events' under the toolbar, lit the tile beneath).
+            if bounds.contains(convert(point, from: nil)), let top = window.contentView?.superview?.hitTest(point) ?? window.contentView?.hitTest(point) {
+                inside = top === self || top.isDescendant(of: self)
+            }
         }
         if state.pointerInside != inside { state.pointerInside = inside }
     }
