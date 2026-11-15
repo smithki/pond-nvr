@@ -323,13 +323,21 @@ struct SearchModelRow: View {
 struct PondNameField: View {
     @Environment(AppModel.self) private var model
     @State private var text = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         TextField(text: $text, prompt: Text(Host.current().localizedName ?? "This Mac")) {
             Text("Name")
             Text("How this Pond is shown to others paired with it.")
         }
-            .onAppear { text = model.config?.name ?? "" }
+            // Not taken up as the page opens (the first field, it was, its name selected, and the system's suggestions
+            // panel came up beside it, empty); nor suggestions while it's typed in (a name, not prose).
+            .focused($focused)
+            .autocorrectionDisabled()
+            .onAppear {
+                text = model.config?.name ?? ""
+                DispatchQueue.main.async { focused = false }
+            }
             .onSubmit(save)
             .task(id: text) {
                 try? await Task.sleep(for: .seconds(0.8))
