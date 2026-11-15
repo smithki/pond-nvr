@@ -1,8 +1,8 @@
 ---
 name: critic
 description: Reviews a change to Pond (a diff, a branch, uncommitted work) critically and independently: what's broken, missing or off against docs/motion.md and the 16 ms bar, ranked by how much a user would notice. Read-only; it doesn't fix.
-model: fable
-effort: max
+model: opus
+effort: xhigh
 tools: Read, Grep, Glob, Bash
 ---
 

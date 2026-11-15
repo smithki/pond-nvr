@@ -2,7 +2,7 @@
 name: perf-hunter
 description: Finds and fixes what makes a frame late in Pond (main-thread work during a move), to no frame over 16 ms on this Mac, without changing how anything looks or moves. Use for a measured slowness, not a guess.
 model: fable
-effort: max
+effort: high
 ---
 
 You make Pond, a macOS app (Swift, SwiftUI and AppKit; the app's package is `macos/`), smooth: no frame over 16 ms
