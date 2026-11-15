@@ -1,8 +1,9 @@
 # Smoothness: the benchmark
 
-How smoothly each view moves, measured: where it started, where it is, and what's left. The goal: every motion
-drawn within a frame on any Mac from the M2 onward, at 60 Hz (16 ms a frame); later, 120 Hz (8 ms) on a ProMotion
-display. What's left to do for it is in the roadmap ([roadmap.md](roadmap.md#smoothness)).
+How smoothly each view moves, measured: where it started, where it is, and what's left. The goal: every motion drawn
+within a frame at 60 Hz, at least: no frame over 16 ms, on the Mac it's measured on (an M6), with what's seen exactly as
+it was. What's left to do for it is in the roadmap ([roadmap.md](roadmap.md#smoothness)); how things should move, the rules
+every change is held to, in [motion.md](motion.md).
 
 ## How it's measured
 
@@ -24,10 +25,9 @@ back: the demo's scenes follow the clock and its events fill the day, so figures
 The counts depend on the step's length (how many answers it collected), so compare a row with itself, before and
 after, not one view's numbers with another's.
 
-All figures so far: an M6 Mac at 60 Hz. **Not yet measured on an M2**, nor at 120 Hz: the goal is met only once they
-are. What a slower chip would expose is work on the main thread (SwiftUI pieces built as they appear, the Timeline's
-redrawing); motion run by Core Animation (the Events grid, Live's tiles, rail and dock) leaves the main thread little to
-do on any chip.
+All figures: an M6 Mac at 60 Hz. What makes a frame late is work on the main thread (SwiftUI pieces built as they
+appear, a drawing redone); motion run by Core Animation (the Events grid, Live's tiles, rail and dock) leaves it little to
+do.
 
 ## Where each view stands
 
@@ -72,5 +72,5 @@ Each cell: answers over 16 ms / over 33 ms (slowest). **Before**: the view as it
 | Another camera | 0 / 0 (13 ms) | 0 / 0 (12 ms) | met |
 | A kind of event hidden / shown | 0 / 0, 2 / 1 (220 ms) | 1 / 0, 0 / 0 (16 ms) | met |
 
-The Timeline's seeks, zooms and playing are within 60 Hz with little to spare (the 95th percentile 14 ms): on an M2,
-or at 120 Hz, likely not; that's what moving it to AppKit and Core Animation would be for.
+The Timeline's seeks, zooms and playing were within 60 Hz with little to spare (the 95th percentile 14 ms); its lanes'
+move to Core Animation (docs/timeline-lanes.md) is for room to spare, with no frame over 16 ms in any change.

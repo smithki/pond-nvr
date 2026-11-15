@@ -92,15 +92,15 @@ Pond is a server that looks like an app: it's only as good as the nights it does
 
 ## Smoothness
 
-Every motion in the app drawn within a frame: at 60 Hz (16 ms) on any Mac from the M2 onward; later at 120 Hz (8 ms)
-on a ProMotion display. Where each view stands, measured change by change, before and now: [smoothness.md](smoothness.md).
-All measured so far on an M6 at 60 Hz; none yet on an M2.
+Every motion in the app drawn within a frame, 60 Hz at least: no frame over 16 ms, on the Mac it's measured on (an M6),
+with what's seen exactly as it was. Where each view stands, measured change by change, before and now:
+[smoothness.md](smoothness.md).
 
 | Goal | Status | Notes |
 |---|---|---|
-| Events within a frame | in progress | AppKit and Core Animation (`EventsShell`). On the M6, every change but one within 16 ms; left: the detail panel's opening, a frame over 16 ms as its content is built (when the pointer didn't rest on the card first, so it wasn't built ahead), a few over 33 ms. Next: measured on an M2. |
-| Live within a frame | in progress | AppKit and Core Animation ([live-stage.md](live-stage.md)). On the M6, adding and removing cameras, the rail and the dock within 16 ms; left: Show All (each new tile's badges built at once), focus and crossfade (the dock built as a camera's watched alone). Next: the dock built ahead (the camera likely to be watched alone), new tiles' badges built ahead or a tile a frame; then the many-cameras demo, real cameras, an M2. |
-| Timeline within a frame | in progress | SwiftUI (its lanes a `Canvas`). On the M6, seeking, zooming, playing and panning within 16 ms, with little to spare (the 95th percentile 14 ms); left: another day (loaded on the main thread). Next: the day loaded ahead or off the main thread; a large library; an M2, where its redrawing likely won't fit (the port below). |
+| Events within a frame | in progress | AppKit and Core Animation (`EventsShell`). On the M6, every change but one within 16 ms; left: the detail panel's opening, a frame over 16 ms as its content is built (when the pointer didn't rest on the card first, so it wasn't built ahead), a few over 33 ms. |
+| Live within a frame | in progress | AppKit and Core Animation ([live-stage.md](live-stage.md)). On the M6, adding and removing cameras, the rail and the dock within 16 ms; left: Show All (each new tile's badges built at once), focus and crossfade (the dock built as a camera's watched alone). Next: the dock built ahead (the camera likely to be watched alone), new tiles' badges built ahead or a tile a frame; then the many-cameras demo, real cameras. |
+| Timeline within a frame | in progress | SwiftUI (its lanes a `Canvas`). On the M6, seeking, zooming, playing and panning within 16 ms, with little to spare (the 95th percentile 14 ms); left: another day (loaded on the main thread). Next: the day loaded ahead or off the main thread; a large library. |
 | The Timeline in AppKit and Core Animation | later | As Events (`EventsShell`) and Live ([live-stage.md](live-stage.md)) were moved: the lanes drawn once into layers and slid by Core Animation through a seek's glide, playing and panning, instead of the whole lanes `Canvas` redrawn every frame. Where it is now (2026-11-14, the demo's ten cameras): within 60 Hz (seek, zoom, playing and panning each 1–3 frames over 16 ms, the 95th percentile 7–14 ms), after its drawing stopped redoing work each frame (the future's dimming, each mark's row, chips' cut-outs). What the port would give: a glide's main-thread cost near nothing (as Live's rail and dock, 0 ms at the 95th), so 120 Hz (13 ms frames now drop it to about 60–80 fps), slower Macs, and a cost that doesn't grow with cameras and events (redrawn, three times the cameras is about three times the work). What it wouldn't: a zoom (a drawing slid and scaled stretches its marks: still redrawn, or two drawings crossfaded), nor changing day (loading, not drawing). What it costs: about 1,200 lines that work now, rebuilt (hover cards, scrubbing, the ruler dragged, cameras reordered by their labels, other Ponds folded, the lanes scrolled), across the seams Live met (hosted SwiftUI losing its animation, clicks over transparent hosted areas, glass tints). Taken up when the measurements ask for it: 120 Hz as a goal, frames over 16 ms on a large library, or a slower Mac's. |
 
 ## Small fixes

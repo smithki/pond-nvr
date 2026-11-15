@@ -57,6 +57,19 @@ and over for 20 s (`POND_TIMELINE_LOOP=zoom` or `seek`), the one to run under `s
 clock and its events fill the day as it goes, and the first launch after a build runs slower: compare builds run one
 after the other, neither the first.
 
+**Watching and timing a move.** `scripts/motion-check.sh STEP` runs one of those steps and captures the demo's window
+about ten times a second while it moves (the window as it really draws, glass and all), with the pictures laid out on
+one sheet: how a move is checked frame by frame ([motion.md](motion.md)). `scripts/timing-compare.sh STEP SETTING`
+times a step with one of the demo's settings off and on, alternately, each in a launch of its own after one to warm up,
+and puts the setting back: how a change is timed against the way before. Both need the demo app and screen-recording
+permission for the terminal, and only one thing should drive the demo at a time (they quit it first).
+
+```sh
+scripts/motion-check.sh tlponds --frames 60
+scripts/motion-check.sh timeline-loop --env POND_TIMELINE_LOOP=zoom
+scripts/timing-compare.sh timeline timelineSurface
+```
+
 **The Events page.** It's drawn by `EventsShell`: the grid (`GridHostView`, cards in layers, reused as they scroll), the rail and the detail panel, laid out and moved by one AppKit view, every move run by Core Animation on one curve (so none waits on the main thread, and none falls behind another); what's in the rail and the panel is SwiftUI's, hosted. The panel for the card the pointer rests on is made ahead, off the window; opened before it's ready, a skeleton of it slides in. The `panels` step times the panel's opening and closing, while things move apart from after.
 
 `POND_STALLS=1` (any run) logs each main-thread wait over 40 ms with what the grid was doing then (`/usr/bin/log stream --predicate 'subsystem == "camera.pond" AND category == "frames"'`). To find what a stall is, `/usr/bin/sample <pid> 30` during the check; for the main thread's own code, sum the samples under functions `in PondApp`.
