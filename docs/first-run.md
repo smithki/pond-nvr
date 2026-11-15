@@ -64,7 +64,17 @@ Continue, each page saying in a line why it's needed.
 5. **The watched test**, its fixes, and again.
 6. **The website's *Getting started***, from the same pages.
 
-## To confirm when it's picked up
+## Scope
 
-Recommended: the wizard in the main window (not a window of its own); the internal disk allowed, with a warning;
-done when one camera is recording. Open: who tries it first.
+Decided (2026-11-14):
+- **Done when one camera is recording**: pages 1–6 are the minimum, in the main window, not a window of its own; the
+  internal disk is allowed, with a warning.
+- **Page 7 offers three things**: the Home app, notifications, and descriptions and search (the model's download
+  and its progress). Pond's sensor and the daily summary aren't in the wizard: they stay in Settings, and the
+  sensor is in the *Getting started* list.
+- **A camera that isn't found or won't connect**: *Enter an Address*, the general steps for turning on RTSP or
+  ONVIF, and a link to the camera guides ([cameras/](cameras/README.md)) for the makes they cover. No step-by-step
+  instructions for each make inside the app.
+- **Page 8's *Getting started* list is in**; the website's *Getting started* page comes with the website's own work.
+
+Open: who tries it first.
